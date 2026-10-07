@@ -23,3 +23,29 @@ _Avoid_: Instantiation, wiring
 **Layer**:
 A set of client instances with the same height in the dependency graph: clients with no dependencies form layer 0, every other client sits one layer above its highest dependency. All clients of one layer connect concurrently.
 _Avoid_: Level, tier, depth
+
+### Running
+
+**Entrypoint**:
+An async function that a process runs as its main program, declared as a Job or a Worker.
+_Avoid_: Command, main, executable
+
+**Job**:
+An entrypoint that runs once: it finishes when its function returns. How often it runs is decided by an external scheduler.
+_Avoid_: Cron, task, script
+
+**Worker**:
+An entrypoint that runs until the process is asked to stop.
+_Avoid_: Daemon, consumer
+
+**Run**:
+One execution of an entrypoint in a process, from resolving its clients to the exit code.
+_Avoid_: Execution, launch, invocation
+
+**Shutdown**:
+The request for a Run to stop, raised by a termination signal. An entrypoint gets a grace period to finish on its own before it is cancelled.
+_Avoid_: Stop token, termination, kill
+
+**Background task**:
+A coroutine started through the container-owned task supervisor rather than awaited by its caller. It is cancelled and awaited before the clients it uses disconnect.
+_Avoid_: Fire-and-forget, job
