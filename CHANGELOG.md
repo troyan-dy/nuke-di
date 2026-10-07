@@ -6,6 +6,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-08
+
 ### Changed
 
 - Clients connect concurrently in layers, from the deepest dependencies up, instead of one by one
@@ -58,5 +60,6 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/troyan-dy/nuke-di/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/troyan-dy/nuke-di/releases/tag/v1.0.0
