@@ -10,7 +10,8 @@ The simplest dependency injection for async Python projects.
 
 Dependencies are declared with plain type hints. `nuke-di` builds the dependency tree,
 creates every client once and drives its async lifecycle: `connect()` on startup and
-`disconnect()` on shutdown, in reverse order.
+`disconnect()` on shutdown. Independent clients start concurrently, layer by layer,
+from the deepest dependencies up.
 
 It was extracted from the DI layer of a production Python microservice framework
 and has no runtime dependencies.
@@ -110,6 +111,25 @@ class BusinessLogic(Client):
         self._grpc = grpc
 ```
 
+### Layers
+
+Clients connect concurrently in layers. Clients without dependencies form layer 0;
+every other client sits one layer above its highest dependency. A layer starts only
+after the previous one has connected, so a client never connects before its own
+dependencies. `disconnect()` walks the layers in reverse.
+
+```text
+Checkout(pg: Postgres, payments: Payments)    layer 2
+Payments(pg: Postgres)                        layer 1
+Postgres, Redis                               layer 0  <- connect together
+```
+
+Only dependencies declared in `__init__` are ordered. If a client needs another one to be
+connected first, declare it as a dependency.
+
+If a client fails to connect, the rest of its layer is cancelled and the next layers
+never start. Mocked clients are not connected and do not affect the layers.
+
 ### Container
 
 `Dependencies` is the container. `DI` is a ready-to-use global instance; create your own
@@ -119,8 +139,8 @@ when you need isolation, e.g. in tests.
 |----------------------|-------------------------------------------------------------------------|
 | `resolve(cls)`       | Build `cls` and its dependency tree. Idempotent for `Client`.           |
 | `inject(func)`       | Return `functools.partial(func, ...)` with client arguments bound. Every argument of `func` except `*args` / `**kwargs` must have a type hint. |
-| `connect()`          | Call `connect()` on every resolved client, in resolution order.         |
-| `disconnect()`       | Call `disconnect()` in reverse order, then `flush()` the container.     |
+| `connect()`          | Call `connect()` on every resolved client, layer by layer.              |
+| `disconnect()`       | Call `disconnect()` layer by layer in reverse, then `flush()` the container. |
 | `async with`         | `connect()` on enter, `disconnect()` on exit.                           |
 | `mock(cls, new=None)`| Register a replacement for `cls` (an autospec mock by default).         |
 | `flush()`            | Forget every resolved client.                                           |
@@ -174,13 +194,14 @@ async def test_greet() -> None:
 | Environment variable      | Default | Description                                        |
 |---------------------------|---------|----------------------------------------------------|
 | `CONNECT_TIMEOUT_SECONDS` | `30`    | Timeout for a single client's `connect()`, seconds |
+| `CONNECT_CONCURRENCY`     | `0`     | How many clients may connect or disconnect at once across the container; `0` means no limit |
 
-The value is read when a `Dependencies` instance is created. You can also pass it explicitly:
+The values are read when a `Dependencies` instance is created. You can also pass them explicitly:
 
 ```python
 from nuke_di import Dependencies, DependenciesSettings
 
-deps = Dependencies(settings=DependenciesSettings(connect_timeout=5))
+deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, connect_concurrency=4))
 ```
 
 ## Errors

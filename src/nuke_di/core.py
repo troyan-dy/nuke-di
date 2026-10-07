@@ -1,7 +1,8 @@
 import asyncio
+import contextlib
 import inspect
 import logging
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
@@ -19,6 +20,20 @@ isnotsingleton = isa(NotSingletonClient)
 
 CT = TypeVar("CT", bound=NotSingletonClient)
 
+Limiter = asyncio.Semaphore | contextlib.nullcontext[None]
+
+
+class _ClientConnectError(Exception):
+    """
+    Carries a `ConnectError` out of a connect task.
+
+    `ConnectError` is a `SystemExit`, and a `SystemExit` raised inside a task escapes the event loop.
+    """
+
+    def __init__(self, error: ConnectError) -> None:
+        super().__init__(str(error))
+        self.error = error
+
 
 @dataclass(repr=False)
 class Dependencies:
@@ -26,6 +41,8 @@ class Dependencies:
     connect_clients: list[NotSingletonClient] = field(default_factory=list)
     settings: DependenciesSettings = field(default_factory=DependenciesSettings)
     connected: bool = field(default=False, init=False)
+    # Layer of every client in `connect_clients`, keyed by `id()`: dataclass clients may be unhashable
+    _layers: dict[int, int] = field(default_factory=dict, init=False)
 
     async def __aenter__(self) -> None:
         await self.connect()
@@ -39,43 +56,79 @@ class Dependencies:
 
         self.clients = OrderedDict()
         self.connect_clients = []
+        self._layers = {}
 
     async def connect(self) -> None:
         if self.connected is True:
             raise ConnectError("already connected")
 
         self.connected = True
+        limiter = self._limiter()
 
-        for client in self.connect_clients:
-            name = sname(client)
-            logger.debug("Connecting client %s", name)
+        for number, layer in enumerate(self._group_by_layer()):
+            logger.debug("Connecting layer %d: %s", number, ", ".join(map(sname, layer)))
             try:
+                # The first failure cancels the rest of the layer
+                async with asyncio.TaskGroup() as group:
+                    for client in layer:
+                        group.create_task(self._connect_client(client, limiter))
+
+            except ExceptionGroup as eg:
+                # Every failure is logged already, the first one stops the application
+                error = cast(_ClientConnectError, eg.exceptions[0]).error
+                raise error from error.__cause__
+
+    async def _connect_client(self, client: NotSingletonClient, limiter: Limiter) -> None:
+        name = sname(client)
+        try:
+            async with limiter:
+                logger.debug("Connecting client %s", name)
                 await asyncio.wait_for(client.connect(), timeout=self.settings.connect_timeout)
 
-            except TimeoutError as exc:
-                logger.exception("Timeout occurred connecting client %s", name)
-                raise ConnectTimeoutError(f"Timeout occurred connecting client {name}") from exc
+        except TimeoutError as exc:
+            logger.exception("Timeout occurred connecting client %s", name)
+            error: ConnectError = ConnectTimeoutError(f"Timeout occurred connecting client {name}")
+            error.__cause__ = exc
+            raise _ClientConnectError(error) from exc
 
-            except Exception as e:
-                logger.exception("Error occurred connecting client %s", name)
-                raise ConnectError(f"Error occurred connecting client {name}") from e
+        except Exception as exc:
+            logger.exception("Error occurred connecting client %s", name)
+            error = ConnectError(f"Error occurred connecting client {name}")
+            error.__cause__ = exc
+            raise _ClientConnectError(error) from exc
 
     async def disconnect(self) -> None:
         if self.connected is False:
             raise ConnectError("already disconnected")
 
         self.connected = False
+        limiter = self._limiter()
 
-        for client in reversed(self.connect_clients):
-            name = sname(client)
-            logger.debug("Disconnecting client %s", name)
-            try:
-                await client.disconnect()
-            except Exception:
-                # The client failed, but the rest still have to be stopped
-                logger.exception("Failed to disconnect client %s", name)
+        for layer in reversed(self._group_by_layer()):
+            await asyncio.gather(*(self._disconnect_client(client, limiter) for client in layer))
 
         self.flush()
+
+    async def _disconnect_client(self, client: NotSingletonClient, limiter: Limiter) -> None:
+        name = sname(client)
+        try:
+            async with limiter:
+                logger.debug("Disconnecting client %s", name)
+                await client.disconnect()
+        except Exception:
+            # The client failed, but the rest still have to be stopped
+            logger.exception("Failed to disconnect client %s", name)
+
+    def _limiter(self) -> Limiter:
+        if self.settings.connect_concurrency == 0:
+            return contextlib.nullcontext()
+        return asyncio.Semaphore(self.settings.connect_concurrency)
+
+    def _group_by_layer(self) -> list[list[NotSingletonClient]]:
+        layers: defaultdict[int, list[NotSingletonClient]] = defaultdict(list)
+        for client in self.connect_clients:
+            layers[self._layers.get(id(client), 0)].append(client)
+        return [layers[number] for number in sorted(layers)]
 
     def resolve(self, cls: type[CT]) -> CT:
         """
@@ -108,6 +161,8 @@ class Dependencies:
         if isclient(cls):
             self.clients[cls] = inst
 
+        # One layer above the highest dependency; mocks are not connected, so they do not count
+        self._layers[id(inst)] = 1 + max((self._layers.get(id(d), -1) for d in init.values()), default=-1)
         self.connect_clients.append(inst)
         return inst
 
