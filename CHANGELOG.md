@@ -6,6 +6,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-08
+
 ### Changed
 
 - Clients connect concurrently in layers, from the deepest dependencies up, instead of one by one
@@ -14,15 +16,28 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   `disconnect()` runs the layers in reverse, concurrently within a layer.
 - A failed `connect()` cancels the clients still connecting in the same layer;
   the next layers never start. See `docs/adr/0001-layered-concurrent-connect.md`.
+- Every client's `disconnect()` is bounded by `DISCONNECT_TIMEOUT_SECONDS` (default `10`). A hanging client
+  is logged and the others still disconnect; before, it blocked shutdown forever.
 
 ### Fixed
 
+- A failed or cancelled `connect()` disconnects the clients that already connected, layers in reverse,
+  and leaves the container disconnected and empty. Before, they stayed connected and the container
+  stayed in the connected state ([#1](https://github.com/troyan-dy/nuke-di/issues/1)).
 - `inject()` now raises `InvalidSignatureError` for a function argument without a type hint.
   The check never fired before, so such functions were accepted silently.
   Unannotated `*args` / `**kwargs` are still allowed.
 
 ### Added
 
+- `@job` and `@worker` turn an async function into the main program of a process run with `python -m`:
+  the clients are injected and connected, the function runs, the clients disconnect and the process
+  exits with `0`, `1` or `128 + signum`. See "Workers and jobs" in the README and
+  `docs/adr/0002-entrypoint-runs-on-decoration.md`.
+- `Shutdown` client, set on the first SIGTERM / SIGINT; the entrypoint is cancelled after
+  `SHUTDOWN_GRACE_SECONDS` (default `10`) or on a second signal.
+- `BackgroundTasks` client that supervises background tasks; a failing task fails the worker or job.
+- Run hooks (`RunHook`, `Run`) to observe every run, e.g. for metrics or tracing.
 - `CONNECT_CONCURRENCY` setting (`DependenciesSettings.connect_concurrency`) caps how many clients
   connect or disconnect at once; `0` (the default) means no limit.
 - Line and branch coverage is 100% and enforced in CI (`fail_under = 100`).
@@ -45,5 +60,6 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/troyan-dy/nuke-di/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/troyan-dy/nuke-di/releases/tag/v1.0.0

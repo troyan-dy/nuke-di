@@ -128,7 +128,9 @@ Only dependencies declared in `__init__` are ordered. If a client needs another 
 connected first, declare it as a dependency.
 
 If a client fails to connect, the rest of its layer is cancelled and the next layers
-never start. Mocked clients are not connected and do not affect the layers.
+never start. The clients that already connected are disconnected, layers in reverse, and
+the container is left disconnected and empty; the same happens when `connect()` itself is
+cancelled. Mocked clients are not connected and do not affect the layers.
 
 ### Container
 
@@ -148,7 +150,8 @@ when you need isolation, e.g. in tests.
 `resolve`, `inject`, `mock` and `flush` only work while the container is disconnected:
 the whole tree is built before startup.
 
-A failing `disconnect()` is logged and does not stop the other clients from shutting down.
+A failing or hanging `disconnect()` is logged and does not stop the other clients from
+shutting down: each one is bounded by `DISCONNECT_TIMEOUT_SECONDS`.
 
 ### Dataclass clients
 
@@ -166,6 +169,145 @@ class Checkout:
 ```
 
 It accepts the same keyword arguments as `dataclasses.dataclass`.
+
+## Workers and jobs
+
+An async function becomes the main program of a process with one decorator:
+
+| Decorator | Runs                                                   |
+|-----------|--------------------------------------------------------|
+| `@job`    | Once: the process exits when the function returns      |
+| `@worker` | Until the process receives SIGTERM or SIGINT           |
+
+```python
+# app/jobs/sync.py
+from nuke_di import job
+
+from app.clients import Postgres, Warehouse
+
+
+@job
+async def sync(pg: Postgres, warehouse: Warehouse) -> None:
+    for batch in await warehouse.changed_batches():
+        await pg.upsert(batch)
+```
+
+```bash
+python -m app.jobs.sync
+```
+
+Every argument is a client, injected from the global `DI` container. The process resolves the
+clients, connects them, runs the function, disconnects them and exits with an exit code.
+Scheduling is not part of the library: a Kubernetes CronJob, a systemd timer or crontab
+decides when a job runs.
+
+When the module is run as `__main__`, the decorator runs the function right away and the
+process exits there, so **code below the decorated function never runs: keep one
+entrypoint per module and define it last.** On a normal import the decorator returns the
+function unchanged, so a test calls it directly with mocks:
+
+```python
+from unittest.mock import AsyncMock
+
+
+async def test_sync() -> None:
+    pg, warehouse = AsyncMock(), AsyncMock()
+    warehouse.changed_batches.return_value = [batch]
+
+    await sync(pg, warehouse)
+
+    pg.upsert.assert_awaited_once_with(batch)
+```
+
+The decorated function must be declared with `async def`, otherwise `TypeError` is raised on import.
+
+### Shutdown
+
+On the first SIGTERM or SIGINT the `Shutdown` client is set. An entrypoint that depends on
+it can finish its current piece of work and return:
+
+```python
+from nuke_di import Shutdown, worker
+
+
+@worker
+async def consumer(queue: Queue, shutdown: Shutdown) -> None:
+    while not shutdown.is_set():
+        message = await queue.get()
+        await message.process()
+        await message.ack()
+```
+
+`await shutdown.wait()` blocks until the Shutdown begins. If the entrypoint is still
+running after `SHUTDOWN_GRACE_SECONDS`, it is cancelled; a second signal cancels it
+immediately. A signal that arrives while the clients are connecting stops the startup, and
+the clients that already connected are disconnected.
+
+A worker that returns or raises on its own also ends the process: restarting it is the
+orchestrator's job.
+
+In the worst case a process stops in
+`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers`. With the defaults, a tree of
+two layers takes the whole Kubernetes default `terminationGracePeriodSeconds` of 30 seconds,
+so lower the timeouts or raise the grace period for deeper trees.
+
+On Windows only SIGINT (Ctrl+C) is handled; SIGTERM keeps its default behavior.
+
+### Background tasks
+
+`BackgroundTasks` is a client that supervises coroutines running alongside the entrypoint:
+
+```python
+@worker
+async def indexer(tasks: BackgroundTasks, search: Search, shutdown: Shutdown) -> None:
+    tasks.spawn(search.refresh_loop(), name="refresh")
+    await shutdown.wait()
+```
+
+A failing task is logged with its traceback, and inside a worker or a job it fails the whole
+process: the entrypoint is cancelled and the exit code is `1`. When the process stops, the
+tasks are cancelled and awaited **before** any client disconnects, so they never run against
+closed clients. Outside a worker or a job, e.g. under a plain `async with DI`, failures are
+only logged and the tasks are cancelled on `disconnect()`.
+
+### Exit codes
+
+The first matching rule wins:
+
+| Condition                                                                            | Exit code      |
+|--------------------------------------------------------------------------------------|----------------|
+| An exception: resolving or connecting the clients, the entrypoint, a background task | `1`            |
+| A termination signal was received                                                    | `128 + signum` |
+| Otherwise                                                                            | `0`            |
+
+SIGTERM gives `143` and SIGINT gives `130`. A job that sees a Shutdown and returns cleanly
+still exits with `128 + signum`: its work was interrupted, and a scheduler must not count it
+as complete.
+
+### Hooks
+
+Hooks observe every run, e.g. to push metrics or open a tracing span:
+
+```python
+from nuke_di import Run, job
+
+
+class Metrics:
+    async def on_start(self, run: Run) -> None:
+        print(f"{run.kind} {run.name} started at {run.started_at}")
+
+    async def on_finish(self, run: Run) -> None:
+        print(f"{run.name} exited with {run.exit_code}, error: {run.error!r}")
+
+
+@job(hooks=[Metrics()])
+async def sync(pg: Postgres) -> None: ...
+```
+
+`on_start` is called in list order before the clients are resolved; `on_finish` in reverse
+order after they have disconnected, so it sees the final `exit_code`, `error`, `signal` and
+`finished_at`, connect failures included. Hooks are plain objects, not clients: they manage
+their own resources. An exception in a hook is logged and does not change the exit code.
 
 ## Testing
 
@@ -195,13 +337,15 @@ async def test_greet() -> None:
 |---------------------------|---------|----------------------------------------------------|
 | `CONNECT_TIMEOUT_SECONDS` | `30`    | Timeout for a single client's `connect()`, seconds |
 | `CONNECT_CONCURRENCY`     | `0`     | How many clients may connect or disconnect at once across the container; `0` means no limit |
+| `DISCONNECT_TIMEOUT_SECONDS` | `10` | Timeout for a single client's `disconnect()`, seconds |
+| `SHUTDOWN_GRACE_SECONDS`  | `10`    | How long a worker or a job may keep running after SIGTERM / SIGINT before it is cancelled, seconds; read when the process starts |
 
-The values are read when a `Dependencies` instance is created. You can also pass them explicitly:
+The container settings are read when a `Dependencies` instance is created. You can also pass them explicitly:
 
 ```python
 from nuke_di import Dependencies, DependenciesSettings
 
-deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, connect_concurrency=4))
+deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_timeout=5, connect_concurrency=4))
 ```
 
 ## Errors

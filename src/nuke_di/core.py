@@ -64,26 +64,36 @@ class Dependencies:
 
         self.connected = True
         limiter = self._limiter()
+        # Clients whose connect() finished, so a failure knows what to roll back
+        connected: list[NotSingletonClient] = []
 
-        for number, layer in enumerate(self._group_by_layer()):
-            logger.debug("Connecting layer %d: %s", number, ", ".join(map(sname, layer)))
-            try:
+        try:
+            for number, layer in enumerate(self._group_by_layer(self.connect_clients)):
+                logger.debug("Connecting layer %d: %s", number, ", ".join(map(sname, layer)))
                 # The first failure cancels the rest of the layer
                 async with asyncio.TaskGroup() as group:
                     for client in layer:
-                        group.create_task(self._connect_client(client, limiter))
+                        group.create_task(self._connect_client(client, limiter, connected))
 
-            except ExceptionGroup as eg:
-                # Every failure is logged already, the first one stops the application
-                error = cast(_ClientConnectError, eg.exceptions[0]).error
-                raise error from error.__cause__
+        except ExceptionGroup as eg:
+            await self._rollback(connected)
+            # Every failure is logged already, the first one stops the application
+            error = cast(_ClientConnectError, eg.exceptions[0]).error
+            raise error from error.__cause__
 
-    async def _connect_client(self, client: NotSingletonClient, limiter: Limiter) -> None:
+        except asyncio.CancelledError:
+            await self._rollback(connected)
+            raise
+
+    async def _connect_client(
+        self, client: NotSingletonClient, limiter: Limiter, connected: list[NotSingletonClient]
+    ) -> None:
         name = sname(client)
         try:
             async with limiter:
                 logger.debug("Connecting client %s", name)
                 await asyncio.wait_for(client.connect(), timeout=self.settings.connect_timeout)
+            connected.append(client)
 
         except TimeoutError as exc:
             logger.exception("Timeout occurred connecting client %s", name)
@@ -101,10 +111,17 @@ class Dependencies:
         if self.connected is False:
             raise ConnectError("already disconnected")
 
+        await self._disconnect_layers(self.connect_clients)
+
+    async def _rollback(self, connected: list[NotSingletonClient]) -> None:
+        logger.debug("Connect failed, disconnecting %d connected clients", len(connected))
+        await self._disconnect_layers(connected)
+
+    async def _disconnect_layers(self, clients: list[NotSingletonClient]) -> None:
         self.connected = False
         limiter = self._limiter()
 
-        for layer in reversed(self._group_by_layer()):
+        for layer in reversed(self._group_by_layer(clients)):
             await asyncio.gather(*(self._disconnect_client(client, limiter) for client in layer))
 
         self.flush()
@@ -114,7 +131,9 @@ class Dependencies:
         try:
             async with limiter:
                 logger.debug("Disconnecting client %s", name)
-                await client.disconnect()
+                await asyncio.wait_for(client.disconnect(), timeout=self.settings.disconnect_timeout)
+        except TimeoutError:
+            logger.exception("Timeout occurred disconnecting client %s", name)
         except Exception:
             # The client failed, but the rest still have to be stopped
             logger.exception("Failed to disconnect client %s", name)
@@ -124,9 +143,9 @@ class Dependencies:
             return contextlib.nullcontext()
         return asyncio.Semaphore(self.settings.connect_concurrency)
 
-    def _group_by_layer(self) -> list[list[NotSingletonClient]]:
+    def _group_by_layer(self, clients: list[NotSingletonClient]) -> list[list[NotSingletonClient]]:
         layers: defaultdict[int, list[NotSingletonClient]] = defaultdict(list)
-        for client in self.connect_clients:
+        for client in clients:
             layers[self._layers.get(id(client), 0)].append(client)
         return [layers[number] for number in sorted(layers)]
 
