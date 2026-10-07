@@ -63,3 +63,15 @@ def test_frozen(my_client: MyClient) -> None:
 
 def test_client_inheritance(my_client: MyClient) -> None:
     assert getattr(my_client, "connect", False)
+
+
+@client_dataclass
+class AlreadyClient(Client):
+    b: B
+
+
+def test_already_client_keeps_class() -> None:
+    assert AlreadyClient.__bases__ == (Client,)
+    assert is_dataclass(AlreadyClient)
+    client: AlreadyClient = Dependencies().resolve(AlreadyClient)  # type: ignore[type-var,assignment]
+    assert type(client.b) is B

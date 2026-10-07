@@ -1,4 +1,6 @@
-from nuke_di import Client, Dependencies, NotSingletonClient
+import pytest
+
+from nuke_di import Client, Dependencies, InvalidSignatureError, NotSingletonClient
 
 
 class InnerDeps(NotSingletonClient):
@@ -26,3 +28,18 @@ async def test_inject() -> None:
 
     async with dep:
         assert (await new_func(1)) == 2
+
+
+def test_inject_rejects_argument_without_type_hint() -> None:
+    def func(a, inner: InnerDeps) -> None:  # type: ignore[no-untyped-def]
+        pass
+
+    with pytest.raises(InvalidSignatureError, match='"a"'):
+        Dependencies().inject(func)
+
+
+def test_inject_allows_untyped_var_arguments() -> None:
+    def func(*args, inner: InnerDeps, **kwargs) -> InnerDeps:  # type: ignore[no-untyped-def]
+        return inner
+
+    assert type(Dependencies().inject(func)()) is InnerDeps

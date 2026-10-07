@@ -3,6 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/nuke-di)](https://pypi.org/project/nuke-di/)
 [![Python](https://img.shields.io/pypi/pyversions/nuke-di)](https://pypi.org/project/nuke-di/)
 [![CI](https://github.com/troyan-dy/nuke-di/actions/workflows/ci.yml/badge.svg)](https://github.com/troyan-dy/nuke-di/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](#development)
 [![License](https://img.shields.io/pypi/l/nuke-di)](LICENSE)
 
 The simplest dependency injection for async Python projects.
@@ -117,7 +118,7 @@ when you need isolation, e.g. in tests.
 | Method               | Description                                                             |
 |----------------------|-------------------------------------------------------------------------|
 | `resolve(cls)`       | Build `cls` and its dependency tree. Idempotent for `Client`.           |
-| `inject(func)`       | Return `functools.partial(func, ...)` with client arguments bound.      |
+| `inject(func)`       | Return `functools.partial(func, ...)` with client arguments bound. Every argument of `func` except `*args` / `**kwargs` must have a type hint. |
 | `connect()`          | Call `connect()` on every resolved client, in resolution order.         |
 | `disconnect()`       | Call `disconnect()` in reverse order, then `flush()` the container.     |
 | `async with`         | `connect()` on enter, `disconnect()` on exit.                           |
@@ -189,6 +190,7 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5))
 | `InitializeDependencyError` | A client's `__init__` raised                              |
 | `ConnectError`              | A client's `connect()` raised, or the container state is wrong (e.g. resolving after connect) |
 | `ConnectTimeoutError`       | A client's `connect()` exceeded `CONNECT_TIMEOUT_SECONDS` |
+| `InvalidSignatureError`     | `inject()` got a function with an argument without a type hint |
 
 `InitializeDependencyError` and `ConnectError` derive from `SystemExit`: an application
 whose dependencies cannot start is expected to stop. Catch them explicitly if you need
@@ -199,11 +201,14 @@ different behavior; the original exception is available as `__cause__`.
 ## Development
 
 ```bash
-uv sync
-uv run pytest --cov
-uv run ruff check . && uv run ruff format --check .
-uv run mypy
+make install   # uv sync --locked
+make check     # ruff, mypy and tests, as in CI
+make cov       # tests with a coverage report (terminal + htmlcov/)
+make test-all  # tests on Python 3.11-3.14
 ```
+
+Line and branch coverage is 100%, and CI fails if it drops below that
+(`fail_under = 100` in `pyproject.toml`).
 
 ## License
 

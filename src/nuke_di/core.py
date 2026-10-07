@@ -132,13 +132,17 @@ class Dependencies:
         logger.debug('Parsing signature of func "%s"', sname(func))
         signature: dict[str, NotSingletonClient] = {}
 
+        # get_type_hints silently skips unannotated arguments, so they are looked up in the signature
+        for param in inspect.signature(func).parameters.values():
+            if param.kind in {param.VAR_POSITIONAL, param.VAR_KEYWORD}:
+                continue
+            if param.annotation is inspect.Parameter.empty:
+                raise InvalidSignatureError(f'Argument "{param.name}" of "{sname(func)}" has no type hint')
+
         sig: dict[str, Any] = get_type_hints(func)
         sig.pop("return", None)
 
         for key, value in sig.items():
-            if value is inspect.Parameter.empty:
-                raise InvalidSignatureError("Arguments without type hints are restricted")
-
             if isnotsingleton(value):
                 signature[key] = self.resolve(value)
 
