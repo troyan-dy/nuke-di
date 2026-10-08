@@ -10,7 +10,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- FastAPI integration, `nuke_di.fastapi` (`pip install "nuke-di[fastapi]"`, FastAPI 0.100 or newer): path
+- FastAPI integration, `nuke_di.fastapi` (`pip install "nuke-di[fastapi]"`, FastAPI 0.105 or newer): path
   operations and their dependency functions take clients by plain type hints, e.g.
   `async def get_user(user_id: int, users: UserService)`; classes used as dependencies too. `setup(app)`
   connects the clients of the routes the app serves on startup and disconnects them on shutdown;

@@ -30,17 +30,26 @@ class _Binding:
     A client argument of one function, filled with the instance resolved on startup.
     """
 
-    def __init__(self, cls: type[NotSingletonClient]) -> None:
+    def __init__(self, cls: type[NotSingletonClient], container: Dependencies) -> None:
         self.cls = cls
+        self.container = weakref.ref(container)
         self.instance: NotSingletonClient | None = None
 
     async def get(self) -> NotSingletonClient:
         # No arguments and `async`, so FastAPI calls it inline rather than in a threadpool
-        if self.instance is None:
+        if self.instance is not None:
+            return self.instance
+
+        container = self.container()
+        if container is not None and container.connected:
+            # The app started, but its startup never saw this route
             raise RuntimeError(
-                f"{sname(self.cls)} is not connected: start the app with its lifespan, e.g. `with TestClient(app)`"
+                f"{sname(self.cls)} was not started with the app: include the router of its route into the app "
+                f"or into a ClientRouter, not into a plain APIRouter"
             )
-        return self.instance
+        raise RuntimeError(
+            f"{sname(self.cls)} is not connected: start the app with its lifespan, e.g. `with TestClient(app)`"
+        )
 
 
 class _ContainerRoute(APIRoute):
@@ -72,8 +81,9 @@ vars(DI)[_ROUTE_CLASS] = ClientRoute
 
 def _route_class(container: Dependencies) -> type[_ContainerRoute]:
     route_cls: type[_ContainerRoute] | None = vars(container).get(_ROUTE_CLASS)
-    if route_cls is None:
-        route_cls = type("ClientRoute", (_ContainerRoute,), {"container": container})
+    # A copy of a container carries the route class of the original in its attributes
+    if route_cls is None or route_cls.container is not container:
+        route_cls = type("ContainerRoute", (_ContainerRoute,), {"container": container})
         vars(container)[_ROUTE_CLASS] = route_cls
     return route_cls
 
@@ -123,13 +133,14 @@ def setup(app: FastAPI, container: Dependencies = DI) -> None:
         raise TypeError("setup() was already called for this app")
 
     _track(app.router, route_cls)
-    include_router = app.include_router
+    # On the router of the app rather than the app: app.include_router() calls it, and so may the user
+    include_router = app.router.include_router
 
     def include(router: APIRouter, **kwargs: Any) -> None:
         _include(app.router, router, kwargs, route_cls, "this app")
         include_router(router, **kwargs)
 
-    app.include_router = include  # type: ignore[method-assign]
+    app.router.include_router = include  # type: ignore[method-assign]
 
     @asynccontextmanager
     async def lifespan(app: Any) -> AsyncIterator[Any]:
@@ -291,7 +302,7 @@ def _bind(call: Callable[..., Any] | None, route_cls: type[_ContainerRoute]) -> 
             parameters.append(param.replace(annotation=hint))
             continue
 
-        binding = _Binding(client)
+        binding = _Binding(client, route_cls.container)
         own.append(binding)
         parameters.append(param.replace(annotation=Annotated[client, Depends(binding.get)]))
 
@@ -301,9 +312,9 @@ def _bind(call: Callable[..., Any] | None, route_cls: type[_ContainerRoute]) -> 
         return reachable
 
     # Annotations are evaluated already: FastAPI would resolve strings against the wrong module otherwise
-    rewritten = signature.replace(
-        parameters=parameters, return_annotation=hints.get("return", signature.return_annotation)
-    )
+    # A class returns an instance of itself, not what its __init__ is annotated with
+    return_annotation = signature.empty if inspect.isclass(call) else hints.get("return", signature.return_annotation)
+    rewritten = signature.replace(parameters=parameters, return_annotation=return_annotation)
     if inspect.isclass(call):
         call.__signature__ = _ClassSignature(call, rewritten)  # type: ignore[attr-defined]
     else:

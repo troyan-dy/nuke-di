@@ -520,7 +520,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "fastapi", marker = "extra == 'fastapi'", specifier = ">=0.100" }]
+requires-dist = [{ name = "fastapi", marker = "extra == 'fastapi'", specifier = ">=0.105" }]
 provides-extras = ["fastapi"]
 
 [package.metadata.requires-dev]

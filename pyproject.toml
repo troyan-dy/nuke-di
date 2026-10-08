@@ -35,7 +35,7 @@ nuke_di = "nuke_di.pytest_plugin"
 
 [project.optional-dependencies]
 fastapi = [
-    "fastapi>=0.100",
+    "fastapi>=0.105",
 ]
 
 [dependency-groups]

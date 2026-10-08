@@ -1052,7 +1052,7 @@ written per handler: no `Depends`, no `inject()`.
 pip install "nuke-di[fastapi]"
 ```
 
-Requires FastAPI 0.100 or newer. The examples share one module of clients:
+Requires FastAPI 0.105 or newer. The examples share one module of clients:
 
 ```python
 # app/clients.py
@@ -1262,8 +1262,10 @@ These places take no clients. Each raises a `TypeError` that says so when the ro
 | An optional client, `Database \| None`                  | A plain `Database`                            |
 | A bound method or a callable object as an endpoint or a dependency | A function or a class              |
 
-A route of a router included into a plain `APIRouter` instead of a `ClientRouter` is found by older
-FastAPI only; on FastAPI 0.14x its requests get the `RuntimeError` below.
+Unlike these, a route of a router included into a plain `APIRouter` instead of a `ClientRouter` is
+found by older FastAPI only. On FastAPI 0.14x it is declared and the app starts, but its requests fail
+with `RuntimeError: UserService was not started with the app: include the router of its route into
+the app or into a ClientRouter, not into a plain APIRouter`.
 
 A request that arrives without the lifespan, e.g. through `TestClient(app)` without `with`, gets a
 `RuntimeError`: `UserService is not connected: start the app with its lifespan`.

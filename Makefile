@@ -42,7 +42,7 @@ test-all: ## Run tests on every supported Python version
 
 .PHONY: test-fastapi-min
 test-fastapi-min: ## Run the FastAPI tests on the lowest supported FastAPI
-	uv run --python 3.11 --isolated --with "fastapi==0.100.0" --with "httpx<0.28" pytest tests/test_fastapi.py -p no:cacheprovider
+	uv run --python 3.11 --isolated --with "fastapi==0.105.0" --with "httpx<0.28" pytest tests/test_fastapi.py -p no:cacheprovider
 
 .PHONY: check
 check: lint test ## Run everything CI runs

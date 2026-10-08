@@ -38,7 +38,7 @@ The clients connect, layer by layer, when the app starts and disconnect when it 
 
 ## Public API
 
-Module `nuke_di.fastapi`, installed with the `fastapi` extra (`pip install nuke-di[fastapi]`, `fastapi>=0.100`). `import nuke_di` never imports FastAPI.
+Module `nuke_di.fastapi`, installed with the `fastapi` extra (`pip install nuke-di[fastapi]`, `fastapi>=0.105`). `import nuke_di` never imports FastAPI.
 
 ### `setup(app, container=DI)`
 
@@ -78,7 +78,7 @@ In core, no import of pydantic. Defers to pydantic's own handler and only replac
 
 ## Testing
 
-- `with DI.override(Database, fake): with TestClient(app) as client: ...` works: importing the app only registers clients, so the container is still empty when the override starts, and startup resolves with the Replacement.
+- `with DI.override(Database, replacement): with TestClient(app) as client: ...` works: importing the app only records clients, so the container is still empty when the override starts, and startup resolves with the Replacement.
 - `app.dependency_overrides[some_dependency]` keeps working for dependency functions that take clients, because they are rewritten in place rather than wrapped.
 - The handler is still a plain function; tests can call it directly with a Replacement.
 
@@ -96,7 +96,7 @@ In core, no import of pydantic. Defers to pydantic's own handler and only replac
 | 8 | Lifespan order | Ours outside the app's own: clients are connected during the app's startup and still connected during its shutdown. Shutdown order follows a Run: `Shutdown`, `BackgroundTasks`, `disconnect()`. |
 | 9 | Unsupported places | One `TypeError` with the fix, through the pydantic hook, instead of FastAPI's "Invalid args for response field". |
 | 10 | `NotSingletonClient` | One instance per argument, like `inject()`. |
-| 11 | Minimum FastAPI | 0.100 (pydantic v2); the prototype passed on 0.100, 0.110, 0.115, 0.120 and 0.142. |
+| 11 | Minimum FastAPI | 0.105: the first that works with current pydantic 2 (0.100–0.104 break on `Header()` even without nuke-di). CI runs the FastAPI tests on it. |
 | 12 | FastAPI's `BackgroundTasks` | Not a client; `nuke_di.BackgroundTasks` is. Documented, no special case. |
 | 13 | A function declared with two containers | Rewritten again from its original signature, not refused: an app factory with a container per test is common. |
 | 14 | Lazy dependency paths of FastAPI 0.14x | `ClientRouter` covers router-level and `include_router()` dependencies, `setup()` the app's and those of `app.include_router()`, by wrapping that method of the app it was given. |

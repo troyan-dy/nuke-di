@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import gc
+import inspect
 import weakref
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Annotated, Any
 
+import fastapi.routing
 import pytest
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Header
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, TypeAdapter
@@ -21,6 +24,9 @@ if TYPE_CHECKING:
     from decimal import Decimal
 
 events: list[str] = []
+
+# FastAPI 0.14x applies included routers lazily instead of copying their routes
+LAZY_INCLUDES = hasattr(fastapi.routing, "_IncludedRouter")
 
 
 @pytest.fixture(autouse=True)
@@ -312,7 +318,7 @@ def test_router_route_class_must_match_its_container() -> None:
 
     other = ClientRouter(container=Dependencies()).route_class
     assert not issubclass(other, ClientRoute)
-    with pytest.raises(TypeError, match=r"route_class=ClientRoute does not fill clients"):
+    with pytest.raises(TypeError, match=r"route_class=ContainerRoute does not fill clients"):
         ClientRouter(route_class=other)
 
 
@@ -654,3 +660,69 @@ def test_callable_object_dependency_is_left_to_fastapi() -> None:
 
     with TestClient(app) as client:
         assert client.get("/").json() == "Dear Hello, user-1!"
+
+
+def test_app_router_include_router_is_tracked_too() -> None:
+    deps = Dependencies()
+    app = make_app(deps)
+    router = ClientRouter(container=deps)
+    router.get("/users/{user_id}")(greet)
+    app.router.include_router(router, dependencies=[Depends(include_audit)])
+
+    with TestClient(app) as client:
+        assert client.get("/users/1").json() == "Hello, user-1!"
+
+    assert "include audit" in events
+
+
+def test_route_the_app_does_not_know_explains() -> None:
+    deps = Dependencies()
+    app = make_app(deps)
+    hidden = ClientRouter(container=deps)
+    hidden.get("/users/{user_id}")(greet)
+    plain = APIRouter()
+    plain.include_router(hidden)
+    app.include_router(plain)
+
+    with TestClient(app) as client:
+        if not LAZY_INCLUDES:
+            # Older FastAPI copies the routes through the route class, so nuke-di sees them
+            assert client.get("/users/1").json() == "Hello, user-1!"
+            return
+        expected = r"UserService was not started with the app: include the router of its route .* plain APIRouter"
+        with pytest.raises(RuntimeError, match=expected):
+            client.get("/users/1")
+
+
+def test_copy_of_a_container_has_its_own_route_class() -> None:
+    deps = Dependencies()
+    original = ClientRouter(container=deps).route_class
+
+    copied = ClientRouter(container=copy.deepcopy(deps)).route_class
+
+    assert copied is not original
+    assert original.__name__ == copied.__name__ == "ContainerRoute"
+
+
+def test_class_dependency_signature_has_no_return_annotation() -> None:
+    app = make_app(Dependencies())
+    app.get("/annotated")(whoami)
+
+    assert inspect.signature(Auth).return_annotation is inspect.Signature.empty
+
+
+async def header_user(x_user_id: Annotated[int, Header()], db: Database) -> str:
+    return await db.fetch_user(x_user_id)
+
+
+async def by_header(user: Annotated[str, Depends(header_user)]) -> str:
+    return user
+
+
+def test_dependency_with_header_and_client() -> None:
+    # The shape of the README example, so the lowest supported FastAPI is checked against it
+    app = make_app(Dependencies())
+    app.get("/me")(by_header)
+
+    with TestClient(app) as client:
+        assert client.get("/me", headers={"X-User-Id": "7"}).json() == "user-7"
