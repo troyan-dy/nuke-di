@@ -44,6 +44,14 @@ test-all: ## Run tests on every supported Python version
 test-fastapi-min: ## Run the FastAPI tests on the lowest supported FastAPI
 	uv run --python 3.11 --isolated --with "fastapi==0.105.0" --with "httpx<0.28" pytest tests/test_fastapi.py -p no:cacheprovider
 
+.PHONY: test-faststream-min
+test-faststream-min: ## Run the FastStream tests on the lowest supported FastStream
+	uv run --python 3.11 --isolated --with "faststream[nats]==0.6.0" pytest tests/test_faststream.py -p no:cacheprovider
+
+.PHONY: test-litestar-min
+test-litestar-min: ## Run the Litestar tests on the lowest supported Litestar
+	uv run --python 3.11 --isolated --with "litestar==2.15.0" pytest tests/test_litestar.py -p no:cacheprovider
+
 .PHONY: check-version
 check-version: ## Check that the version is bumped against origin/master, as CI does for a pull request
 	git fetch --quiet --tags origin master

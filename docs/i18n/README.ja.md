@@ -12,7 +12,7 @@
 
 依存関係は普通の型ヒントで宣言します。`nuke-di` は依存関係ツリーを構築し、各クライアントを一度だけ生成して、その非同期ライフサイクルを管理します。起動時には `connect()` を、終了時には `disconnect()` を呼び出します。互いに依存しないクライアントは、最も深い依存関係から順に、レイヤーごとに並行して起動します。
 
-さらに、デコレーターをひとつ付けるだけで async 関数がプロセスになります。一度だけ実行される**ジョブ**か、停止されるまで動き続ける**ワーカー**として動作し、コマンドラインパラメータ、SIGTERM によるグレースフルシャットダウン、意味のある終了コードを備えます。
+さらに、デコレーターをひとつ付けるだけで async 関数がプロセスになります。一度だけ実行される**ジョブ**か、停止されるまで動き続ける**ワーカー**として動作し、コマンドラインパラメータ、SIGTERM によるグレースフルシャットダウン、意味のある終了コードを備えます。FastAPI、Litestar、FastStream のハンドラーも、同じように型ヒントでクライアントを受け取ります。
 
 本番運用されている Python マイクロサービスフレームワークの DI 機構を切り出したもので、実行時の依存パッケージはありません。
 
@@ -21,7 +21,7 @@
 - [クライアント](#clients)：[シングルトン](#client-and-notsingletonclient)、[ライフサイクル](#connect-and-disconnect)、[データクラス](#dataclass-clients)、[レイヤー](#layers)、[起動時間](#startup-timings)、[接続の失敗](#when-a-client-fails-to-connect)、[解決エラー](#when-the-tree-cannot-be-built)
 - [コンテナ](#the-container)
 - [ワーカーとジョブ](#workers-and-jobs)：[ジョブ](#your-first-job)、[パラメータ](#parameters)、[ワーカー](#your-first-worker)、[猶予期間](#grace-period)、[バックグラウンドタスク](#background-tasks)、[終了コード](#exit-codes)、[フック](#hooks)、[Kubernetes](#running-in-kubernetes)
-- [FastAPI](#fastapi)
+- フレームワーク：[FastAPI](#fastapi)、[Litestar](#litestar)、[FastStream](#faststream)
 - [テスト](#testing)
 - [設定](#configuration) · [エラー](#errors) · [開発](#development)
 
@@ -1232,7 +1232,7 @@ $ curl localhost:8000/me -H "X-User-Id: 7"
 
 ルール：
 
-- **クライアントが埋められる場所。** パスオペレーションと、それが使うすべての依存関係の引数です。深さは問いません。関数のほか、`Depends(Auth)` や `Annotated[Auth, Depends()]` として使われるクラスも対象で、ルート、そのルーター、`include_router()`、アプリの `dependencies=` も含まれます。型ヒントがクライアントである引数はクライアントとして扱われ、`Depends` を伴わない `Annotated[UserService, ...]` の中にある場合も同様です。それ以外の引数（パス、クエリ、ヘッダー、ボディ、`Depends`）はすべて FastAPI が扱います。
+- **クライアントが埋められる場所。** パスオペレーション、WebSocket エンドポイントと、それらが使うすべての依存関係の引数です。深さは問いません。関数のほか、`Depends(Auth)` や `Annotated[Auth, Depends()]` として使われるクラスも対象で、ルート、そのルーター、`include_router()`、アプリの `dependencies=` も含まれます。型ヒントがクライアントである引数はクライアントとして扱われ、`Depends` を伴わない `Annotated[UserService, ...]` の中にある場合も同様です。それ以外の引数（パス、クエリ、ヘッダー、ボディ、`Depends`）はすべて FastAPI が扱います。
 - **ルーター。** ルーターは、`APIRouter` と同じ引数を受け取る `ClientRouter(...)` で作成し、アプリか別の `ClientRouter` にインクルードします。他のルーターをインクルードしないルーターであれば、`APIRouter(route_class=ClientRoute)` でも動作します。別のコンテナを使う場合は、`setup(app, container)` と `ClientRouter(container=container)` を使います。別のコンテナのルーターをインクルードすると、ただちに `TypeError` が送出されます。
 - **`setup(app)` はルートより前に呼び出す。** それより前に宣言された、クライアントを受け取るルートは、[後述](#not-supported)の `TypeError` でただちに失敗します。
 - **アプリが提供するものだけ。** アプリがインクルードしていないルーター（テストからだけインポートされるものなど）は、アプリの起動時に何も接続しません。
@@ -1269,6 +1269,45 @@ $ pytest -q tests/test_api.py
 ```
 
 `app.dependency_overrides` も引き続き使えます。クライアントを受け取る依存関係の関数に対しても同様です。
+
+**WebSocket。** WebSocket エンドポイントも、アプリ上でも `ClientRouter` 上でも、同じようにクライアントを受け取ります。
+
+```python
+# app/chat.py
+from fastapi import FastAPI, WebSocket
+
+from app.clients import UserService
+from nuke_di.fastapi import setup
+
+app = FastAPI()
+setup(app)
+
+
+@app.websocket("/greet")
+async def greet(websocket: WebSocket, users: UserService) -> None:
+    await websocket.accept()
+    async for user_id in websocket.iter_text():
+        await websocket.send_text(await users.greet(int(user_id)))
+```
+
+```python
+# tests/test_chat.py
+from fastapi.testclient import TestClient
+
+from app.chat import app
+
+
+def test_greet() -> None:
+    with TestClient(app) as client, client.websocket_connect("/greet") as ws:
+        ws.send_text("42")
+        assert ws.receive_text() == "Hello, user-42!"
+```
+
+```console
+$ pytest -q tests/test_chat.py
+.                                                                        [100%]
+1 passed in 0.16s
+```
 
 **接続に失敗したクライアント**があると、起動が失敗します。`SystemExit` ではサーバーのイベントループを突き抜けてしまうため、lifespan は `ConnectError` を原因とする通常の `RuntimeError` を送出し、サーバーはそれを報告して終了します。
 
@@ -1323,7 +1362,7 @@ $ echo $?
 | 場所                                                    | 代わりの方法                                  |
 |---------------------------------------------------------|-----------------------------------------------|
 | `ClientRouter` / `ClientRoute` を使わずに作成したルーター | `ClientRouter(...)` で作成する              |
-| WebSocket エンドポイントとその依存関係                  | まだサポートされていません（[#19](https://github.com/troyan-dy/nuke-di/issues/19)） |
+| `APIRouter(route_class=ClientRoute)` 上の WebSocket エンドポイント | `ClientRouter(...)` でルーターを作成する |
 | オプショナルなクライアント `Database \| None`           | 普通の `Database`                             |
 | エンドポイントや依存関係としての束縛メソッドや呼び出し可能オブジェクト | 関数またはクラス               |
 
@@ -1331,6 +1370,214 @@ $ echo $?
 the app or into a ClientRouter, not into a plain APIRouter` で失敗します。
 
 lifespan を経由せずに届いたリクエスト（`with` を使わない `TestClient(app)` など）は、`RuntimeError` になります：`UserService is not connected: start the app with its lifespan`。
+
+## <a id="litestar"></a>Litestar
+
+Litestar のルートハンドラーも、プラグインを通じて型ヒントでクライアントを受け取ります。
+
+```bash
+pip install "nuke-di[litestar]"
+```
+
+Litestar 2.15 以降が必要です。[FastAPI](#fastapi) の例と同じクライアントを使います。
+
+```python
+# app/litestar_api.py
+from typing import Annotated
+
+from litestar import Litestar, get
+from litestar.di import NamedDependency, Provide
+from litestar.params import FromPath, HeaderParameter
+
+from app.clients import Database, UserService
+from nuke_di.litestar import ClientPlugin
+
+
+@get("/users/{user_id:int}")
+async def get_user(user_id: FromPath[int], users: UserService) -> str:
+    return await users.greet(user_id)
+
+
+async def current_user(x_user_id: Annotated[int, HeaderParameter(name="X-User-Id")], db: Database) -> str:
+    return await db.fetch_user(x_user_id)
+
+
+@get("/me", dependencies={"user": Provide(current_user)})
+async def me(user: NamedDependency[str]) -> str:
+    return user
+
+
+app = Litestar([get_user, me], plugins=[ClientPlugin()])
+```
+
+```console
+$ uvicorn app.litestar_api:app
+INFO:     Started server process [6801]
+INFO:     Waiting for application startup.
+database: connected
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51940 - "GET /users/42 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51942 - "GET /me HTTP/1.1" 200 OK
+^C
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+database: disconnected
+INFO:     Application shutdown complete.
+INFO:     Finished server process [6801]
+```
+
+```console
+$ curl localhost:8000/users/42
+Hello, user-42!
+$ curl localhost:8000/me -H "X-User-Id: 7"
+user-7
+```
+
+`ClientPlugin()` は `get_user` の `users: UserService` と、依存関係 `current_user` の `db: Database` を見つけ、その両方を依存関係として Litestar に提供し、起動時に接続しました。
+
+ルール：
+
+- **クライアントが埋められる場所。** アプリの作成時に渡された HTTP ハンドラーと `@websocket` ハンドラー（任意の深さのルーターやコントローラーのものも含む）の引数と、アプリ、ルーター、コントローラー、ハンドラーで宣言されたすべての依存関係（関数とクラス）の引数です。
+- **名前で。** Litestar は依存関係を引数名で提供するので、nuke-di はすべてのクライアント引数をその名前でアプリに提供します。ひとつの名前はアプリ全体でひとつのクライアントを意味します。あるハンドラーで `users: UserService`、別のハンドラーで `users: Billing` とすると、アプリの作成時に `TypeError` が送出されます。アプリ、ルーター、コントローラー、ハンドラーで同じ名前の依存関係が宣言されている場合は、クライアントよりもそちらが優先されます。
+- **インスタンス。** `Client` はコンテナごとに 1 インスタンス、`NotSingletonClient` は引数名ごとに 1 インスタンスです。
+- **lifespan。** クライアントは、アプリ自身の `lifespan=` と `on_startup=` が実行される前に接続し、Litestar が最後に呼び出す `on_shutdown=` フックの後に切断します。`Shutdown` と `BackgroundTasks` は [FastAPI](#fastapi) と同じように動作します。
+- **関数は関数のまま。** クライアント引数は、値が検証されない Litestar の明示的な依存関係として `Annotated[UserService, Dependency(), SkipValidationMarker()]` と注釈されます。これは、名前だけで照合される依存関係の代わりに Litestar 2.23 が求める形です。関数を直接呼び出すことは、これまでどおりできます。
+- **プラグイン。** ルートハンドラーを追加するプラグインがある場合は、`ClientPlugin()` をそれらの後に置いてください。`ClientPlugin()` は、自分の番が来た時点でアプリが持っているハンドラーを参照します。
+- **別のコンテナ。** `ClientPlugin(container)` を使います。
+
+**テスト。** FastAPI と同様に、テストでは `TestClient` がアプリを起動する前にクライアントを差し替えます。
+
+```python
+# tests/test_litestar_api.py
+from litestar.testing import TestClient
+
+from app.clients import Database
+from app.litestar_api import app
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+def test_get_user() -> None:
+    with DI.override(Database, FakeDatabase()), TestClient(app) as client:
+        assert client.get("/users/1").text == "Hello, alice!"
+        assert client.get("/me", headers={"X-User-Id": "7"}).text == "alice"
+```
+
+```console
+$ pytest -q tests/test_litestar_api.py
+.                                                                        [100%]
+1 passed in 0.23s
+```
+
+**サポートされていないもの。** WebSocket リスナー（`@websocket_listener` や `WebsocketListener` クラス）はクライアントを受け取れません。Litestar はリスナーが宣言された時点、つまりプラグインがそれを見る前にシグネチャを読み取るためです。そのためアプリは `TypeError` を送出し、代わりに `@websocket` ハンドラーを使うよう示します。Litestar が予約している名前（`state` や `request` など）のクライアント引数でも `TypeError` が送出されます。アプリの作成後に `app.register()` で登録されたハンドラーは検出されません。
+
+## <a id="faststream"></a>FastStream
+
+FastStream のサブスクライバーは、メッセージと並んで型ヒントでクライアントを受け取ります。
+
+```bash
+pip install "nuke-di[faststream]"
+```
+
+FastStream 0.6 以降が必要で、ブローカーの種類は問いません。[FastAPI](#fastapi) の例と同じクライアントを使います。
+
+```python
+# app/worker.py
+from faststream import FastStream
+from faststream.nats import NatsBroker
+
+from app.clients import UserService
+from nuke_di.faststream import setup
+
+broker = NatsBroker("nats://localhost:4222")
+app = FastStream(broker)
+setup(app)  # clients connect before the broker starts, disconnect after it stops
+
+
+@broker.subscriber("greetings")
+async def greet(user_id: int, users: UserService) -> None:
+    print(await users.greet(user_id))
+```
+
+```console
+$ faststream run app.worker:app
+database: connected
+2026-10-08 15:12:52,281 INFO     - FastStream app starting...
+2026-10-08 15:12:52,287 INFO     - greetings |            - `Greet` waiting for messages
+2026-10-08 15:12:52,287 INFO     - FastStream app started successfully! To exit, press CTRL+C
+2026-10-08 15:12:55,078 INFO     - greetings | a747e4d0-2 - Received
+Hello, user-42!
+2026-10-08 15:12:55,079 INFO     - greetings | a747e4d0-2 - Processed
+^C
+2026-10-08 15:12:56,222 INFO     - FastStream app shutting down...
+2026-10-08 15:12:56,223 INFO     - FastStream app shut down gracefully.
+database: disconnected
+```
+
+メッセージは次のコードで送信しました。
+
+```python
+# publish.py
+import asyncio
+
+from faststream.nats import NatsBroker
+
+
+async def main() -> None:
+    async with NatsBroker("nats://localhost:4222") as broker:
+        await broker.publish(42, "greetings")
+
+
+asyncio.run(main())
+```
+
+ルール：
+
+- **クライアントが埋められる場所。** アプリのブローカーのサブスクライバー（インクルードされたルーターのものも含む）と、それらが使うすべての `Depends(...)` の引数です。深さは問いません。関数とクラスが対象で、サブスクライバー、そのルーター、ブローカーの `dependencies=` も含まれます。それ以外の引数（メッセージ、そのフィールド、`Context()`）はすべて FastStream が扱います。
+- **起動するクライアント。** 起動時に、アプリのブローカーが扱うすべてのサブスクライバー（ルーターのものも含む）のクライアントが起動します。サブスクライバーは `setup(app)` の前に宣言しても後に宣言してもかまいません。
+- **lifespan。** クライアントは、アプリ自身の `lifespan=` と `on_startup=` フックより前、かつブローカーの起動より前に接続し、ブローカーの停止と `after_shutdown=` フックの後に切断します。`Shutdown` と `BackgroundTasks` は [FastAPI](#fastapi) と同じように動作します。`setup()` は `AsgiFastStream` でも使えます。
+- **インスタンス。** `inject()` と同様に、`Client` はコンテナごとに 1 インスタンス、`NotSingletonClient` はそれを宣言する引数ごとに 1 インスタンスです。メッセージごとではありません。
+- **関数は関数のまま。** [FastAPI](#fastapi) と同じように、FastStream から見たシグネチャは `Annotated[UserService, Depends(...)]` になります。
+- **一度に 1 つのアプリ。** サブスクライバー関数とその依存関係は、コンテナに関係なく一度だけ書き換えられます。そのため、それらを共有するアプリ（たとえばモジュールレベルのブローカーでテストごとに作るアプリ）は 1 つずつ順番に実行します。同じ関数を持つ別のアプリが動いている間に起動したアプリは、起動に失敗します。クライアントを受け取る依存関係の関数が扱えるのは、FastAPI か FastStream のどちらか一方のハンドラーで、両方ではありません。
+
+**テスト。** FastStream のテストブローカーはアプリのフックを実行しないので、その内側で `TestApp` を使ってアプリを起動します。
+
+```python
+# tests/test_worker.py
+import pytest
+from faststream import TestApp
+from faststream.nats import TestNatsBroker
+
+from app.clients import Database
+from app.worker import app, broker
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+async def test_greet(capsys: pytest.CaptureFixture[str]) -> None:
+    with DI.override(Database, FakeDatabase()):
+        async with TestNatsBroker(broker) as test_broker, TestApp(app):
+            await test_broker.publish(1, "greetings")
+
+    assert "Hello, alice!" in capsys.readouterr().out
+```
+
+```console
+$ pytest -q tests/test_worker.py
+.                                                                        [100%]
+1 passed in 0.14s
+```
+
+アプリの lifespan を経由せずに処理されたメッセージ（`TestApp` を使わない `TestNatsBroker(broker)` など）は、`RuntimeError: UserService is not connected: start the app with its lifespan` を送出します。アプリの起動後に追加されたサブスクライバーは `RuntimeError: UserService was not started with the app` を送出します。
 
 ## <a id="testing"></a>テスト
 

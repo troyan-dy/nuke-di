@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "1.6.0"
+version = "1.7.0"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
@@ -23,6 +23,8 @@ keywords = [
   "graceful-shutdown",
   "cli",
   "fastapi",
+  "litestar",
+  "faststream",
   "pytest",
   "microservices",
   "kubernetes",
@@ -58,11 +60,19 @@ nuke_di = "nuke_di.pytest_plugin"
 fastapi = [
     "fastapi>=0.105",
 ]
+faststream = [
+    "faststream>=0.6",
+]
+litestar = [
+    "litestar>=2.15",
+]
 
 [dependency-groups]
 dev = [
   "fastapi>=0.142.4",
+  "faststream[nats]>=0.7.7",
   "httpx2>=2.13.1",
+  "litestar>=2.24",
   "mypy>=1.13",
   "pytest>=8.3",
   "pytest-asyncio>=0.24",

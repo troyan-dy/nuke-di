@@ -1,7 +1,7 @@
 # FastAPI integration
 
 Status: implemented.
-Issue: [#12](https://github.com/troyan-dy/nuke-di/issues/12) (the FastAPI part; Litestar and FastStream are left for later).
+Issue: [#12](https://github.com/troyan-dy/nuke-di/issues/12) (the FastAPI part); websocket endpoints in [#19](https://github.com/troyan-dy/nuke-di/issues/19), with [Litestar](litestar.md) and [FastStream](faststream.md).
 Decision record: [ADR-0003](../adr/0003-fastapi-signature-rewrite.md).
 Terms: see [CONTEXT.md](../../CONTEXT.md). This spec uses **Client**, **Container**, **Resolution**, **Replacement** and **Override** as defined there.
 
@@ -31,9 +31,8 @@ The clients connect, layer by layer, when the app starts and disconnect when it 
 
 ## Non-goals
 
-- **Websocket endpoints.** FastAPI builds them without the route class (see ADR-0003).
 - **Request scopes.** A client is a singleton per container, or one instance per argument for a `NotSingletonClient`, exactly as with `inject()`. Per-request clients are a separate decision.
-- **Litestar, FastStream, other frameworks.** Later, each in its own module.
+- **Litestar, FastStream.** Each in its own module: [litestar.md](litestar.md), [faststream.md](faststream.md).
 - **Changing `inject()`.**
 
 ## Public API
@@ -63,6 +62,10 @@ When a route is created, for the endpoint and for every dependency reachable fro
 The route keeps the clients of everything it reaches. A function is rewritten once per container. Declared again with another container, it is rewritten from its original signature; the routes declared before keep the dependencies they captured, so an app factory that makes a container per test works.
 
 `setup()` also rewrites `FastAPI(dependencies=...)`, which FastAPI applies to included routers lazily too.
+
+### Websocket endpoints
+
+FastAPI builds `APIWebSocketRoute` directly, without the route class. Every websocket declaration (`@app.websocket`, `@router.websocket`, `add_api_websocket_route()`, and the copies older FastAPI makes in `include_router()`) goes through `add_api_websocket_route()` of a router, so `ClientRouter` overrides it and `setup()` replaces it on the app's router: the endpoint and the `dependencies=` given to it are rewritten before FastAPI reads them, and the new route keeps their clients like an HTTP route. The router-level dependencies are tracked already. A websocket on a plain `APIRouter(route_class=ClientRoute)` is not covered and fails with the pydantic `TypeError`.
 
 ### Which clients start
 
@@ -103,3 +106,4 @@ In core, no import of pydantic. Defers to pydantic's own handler and only replac
 | 16 | Class dependencies | Supported: `Depends(Auth)` with clients in `Auth.__init__` is common in FastAPI. |
 | 17 | A router of another container | `TypeError` on `include_router()`: its clients would never start. |
 | 15 | A failed startup | A plain `RuntimeError` from the `SystemExit`: uvicorn reports "Application startup failed" and exits with `3`. |
+| 18 | Websocket endpoints (#19) | Through `add_api_websocket_route()`, which every websocket declaration calls: overridden in `ClientRouter`, replaced on the app's router by `setup()`, as `include_router()` already is. |

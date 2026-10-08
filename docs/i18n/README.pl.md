@@ -17,7 +17,8 @@ od najgłębszych zależności w górę.
 
 Do tego jeden dekorator zamienia funkcję asynchroniczną w proces: **job**, który wykonuje się
 raz, albo **worker**, który działa, dopóki się go nie zatrzyma — z parametrami wiersza poleceń, łagodnym
-zamykaniem po SIGTERM i kodami wyjścia, które coś znaczą.
+zamykaniem po SIGTERM i kodami wyjścia, które coś znaczą. Handlery FastAPI, Litestar i FastStream
+przyjmują klientów po adnotacji typu w ten sam sposób.
 
 Biblioteka została wydzielona z warstwy DI produkcyjnego frameworka do mikroserwisów w Pythonie
 i nie ma żadnych zależności w czasie działania.
@@ -27,7 +28,7 @@ i nie ma żadnych zależności w czasie działania.
 - [Klienci](#clients): [singletony](#client-and-notsingletonclient), [cykl życia](#connect-and-disconnect), [klienci jako dataclass](#dataclass-clients), [warstwy](#layers), [czasy startu](#startup-timings), [błędy połączenia](#when-a-client-fails-to-connect), [błędy rozwiązywania](#when-the-tree-cannot-be-built)
 - [Kontener](#the-container)
 - [Workery i joby](#workers-and-jobs): [job](#your-first-job), [parametry](#parameters), [worker](#your-first-worker), [okres karencji](#grace-period), [zadania w tle](#background-tasks), [kody wyjścia](#exit-codes), [hooki](#hooks), [Kubernetes](#running-in-kubernetes)
-- [FastAPI](#fastapi)
+- Frameworki: [FastAPI](#fastapi), [Litestar](#litestar), [FastStream](#faststream)
 - [Testowanie](#testing)
 - [Konfiguracja](#configuration) · [Błędy](#errors) · [Rozwój](#development)
 
@@ -1311,8 +1312,9 @@ Co się stało:
 
 Zasady:
 
-- **Gdzie wstawiani są klienci.** W argumentach operacji ścieżki i każdej zależności, której używają,
-  na dowolnej głębokości: funkcje oraz klasy użyte jako `Depends(Auth)` lub `Annotated[Auth, Depends()]`,
+- **Gdzie wstawiani są klienci.** W argumentach operacji ścieżki, endpointów websocket i każdej
+  zależności, której używają, na dowolnej głębokości: funkcje oraz klasy użyte jako `Depends(Auth)`
+  lub `Annotated[Auth, Depends()]`,
   łącznie z `dependencies=` trasy, jej routera, `include_router()` i aplikacji. Argument jest
   klientem, gdy jego adnotacja typu jest klientem, także wewnątrz `Annotated[UserService, ...]`
   bez `Depends`. Każdy inny argument należy do FastAPI: ścieżka, query, nagłówek, body, `Depends`.
@@ -1364,6 +1366,45 @@ $ pytest -q tests/test_api.py
 ```
 
 `app.dependency_overrides` nadal działa, także dla funkcji-zależności, która przyjmuje klientów.
+
+**Websockety.** Endpoint websocket przyjmuje klientów w ten sam sposób, na aplikacji albo na `ClientRouter`:
+
+```python
+# app/chat.py
+from fastapi import FastAPI, WebSocket
+
+from app.clients import UserService
+from nuke_di.fastapi import setup
+
+app = FastAPI()
+setup(app)
+
+
+@app.websocket("/greet")
+async def greet(websocket: WebSocket, users: UserService) -> None:
+    await websocket.accept()
+    async for user_id in websocket.iter_text():
+        await websocket.send_text(await users.greet(int(user_id)))
+```
+
+```python
+# tests/test_chat.py
+from fastapi.testclient import TestClient
+
+from app.chat import app
+
+
+def test_greet() -> None:
+    with TestClient(app) as client, client.websocket_connect("/greet") as ws:
+        ws.send_text("42")
+        assert ws.receive_text() == "Hello, user-42!"
+```
+
+```console
+$ pytest -q tests/test_chat.py
+.                                                                        [100%]
+1 passed in 0.16s
+```
 
 **Klient, który nie może się połączyć**, przerywa start. Lifespan zgłasza zwykły `RuntimeError`
 z przyczyną `ConnectError`, bo `SystemExit` wydostałby się poza pętlę zdarzeń serwera, a serwer
@@ -1420,7 +1461,7 @@ W tych miejscach klienci nie są przyjmowani. Każde z nich zgłasza `TypeError`
 | Miejsce                                                 | Zamiast tego                                  |
 |---------------------------------------------------------|-----------------------------------------------|
 | Router utworzony bez `ClientRouter` / `ClientRoute`     | Utwórz go przez `ClientRouter(...)`           |
-| Endpoint websocket i jego zależności                    | Na razie nieobsługiwane ([#19](https://github.com/troyan-dy/nuke-di/issues/19)) |
+| Endpoint websocket na `APIRouter(route_class=ClientRoute)` | Utwórz router przez `ClientRouter(...)` |
 | Opcjonalny klient, `Database \| None`                   | Zwykły `Database`                             |
 | Metoda związana lub obiekt wywoływalny jako endpoint lub zależność | Funkcja lub klasa                  |
 
@@ -1432,6 +1473,247 @@ the app or into a ClientRouter, not into a plain APIRouter`.
 
 Żądanie, które przyjdzie z pominięciem lifespan, np. przez `TestClient(app)` bez `with`, dostaje
 `RuntimeError`: `UserService is not connected: start the app with its lifespan`.
+
+## <a id="litestar"></a>Litestar
+
+Handler trasy w Litestar także przyjmuje klienta po adnotacji typu — przez plugin:
+
+```bash
+pip install "nuke-di[litestar]"
+```
+
+Wymaga Litestar 2.15 lub nowszego. Z klientami z przykładów dla [FastAPI](#fastapi):
+
+```python
+# app/litestar_api.py
+from typing import Annotated
+
+from litestar import Litestar, get
+from litestar.di import NamedDependency, Provide
+from litestar.params import FromPath, HeaderParameter
+
+from app.clients import Database, UserService
+from nuke_di.litestar import ClientPlugin
+
+
+@get("/users/{user_id:int}")
+async def get_user(user_id: FromPath[int], users: UserService) -> str:
+    return await users.greet(user_id)
+
+
+async def current_user(x_user_id: Annotated[int, HeaderParameter(name="X-User-Id")], db: Database) -> str:
+    return await db.fetch_user(x_user_id)
+
+
+@get("/me", dependencies={"user": Provide(current_user)})
+async def me(user: NamedDependency[str]) -> str:
+    return user
+
+
+app = Litestar([get_user, me], plugins=[ClientPlugin()])
+```
+
+```console
+$ uvicorn app.litestar_api:app
+INFO:     Started server process [6801]
+INFO:     Waiting for application startup.
+database: connected
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51940 - "GET /users/42 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51942 - "GET /me HTTP/1.1" 200 OK
+^C
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+database: disconnected
+INFO:     Application shutdown complete.
+INFO:     Finished server process [6801]
+```
+
+```console
+$ curl localhost:8000/users/42
+Hello, user-42!
+$ curl localhost:8000/me -H "X-User-Id: 7"
+user-7
+```
+
+`ClientPlugin()` znalazł `users: UserService` w `get_user` oraz `db: Database` w zależności
+`current_user`, przekazał obu klientów do Litestar jako zależności i połączył ich przy starcie.
+
+Zasady:
+
+- **Gdzie wstawiani są klienci.** W argumentach handlerów HTTP i `@websocket`, z którymi tworzona jest
+  aplikacja, łącznie z handlerami routerów i kontrolerów na dowolnej głębokości, oraz każdej zależności
+  zadeklarowanej na aplikacji, routerze, kontrolerze lub handlerze: funkcje i klasy.
+- **Po nazwie.** Litestar dostarcza zależności po nazwie argumentu, więc nuke-di dostarcza każdy
+  argument-klienta pod jego nazwą, na poziomie aplikacji. Jedna nazwa oznacza jednego klienta w całej
+  aplikacji: `users: UserService` w jednym handlerze i `users: Billing` w innym zgłaszają `TypeError`
+  przy tworzeniu aplikacji. Zależność o tej samej nazwie zadeklarowana przez aplikację, router,
+  kontroler lub handler ma pierwszeństwo przed klientem.
+- **Instancje.** `Client` to jedna instancja na kontener, a `NotSingletonClient` — jedna instancja na
+  nazwę argumentu.
+- **Lifespan.** Klienci łączą się, zanim wykonają się własne `lifespan=` i `on_startup=` aplikacji,
+  i rozłączają się po jej hookach `on_shutdown=`, które Litestar wywołuje na końcu. `Shutdown` i
+  `BackgroundTasks` działają tak jak w [FastAPI](#fastapi).
+- **Funkcja pozostaje funkcją.** Jej argumenty-klienci mają teraz adnotację jawnych zależności Litestar,
+  których wartość nie jest walidowana: `Annotated[UserService, Dependency(), SkipValidationMarker()]`,
+  czego Litestar 2.23 wymaga zamiast zależności dopasowanej wyłącznie po nazwie. Bezpośrednie wywołanie
+  funkcji działa tak jak wcześniej.
+- **Pluginy.** Umieść `ClientPlugin()` za każdym pluginem, który dodaje handlery tras: plugin widzi te
+  handlery, które aplikacja ma w chwili, gdy przychodzi jego kolej.
+- **Inny kontener.** `ClientPlugin(container)`.
+
+**Testowanie.** Tak jak w FastAPI, test podmienia klienta, zanim `TestClient` wystartuje aplikację:
+
+```python
+# tests/test_litestar_api.py
+from litestar.testing import TestClient
+
+from app.clients import Database
+from app.litestar_api import app
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+def test_get_user() -> None:
+    with DI.override(Database, FakeDatabase()), TestClient(app) as client:
+        assert client.get("/users/1").text == "Hello, alice!"
+        assert client.get("/me", headers={"X-User-Id": "7"}).text == "alice"
+```
+
+```console
+$ pytest -q tests/test_litestar_api.py
+.                                                                        [100%]
+1 passed in 0.23s
+```
+
+**Nieobsługiwane.** Listener websocket, `@websocket_listener` lub klasa `WebsocketListener`, nie
+przyjmuje klientów: Litestar odczytuje jego sygnaturę już przy deklaracji, zanim plugin ją zobaczy,
+więc aplikacja zgłasza `TypeError` i wskazuje zamiast niego handler `@websocket`. Argument-klient
+o nazwie zarezerwowanej przez Litestar, takiej jak `state` czy `request`, również powoduje `TypeError`.
+Handler zarejestrowany po utworzeniu aplikacji, przez `app.register()`, nie jest widoczny.
+
+## <a id="faststream"></a>FastStream
+
+Subscriber w FastStream przyjmuje klienta po adnotacji typu, obok wiadomości:
+
+```bash
+pip install "nuke-di[faststream]"
+```
+
+Wymaga FastStream 0.6 lub nowszego, z dowolnym brokerem. Z klientami z przykładów dla [FastAPI](#fastapi):
+
+```python
+# app/worker.py
+from faststream import FastStream
+from faststream.nats import NatsBroker
+
+from app.clients import UserService
+from nuke_di.faststream import setup
+
+broker = NatsBroker("nats://localhost:4222")
+app = FastStream(broker)
+setup(app)  # clients connect before the broker starts, disconnect after it stops
+
+
+@broker.subscriber("greetings")
+async def greet(user_id: int, users: UserService) -> None:
+    print(await users.greet(user_id))
+```
+
+```console
+$ faststream run app.worker:app
+database: connected
+2026-10-08 15:12:52,281 INFO     - FastStream app starting...
+2026-10-08 15:12:52,287 INFO     - greetings |            - `Greet` waiting for messages
+2026-10-08 15:12:52,287 INFO     - FastStream app started successfully! To exit, press CTRL+C
+2026-10-08 15:12:55,078 INFO     - greetings | a747e4d0-2 - Received
+Hello, user-42!
+2026-10-08 15:12:55,079 INFO     - greetings | a747e4d0-2 - Processed
+^C
+2026-10-08 15:12:56,222 INFO     - FastStream app shutting down...
+2026-10-08 15:12:56,223 INFO     - FastStream app shut down gracefully.
+database: disconnected
+```
+
+Wiadomość została opublikowana tak:
+
+```python
+# publish.py
+import asyncio
+
+from faststream.nats import NatsBroker
+
+
+async def main() -> None:
+    async with NatsBroker("nats://localhost:4222") as broker:
+        await broker.publish(42, "greetings")
+
+
+asyncio.run(main())
+```
+
+Zasady:
+
+- **Gdzie wstawiani są klienci.** W argumentach subscriberów brokerów aplikacji, także tych
+  z dołączonych routerów, oraz każdego `Depends(...)`, którego używają, na dowolnej głębokości: funkcje
+  i klasy, łącznie z `dependencies=` subscribera, jego routera i brokera. Każdy inny argument należy
+  do FastStream: wiadomość, jej pola, `Context()`.
+- **Którzy klienci startują.** Przy starcie — klienci każdego subscribera obsługiwanego przez brokery
+  aplikacji, łącznie z routerami. Subscribery można deklarować przed `setup(app)` albo po nim.
+- **Lifespan.** Klienci łączą się przed własnymi hookami `lifespan=` i `on_startup=` aplikacji i zanim
+  wystartują brokery; rozłączają się, gdy brokery się zatrzymają, i po hookach `after_shutdown=`.
+  `Shutdown` i `BackgroundTasks` działają tak jak w [FastAPI](#fastapi). `setup()` działa także na
+  `AsgiFastStream`.
+- **Instancje.** Tak jak w `inject()`, `Client` to jedna instancja na kontener, a
+  `NotSingletonClient` — jedna instancja na każdy argument, który go deklaruje, a nie jedna na wiadomość.
+- **Funkcja pozostaje funkcją.** Jej sygnatura pokazuje FastStream `Annotated[UserService, Depends(...)]`,
+  tak jak w [FastAPI](#fastapi).
+- **Jedna aplikacja naraz.** Funkcja-subscriber i jej zależności są przepisywane raz, niezależnie od
+  kontenera, więc aplikacje, które je współdzielą, np. aplikacja na test z brokerem na poziomie modułu,
+  działają jedna po drugiej: aplikacja, która startuje, gdy działa inna z tą samą funkcją, nie wystartuje.
+  Funkcja-zależność, która przyjmuje klientów, obsługuje handlery albo FastAPI, albo FastStream, nie oba naraz.
+
+**Testowanie.** Testowy broker FastStream nie uruchamia hooków aplikacji, więc wystartuj w nim aplikację
+przez `TestApp`:
+
+```python
+# tests/test_worker.py
+import pytest
+from faststream import TestApp
+from faststream.nats import TestNatsBroker
+
+from app.clients import Database
+from app.worker import app, broker
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+async def test_greet(capsys: pytest.CaptureFixture[str]) -> None:
+    with DI.override(Database, FakeDatabase()):
+        async with TestNatsBroker(broker) as test_broker, TestApp(app):
+            await test_broker.publish(1, "greetings")
+
+    assert "Hello, alice!" in capsys.readouterr().out
+```
+
+```console
+$ pytest -q tests/test_worker.py
+.                                                                        [100%]
+1 passed in 0.14s
+```
+
+Wiadomość obsłużona z pominięciem lifespan aplikacji, np. przez `TestNatsBroker(broker)` bez `TestApp`,
+zgłasza `RuntimeError: UserService is not connected: start the app with its lifespan`. Subscriber
+dodany po starcie aplikacji zgłasza `RuntimeError: UserService was not started with the app`.
 
 ## <a id="testing"></a>Testowanie
 

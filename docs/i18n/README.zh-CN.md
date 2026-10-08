@@ -16,6 +16,7 @@
 
 在此之上，只需一个装饰器就能把异步函数变成一个进程：只运行一次的 **job**，或一直运行到被停止的
 **worker**，并且自带命令行参数、收到 SIGTERM 时优雅关闭，以及含义明确的退出码。
+FastAPI、Litestar 和 FastStream 的处理函数也以同样的方式通过类型提示接收客户端。
 
 它提取自一个生产环境 Python 微服务框架的 DI 层，没有任何运行时依赖。
 
@@ -24,7 +25,7 @@
 - [客户端](#clients)：[单例](#client-and-notsingletonclient)、[生命周期](#connect-and-disconnect)、[dataclass](#dataclass-clients)、[层](#layers)、[启动耗时](#startup-timings)、[连接失败](#when-a-client-fails-to-connect)、[解析错误](#when-the-tree-cannot-be-built)
 - [容器](#the-container)
 - [worker 与 job](#workers-and-jobs)：[第一个 job](#your-first-job)、[参数](#parameters)、[第一个 worker](#your-first-worker)、[宽限期](#grace-period)、[后台任务](#background-tasks)、[退出码](#exit-codes)、[钩子](#hooks)、[Kubernetes](#running-in-kubernetes)
-- [FastAPI](#fastapi)
+- 框架：[FastAPI](#fastapi)、[Litestar](#litestar)、[FastStream](#faststream)
 - [测试](#testing)
 - [配置](#configuration) · [错误](#errors) · [开发](#development)
 
@@ -1293,7 +1294,7 @@ $ curl localhost:8000/me -H "X-User-Id: 7"
 
 规则如下：
 
-- **在哪里填充客户端。** 在路径操作的参数中，以及它们用到的每个依赖项的参数中，不论嵌套多深：
+- **在哪里填充客户端。** 在路径操作和 WebSocket 端点的参数中，以及它们用到的每个依赖项的参数中，不论嵌套多深：
   既包括函数，也包括以 `Depends(Auth)` 或 `Annotated[Auth, Depends()]` 方式使用的类，
   还包括路由、其路由器、`include_router()` 和应用上的 `dependencies=`。
   只要参数的类型提示是客户端，它就是客户端参数，即便写在不带 `Depends` 的 `Annotated[UserService, ...]`
@@ -1346,6 +1347,45 @@ $ pytest -q tests/test_api.py
 ```
 
 `app.dependency_overrides` 依然有效，对接收客户端的依赖函数也同样适用。
+
+**WebSocket。** WebSocket 端点以同样的方式接收客户端，无论它声明在应用上还是 `ClientRouter` 上：
+
+```python
+# app/chat.py
+from fastapi import FastAPI, WebSocket
+
+from app.clients import UserService
+from nuke_di.fastapi import setup
+
+app = FastAPI()
+setup(app)
+
+
+@app.websocket("/greet")
+async def greet(websocket: WebSocket, users: UserService) -> None:
+    await websocket.accept()
+    async for user_id in websocket.iter_text():
+        await websocket.send_text(await users.greet(int(user_id)))
+```
+
+```python
+# tests/test_chat.py
+from fastapi.testclient import TestClient
+
+from app.chat import app
+
+
+def test_greet() -> None:
+    with TestClient(app) as client, client.websocket_connect("/greet") as ws:
+        ws.send_text("42")
+        assert ws.receive_text() == "Hello, user-42!"
+```
+
+```console
+$ pytest -q tests/test_chat.py
+.                                                                        [100%]
+1 passed in 0.16s
+```
 
 **客户端连接失败**会导致启动失败。由于 `SystemExit` 会逃逸出服务器的事件循环，
 lifespan 会从 `ConnectError` 抛出一个普通的 `RuntimeError`，服务器报告该错误
@@ -1402,7 +1442,7 @@ $ echo $?
 | 位置                                                    | 替代做法                                      |
 |---------------------------------------------------------|-----------------------------------------------|
 | 未使用 `ClientRouter` / `ClientRoute` 创建的路由器      | 用 `ClientRouter(...)` 创建                   |
-| WebSocket 端点及其依赖项                                | 暂不支持（[#19](https://github.com/troyan-dy/nuke-di/issues/19)） |
+| `APIRouter(route_class=ClientRoute)` 上的 WebSocket 端点 | 用 `ClientRouter(...)` 创建路由器             |
 | 可选的客户端 `Database \| None`                         | 普通的 `Database`                             |
 | 作为端点或依赖项的绑定方法或可调用对象                  | 函数或类                                      |
 
@@ -1412,6 +1452,240 @@ $ echo $?
 
 没有经过 lifespan 就到达的请求，例如通过不带 `with` 的 `TestClient(app)` 发出的请求，会得到一个
 `RuntimeError`：`UserService is not connected: start the app with its lifespan`。
+
+## <a id="litestar"></a>Litestar
+
+Litestar 的路由处理函数同样通过类型提示接收客户端，借助一个插件实现：
+
+```bash
+pip install "nuke-di[litestar]"
+```
+
+需要 Litestar 2.15 或更高版本。使用 [FastAPI](#fastapi) 示例中的客户端：
+
+```python
+# app/litestar_api.py
+from typing import Annotated
+
+from litestar import Litestar, get
+from litestar.di import NamedDependency, Provide
+from litestar.params import FromPath, HeaderParameter
+
+from app.clients import Database, UserService
+from nuke_di.litestar import ClientPlugin
+
+
+@get("/users/{user_id:int}")
+async def get_user(user_id: FromPath[int], users: UserService) -> str:
+    return await users.greet(user_id)
+
+
+async def current_user(x_user_id: Annotated[int, HeaderParameter(name="X-User-Id")], db: Database) -> str:
+    return await db.fetch_user(x_user_id)
+
+
+@get("/me", dependencies={"user": Provide(current_user)})
+async def me(user: NamedDependency[str]) -> str:
+    return user
+
+
+app = Litestar([get_user, me], plugins=[ClientPlugin()])
+```
+
+```console
+$ uvicorn app.litestar_api:app
+INFO:     Started server process [6801]
+INFO:     Waiting for application startup.
+database: connected
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51940 - "GET /users/42 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51942 - "GET /me HTTP/1.1" 200 OK
+^C
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+database: disconnected
+INFO:     Application shutdown complete.
+INFO:     Finished server process [6801]
+```
+
+```console
+$ curl localhost:8000/users/42
+Hello, user-42!
+$ curl localhost:8000/me -H "X-User-Id: 7"
+user-7
+```
+
+`ClientPlugin()` 在 `get_user` 中找到了 `users: UserService`，在依赖项 `current_user` 中找到了
+`db: Database`，把两者作为依赖项提供给 Litestar，并在启动时连接它们。
+
+规则如下：
+
+- **在哪里填充客户端。** 在创建应用时传入的 HTTP 处理函数和 `@websocket` 处理函数的参数中，
+  包括任意深度的路由器和控制器中的处理函数，以及在应用、路由器、控制器或处理函数上声明的
+  每个依赖项的参数中：既包括函数，也包括类。
+- **按名称提供。** Litestar 按参数名提供依赖项，因此 nuke-di 在应用上以参数名提供每个客户端参数。
+  在整个应用中，一个名称只对应一个客户端：如果一个处理函数中写 `users: UserService`，另一个中写
+  `users: Billing`，创建应用时就会抛出 `TypeError`。应用、路由器、控制器或处理函数声明的同名
+  依赖项优先于客户端。
+- **实例。** `Client` 在每个容器中只有一个实例；`NotSingletonClient` 是每个参数名一个实例。
+- **lifespan。** 客户端在应用自己的 `lifespan=` 和 `on_startup=` 运行之前连接，在它的
+  `on_shutdown=` 钩子之后断开，Litestar 最后才调用这些钩子。`Shutdown` 和
+  `BackgroundTasks` 的行为与 [FastAPI](#fastapi) 中相同。
+- **函数仍然是函数。** 它的客户端参数现在标注为 Litestar 的显式依赖项，且不校验其值：
+  `Annotated[UserService, Dependency(), SkipValidationMarker()]`，这正是 Litestar 2.23 所要求的
+  写法，用来取代仅按名称匹配的依赖项。直接调用该函数仍和以前一样可行。
+- **插件。** 把 `ClientPlugin()` 放在所有会添加路由处理函数的插件之后：轮到它时，它看到的是应用
+  此刻已有的处理函数。
+- **使用其他容器。** `ClientPlugin(container)`。
+
+**测试。** 与 FastAPI 一样，测试在 `TestClient` 启动应用之前替换客户端：
+
+```python
+# tests/test_litestar_api.py
+from litestar.testing import TestClient
+
+from app.clients import Database
+from app.litestar_api import app
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+def test_get_user() -> None:
+    with DI.override(Database, FakeDatabase()), TestClient(app) as client:
+        assert client.get("/users/1").text == "Hello, alice!"
+        assert client.get("/me", headers={"X-User-Id": "7"}).text == "alice"
+```
+
+```console
+$ pytest -q tests/test_litestar_api.py
+.                                                                        [100%]
+1 passed in 0.23s
+```
+
+**不支持的情况。** WebSocket 监听器，即 `@websocket_listener` 或 `WebsocketListener` 类，不接受
+客户端：Litestar 在声明它时就读取了其签名，早于插件看到它，因此应用会抛出 `TypeError`，并建议
+改用 `@websocket` 处理函数。如果客户端参数使用了 Litestar 保留的名称，例如 `state` 或 `request`，
+同样会抛出 `TypeError`。在应用创建之后通过 `app.register()` 注册的处理函数，插件看不到。
+
+## <a id="faststream"></a>FastStream
+
+FastStream 的订阅者在消息旁边通过类型提示接收客户端：
+
+```bash
+pip install "nuke-di[faststream]"
+```
+
+需要 FastStream 0.6 或更高版本，支持任意 broker。使用 [FastAPI](#fastapi) 示例中的客户端：
+
+```python
+# app/worker.py
+from faststream import FastStream
+from faststream.nats import NatsBroker
+
+from app.clients import UserService
+from nuke_di.faststream import setup
+
+broker = NatsBroker("nats://localhost:4222")
+app = FastStream(broker)
+setup(app)  # clients connect before the broker starts, disconnect after it stops
+
+
+@broker.subscriber("greetings")
+async def greet(user_id: int, users: UserService) -> None:
+    print(await users.greet(user_id))
+```
+
+```console
+$ faststream run app.worker:app
+database: connected
+2026-10-08 15:12:52,281 INFO     - FastStream app starting...
+2026-10-08 15:12:52,287 INFO     - greetings |            - `Greet` waiting for messages
+2026-10-08 15:12:52,287 INFO     - FastStream app started successfully! To exit, press CTRL+C
+2026-10-08 15:12:55,078 INFO     - greetings | a747e4d0-2 - Received
+Hello, user-42!
+2026-10-08 15:12:55,079 INFO     - greetings | a747e4d0-2 - Processed
+^C
+2026-10-08 15:12:56,222 INFO     - FastStream app shutting down...
+2026-10-08 15:12:56,223 INFO     - FastStream app shut down gracefully.
+database: disconnected
+```
+
+消息是这样发布的：
+
+```python
+# publish.py
+import asyncio
+
+from faststream.nats import NatsBroker
+
+
+async def main() -> None:
+    async with NatsBroker("nats://localhost:4222") as broker:
+        await broker.publish(42, "greetings")
+
+
+asyncio.run(main())
+```
+
+规则如下：
+
+- **在哪里填充客户端。** 在应用的 broker 的订阅者（也包括所包含路由器中的订阅者）的参数中，
+  以及它们用到的每个 `Depends(...)` 的参数中，不论嵌套多深：既包括函数，也包括类，还包括
+  订阅者、其路由器和 broker 上的 `dependencies=`。其余参数都交给 FastStream 处理：消息、
+  消息的字段、`Context()`。
+- **哪些客户端会启动。** 启动时，应用的 broker 所服务的每个订阅者（包括路由器中的订阅者）
+  的客户端都会启动。订阅者可以在 `setup(app)` 之前或之后声明。
+- **lifespan。** 客户端在应用自己的 `lifespan=` 和 `on_startup=` 钩子之前、在 broker 启动之前连接；
+  在 broker 停止之后、在 `after_shutdown=` 钩子之后断开。`Shutdown` 和 `BackgroundTasks`
+  的行为与 [FastAPI](#fastapi) 中相同。`setup()` 也适用于 `AsgiFastStream`。
+- **实例。** 与 `inject()` 一样，`Client` 在每个容器中只有一个实例，而
+  `NotSingletonClient` 是每个声明它的参数一个实例，而不是每条消息一个。
+- **函数仍然是函数。** FastStream 看到的签名是 `Annotated[UserService, Depends(...)]`，
+  与 [FastAPI](#fastapi) 中相同。
+- **一次一个应用。** 订阅者函数及其依赖只会被重写一次，与容器无关，因此共享它们的应用
+  （例如在模块级 broker 上每个测试一个应用）要依次运行：当另一个使用同一函数的应用正在运行时，
+  新启动的应用会启动失败。接收客户端的依赖函数只能服务于 FastAPI 或 FastStream 的处理函数，不能同时服务两者。
+
+**测试。** FastStream 的测试 broker 不运行任何应用钩子，因此要在其中用 `TestApp` 启动应用：
+
+```python
+# tests/test_worker.py
+import pytest
+from faststream import TestApp
+from faststream.nats import TestNatsBroker
+
+from app.clients import Database
+from app.worker import app, broker
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+async def test_greet(capsys: pytest.CaptureFixture[str]) -> None:
+    with DI.override(Database, FakeDatabase()):
+        async with TestNatsBroker(broker) as test_broker, TestApp(app):
+            await test_broker.publish(1, "greetings")
+
+    assert "Hello, alice!" in capsys.readouterr().out
+```
+
+```console
+$ pytest -q tests/test_worker.py
+.                                                                        [100%]
+1 passed in 0.14s
+```
+
+没有经过应用的 lifespan 就处理的消息，例如通过不带 `TestApp` 的 `TestNatsBroker(broker)`
+处理的消息，会抛出 `RuntimeError: UserService is not connected: start the app with its lifespan`。
+在应用启动之后才添加的订阅者会抛出 `RuntimeError: UserService was not started with the app`。
 
 ## <a id="testing"></a>测试
 

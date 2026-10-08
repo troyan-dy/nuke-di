@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 import fastapi.routing
 import pytest
-from fastapi import APIRouter, Depends, FastAPI, Header
+from fastapi import APIRouter, Depends, FastAPI, Header, WebSocket
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, TypeAdapter
@@ -437,6 +437,21 @@ def test_failed_resolution_fails_startup_and_flushes() -> None:
     assert deps.clients == {}
 
 
+def test_failed_resolution_leaves_no_timings_of_an_earlier_run() -> None:
+    deps = Dependencies()
+    app = make_app(deps)
+    app.get("/users/{user_id}")(greet)
+    with TestClient(app):
+        pass
+    assert deps.timings != []
+
+    app.get("/")(unbuildable)
+    with pytest.raises(TypeError), TestClient(app):
+        pass  # pragma: no cover
+
+    assert deps.timings == []
+
+
 async def test_container_connected_before_startup_is_left_alone() -> None:
     deps = Dependencies()
     app = make_app(deps)
@@ -746,3 +761,77 @@ def test_dependency_with_header_and_client() -> None:
 
     with TestClient(app) as client:
         assert client.get("/me", headers={"X-User-Id": "7"}).json() == "user-7"
+
+
+# --- websockets ------------------------------------------------------------------------------------------
+
+
+async def chat(websocket: WebSocket, user: Annotated[str, Depends(current_user)], users: UserService) -> None:
+    await websocket.accept()
+    user_id = int(await websocket.receive_text())
+    await websocket.send_text(f"{user}: {await users.greet(user_id)}")
+    await websocket.close()
+
+
+def test_websocket_endpoint_gets_clients() -> None:
+    deps = Dependencies()
+    app = make_app(deps, dependencies=[Depends(app_audit)])
+    app.websocket("/chat", dependencies=[Depends(route_audit)])(chat)
+
+    with deps.override(Database, FakeDatabase()), TestClient(app) as client, client.websocket_connect("/chat") as ws:
+        ws.send_text("2")
+        assert ws.receive_text() == "Hello, alice!: Hello, alice!"
+
+    assert sorted(events) == ["app audit", "route audit"]
+
+
+def test_websocket_of_included_routers_gets_clients() -> None:
+    deps = Dependencies()
+    app = make_app(deps)
+    inner = ClientRouter(container=deps, dependencies=[Depends(router_audit)])
+    inner.websocket("/chat")(chat)
+    outer = ClientRouter(container=deps, dependencies=[Depends(outer_audit)])
+    outer.include_router(inner, prefix="/in", dependencies=[Depends(include_audit)])
+    app.include_router(outer, prefix="/out")
+
+    with TestClient(app) as client, client.websocket_connect("/out/in/chat") as ws:
+        ws.send_text("2")
+        assert ws.receive_text() == "Hello, user-1!: Hello, user-2!"
+
+    assert sorted(events[1:-1]) == ["include audit", "outer audit", "router audit"]
+
+
+def test_websocket_added_without_decorator_gets_clients() -> None:
+    deps = Dependencies()
+    app = make_app(deps)
+    router = ClientRouter(container=deps)
+    router.add_api_websocket_route("/chat", chat)
+    app.add_api_websocket_route("/app-chat", chat)
+    app.include_router(router)
+
+    with TestClient(app) as client:
+        for path in ("/chat", "/app-chat"):
+            with client.websocket_connect(path) as ws:
+                ws.send_text("3")
+                assert ws.receive_text() == "Hello, user-1!: Hello, user-3!"
+
+
+def test_websocket_of_a_router_the_app_does_not_include_starts_nothing() -> None:
+    deps = Dependencies()
+    app = make_app(deps)
+    app.get("/ping")(ping)
+    ClientRouter(container=deps).websocket("/chat")(chat)
+
+    with TestClient(app):
+        assert events == []
+
+
+async def plain_chat(websocket: WebSocket, users: UserService) -> None: ...
+
+
+def test_websocket_on_plain_router_explains() -> None:
+    # The route class is not used for websockets
+    router = APIRouter(route_class=ClientRoute)
+
+    with pytest.raises(TypeError, match=r"UserService is a nuke-di client, not a pydantic type"):
+        router.websocket("/chat")(plain_chat)
