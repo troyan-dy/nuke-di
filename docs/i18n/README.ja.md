@@ -23,7 +23,7 @@
 - [ワーカーとジョブ](#workers-and-jobs)：[ジョブ](#your-first-job)、[パラメータ](#parameters)、[ワーカー](#your-first-worker)、[猶予期間](#grace-period)、[バックグラウンドタスク](#background-tasks)、[終了コード](#exit-codes)、[フック](#hooks)、[Kubernetes](#running-in-kubernetes)
 - フレームワーク：[FastAPI](#fastapi)、[Litestar](#litestar)、[FastStream](#faststream)
 - [テスト](#testing)
-- [設定](#configuration) · [エラー](#errors) · [開発](#development)
+- [設定](#configuration) · [エラー](#errors) · [パフォーマンス](#performance) · [開発](#development)
 
 ## <a id="installation"></a>インストール
 
@@ -1789,6 +1789,37 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 
 `nuke-di` は標準の `logging` モジュールを使い、`nuke_di` ロガーにログを出力します。ログパイプライン向けの
 [構造化フィールド](#startup-metrics-and-structured-logs)付きです。
+
+## <a id="performance"></a>パフォーマンス
+
+`nuke-di` は推測ではなく計測で判断します。`benchmarks/run.py` は何もしないクライアントの上でライブラリ自身が
+加えるコストを計ります。10、100、1000 クライアントの幅広・深い・混合ツリーの `resolve()`、クライアント自身のコルーチンに
+対する `connect()` と `disconnect()` のスケジューリングのオーバーヘッド、`inject()`、`NotSingletonClient`、テストでの
+`mock()` / `override()` サイクル、FastAPI のリクエスト 1 回、インポート時間、メモリです。結果は反復の中央値と p95、
+クライアント 1 件あたりの数値を含む Markdown の表として出力されます。
+
+```console
+$ uv run python benchmarks/run.py --only resolve --size 100
+nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 11f5919 · N = 100 · 20 repeats
+
+| Scenario        | Shape |   N |  Median |     p95 | Per client |
+|-----------------|-------|----:|--------:|--------:|-----------:|
+| resolve(), cold | wide  | 100 |  636 µs |  672 µs |    6.36 µs |
+| resolve(), warm | wide  | 100 | 99.5 ns |  126 ns |            |
+| resolve(), cold | deep  | 100 |  814 µs | 1.01 ms |    8.14 µs |
+| resolve(), warm | deep  | 100 | 96.4 ns | 97.1 ns |            |
+| resolve(), cold | mixed | 100 |  845 µs |  986 µs |    8.45 µs |
+| resolve(), warm | mixed | 100 |  101 ns |  116 ns |            |
+```
+
+`--size N` と `--repeat K` はツリーのサイズと反復回数を、`--only` はシナリオ（`resolve`、`connect`、`inject`、
+`not_singleton`、`overrides`、`fastapi`、`import`、`memory`）を指定し、`--json PATH` は後で比較できるように Python の
+バージョン、プラットフォーム、コミットと共に数値を書き出します。[docs/benchmarks.md](../benchmarks.md) は各シナリオの説明と、
+Apple M2 Pro 上の Python 3.11–3.14 のベースラインを記録しています。`resolve()` はクライアント 1 件あたり 6–12 µs なので、
+1000 クライアントのツリーは 15 ms 未満で構築されます。`connect()` は同じ層のクライアント 1 件あたり 12–18 µs、層ごとに
+0.1–0.2 ms を加えます。`nuke-di` 経由でクライアントを受け取る FastAPI ハンドラのコストは、通常の `Depends()` を使った
+ハンドラと同じです。`import nuke_di` は 26–35 ms で、大半は `asyncio` です。CI はこのスイートをしきい値なしのスモークテスト
+として実行します。GitHub のランナーはノイズが大きすぎてゲートには使えないためです。
 
 ## <a id="development"></a>開発
 

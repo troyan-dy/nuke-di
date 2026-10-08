@@ -6,6 +6,21 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-08
+
+### Added
+
+- Benchmark suite in `benchmarks/`, measurement only: `uv run python benchmarks/run.py [--size N] [--repeat K]
+  [--only SCENARIO] [--json PATH]` times `resolve()` of wide, deep and mixed trees of 10, 100 and 1000 no-op
+  clients, cold and warm, the scheduling overhead of `connect()` / `disconnect()` above the clients' own
+  coroutines, `inject()` and the call of an injected function, `NotSingletonClient` against a singleton,
+  the `flush()` + `mock()` and `override()` cycle of a test, one FastAPI request through nuke-di against a
+  plain `Depends()`, the import time of `nuke_di` and `nuke_di.fastapi` and the memory of a resolved tree,
+  and prints a Markdown table with the median, the p95 and the figure per client. `docs/benchmarks.md`
+  records the baseline on Python 3.11, 3.12, 3.13 and 3.14, with the JSON in `docs/benchmarks/`; CI runs
+  the suite as a non-blocking smoke test; see "Performance" in the README
+  ([#25](https://github.com/troyan-dy/nuke-di/issues/25)).
+
 ## [1.7.1] - 2026-10-08
 
 ### Added
@@ -211,7 +226,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/troyan-dy/nuke-di/compare/v1.7.1...v1.8.0
 [1.7.1]: https://github.com/troyan-dy/nuke-di/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/troyan-dy/nuke-di/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/troyan-dy/nuke-di/compare/v1.5.2...v1.6.0

@@ -30,7 +30,7 @@ y no tiene dependencias en tiempo de ejecución.
 - [Workers y jobs](#workers-and-jobs): [un job](#your-first-job), [parámetros](#parameters), [un worker](#your-first-worker), [periodo de gracia](#grace-period), [tareas en segundo plano](#background-tasks), [códigos de salida](#exit-codes), [hooks](#hooks), [Kubernetes](#running-in-kubernetes)
 - Frameworks: [FastAPI](#fastapi), [Litestar](#litestar), [FastStream](#faststream)
 - [Pruebas](#testing)
-- [Configuración](#configuration) · [Errores](#errors) · [Desarrollo](#development)
+- [Configuración](#configuration) · [Errores](#errors) · [Rendimiento](#performance) · [Desarrollo](#development)
 
 ## <a id="installation"></a>Instalación
 
@@ -1956,6 +1956,39 @@ otro comportamiento; la excepción original está disponible en `__cause__`.
 
 `nuke-di` escribe sus logs con el módulo estándar `logging`, en el logger `nuke_di`, con
 [campos estructurados](#startup-metrics-and-structured-logs) para los pipelines de logs.
+
+## <a id="performance"></a>Rendimiento
+
+`nuke-di` se mide, no se afina a ciegas. `benchmarks/run.py` cronometra lo que añade la propia biblioteca
+sobre clientes vacíos: `resolve()` de árboles anchos, profundos y mixtos de 10, 100 y 1000 clientes, la
+planificación de `connect()` y `disconnect()` por encima de las corrutinas de los propios clientes,
+`inject()`, `NotSingletonClient`, el ciclo `mock()` / `override()` de una prueba, una petición FastAPI, el
+tiempo de importación y la memoria. Imprime una tabla Markdown con la mediana y el p95 de sus repeticiones
+y una cifra por cliente:
+
+```console
+$ uv run python benchmarks/run.py --only resolve --size 100
+nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 11f5919 · N = 100 · 20 repeats
+
+| Scenario        | Shape |   N |  Median |     p95 | Per client |
+|-----------------|-------|----:|--------:|--------:|-----------:|
+| resolve(), cold | wide  | 100 |  636 µs |  672 µs |    6.36 µs |
+| resolve(), warm | wide  | 100 | 99.5 ns |  126 ns |            |
+| resolve(), cold | deep  | 100 |  814 µs | 1.01 ms |    8.14 µs |
+| resolve(), warm | deep  | 100 | 96.4 ns | 97.1 ns |            |
+| resolve(), cold | mixed | 100 |  845 µs |  986 µs |    8.45 µs |
+| resolve(), warm | mixed | 100 |  101 ns |  116 ns |            |
+```
+
+`--size N` y `--repeat K` fijan el tamaño del árbol y el número de repeticiones, `--only` elige un
+escenario (`resolve`, `connect`, `inject`, `not_singleton`, `overrides`, `fastapi`, `import`, `memory`) y
+`--json PATH` escribe las cifras con la versión de Python, la plataforma y el commit para compararlas más
+tarde. [docs/benchmarks.md](../benchmarks.md) explica cada escenario y registra la línea base en Python
+3.11–3.14, tomada en un Apple M2 Pro: `resolve()` cuesta 6–12 µs por cliente, así que un árbol de 1000
+clientes se construye en menos de 15 ms; `connect()` añade 12–18 µs por cliente en una capa y 0,1–0,2 ms
+por capa; un handler de FastAPI que recibe un cliente a través de `nuke-di` cuesta lo mismo que uno con un
+`Depends()` normal; `import nuke_di` tarda 26–35 ms, la mayor parte en `asyncio`. CI ejecuta la suite como
+prueba de humo, sin umbral: un runner de GitHub es demasiado ruidoso para bloquear con él.
 
 ## <a id="development"></a>Desarrollo
 
