@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 
-from nuke_di import DI, Client, Run, job, worker
-from nuke_di.entrypoint import entrypoint_name
+from nuke_di import DI, Client, InvalidSignatureError, Run, UsageError, job, worker
+from nuke_di.entrypoint import entrypoint_name, entrypoint_prog
 
 DECORATORS = [job, worker]
 
@@ -30,6 +30,14 @@ class Hook:
 def clean_di() -> Iterator[None]:
     yield
     DI.flush()
+
+
+@pytest.fixture(autouse=True)
+def argv(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    # The Run parses the command line, and pytest's own arguments are not Parameters
+    argv = ["sync.py"]
+    monkeypatch.setattr(sys, "argv", argv)
+    return argv
 
 
 @pytest.mark.parametrize("decorator", DECORATORS)
@@ -123,3 +131,87 @@ def test_name_of_imported_function() -> None:
         pass
 
     assert entrypoint_name(sync) == "tests.test_entrypoint.test_name_of_imported_function.<locals>.sync"
+
+
+def test_parameters_from_command_line(argv: list[str]) -> None:
+    argv += ["--day", "5"]
+    days: list[int] = []
+
+    async def entry(db: Db, day: int) -> None:
+        days.append(day)
+
+    with pytest.raises(SystemExit) as exc_info:
+        job(as_main(entry))
+
+    assert exc_info.value.code == 0
+    assert days == [5]
+
+
+def test_help_exits_without_run(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    argv.append("--help")
+
+    async def entry(day: int) -> None:
+        """Sync one day."""
+
+    hook = Hook()
+    with pytest.raises(SystemExit) as exc_info:
+        job(hooks=[hook])(as_main(entry))
+
+    assert exc_info.value.code == 0
+    assert hook.runs == []
+    assert "Sync one day." in capsys.readouterr().out
+
+
+def test_usage_error_exits_with_2(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    argv.append("--bogus")
+
+    async def entry(db: Db) -> None:
+        Db.used = True
+
+    Db.used = False
+    hook = Hook()
+    with pytest.raises(SystemExit) as exc_info:
+        job(hooks=[hook])(as_main(entry))
+
+    assert exc_info.value.code == 2
+    assert not Db.used
+    assert isinstance(hook.runs[0].error, UsageError)
+    stderr = capsys.readouterr().err
+    assert stderr.startswith("usage: ")
+    assert ": error: unrecognized arguments: --bogus\n" in stderr
+
+
+def test_signature_error_is_seen_by_hooks(argv: list[str]) -> None:
+    argv.append("--help")
+
+    async def entry(day: dict[str, int]) -> None:
+        pass
+
+    hook = Hook()
+    with pytest.raises(SystemExit) as exc_info:
+        job(hooks=[hook])(as_main(entry))
+
+    assert exc_info.value.code == 1
+    assert isinstance(hook.runs[0].error, InvalidSignatureError)
+
+
+def test_unresolvable_annotation_is_seen_by_hooks() -> None:
+    async def entry(db: "Missing") -> None:  # type: ignore[name-defined]  # noqa: F821
+        pass
+
+    hook = Hook()
+    with pytest.raises(SystemExit) as exc_info:
+        job(hooks=[hook])(as_main(entry))
+
+    assert exc_info.value.code == 1
+    assert isinstance(hook.runs[0].error, NameError)
+
+
+@pytest.mark.parametrize(
+    ("spec_name", "prog"),
+    [("app.jobs.sync", "python -m app.jobs.sync"), ("app.__main__", "python -m app"), (None, None)],
+)
+def test_prog(monkeypatch: pytest.MonkeyPatch, spec_name: str | None, prog: str | None) -> None:
+    fake_main(monkeypatch, spec_name, "/srv/app/jobs/sync.py")
+
+    assert entrypoint_prog() == prog

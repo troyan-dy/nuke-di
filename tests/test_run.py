@@ -7,7 +7,17 @@ from typing import Any
 
 import pytest
 
-from nuke_di import BackgroundTasks, Client, ConnectError, Dependencies, InitializeDependencyError, Run, Shutdown
+from nuke_di import (
+    BackgroundTasks,
+    Client,
+    ConnectError,
+    Dependencies,
+    InitializeDependencyError,
+    InvalidSignatureError,
+    Run,
+    Shutdown,
+    UsageError,
+)
 from nuke_di.run import RunSettings, run_entrypoint
 
 
@@ -70,6 +80,8 @@ async def start(
     hooks: Sequence[Any] = (),
     grace: float = 10,
     container: Dependencies | None = None,
+    params: dict[str, Any] | None = None,
+    error: BaseException | None = None,
 ) -> Run:
     return await run_entrypoint(
         func,
@@ -78,6 +90,8 @@ async def start(
         hooks=hooks,
         container=container or Dependencies(),
         settings=RunSettings(shutdown_grace=grace),
+        params=params or {},
+        error=error,
     )
 
 
@@ -149,6 +163,47 @@ async def test_invalid_signature_fails_run() -> None:
 
     assert run.exit_code == 1
     assert isinstance(run.error, TypeError)
+
+
+async def test_parameters_reach_entrypoint() -> None:
+    async def entry(db: Db, day: int, tag: str = "x") -> None:
+        events.log.append(f"run:{day}:{tag}")
+
+    run = await start(entry, params={"day": 3})
+
+    assert run.exit_code == 0
+    assert events.log == ["connect:Db", "run:3:x", "disconnect:Db"]
+
+
+async def test_usage_error_fails_run_before_resolution(caplog: pytest.LogCaptureFixture) -> None:
+    error = UsageError("unrecognized arguments: --bogus", "usage: entry")
+    container = Dependencies()
+
+    async def entry(db: Db) -> None:
+        events.log.append("run")
+
+    run = await start(entry, container=container, error=error)
+
+    assert run.exit_code == 2
+    assert run.error is error
+    assert events.log == []
+    assert container.connect_clients == []
+    assert "Run tests.entry failed: unrecognized arguments: --bogus" in caplog.text
+    assert "Traceback" not in caplog.text
+
+
+async def test_kept_signature_error_fails_run(caplog: pytest.LogCaptureFixture) -> None:
+    error = InvalidSignatureError("bad signature")
+
+    async def entry(db: Db) -> None:
+        events.log.append("run")
+
+    run = await start(entry, error=error)
+
+    assert run.exit_code == 1
+    assert run.error is error
+    assert events.log == []
+    assert "InvalidSignatureError: bad signature" in caplog.text
 
 
 async def test_worker_ending_on_its_own_ends_run() -> None:

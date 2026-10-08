@@ -5,6 +5,7 @@ from collections.abc import Callable, Coroutine, Sequence
 from pathlib import Path
 from typing import Any, TypeVar, overload
 
+from nuke_di.cli import HelpRequested, UsageError, build_parser, parse
 from nuke_di.core import DI
 from nuke_di.run import Kind, RunHook, RunSettings, run_entrypoint
 
@@ -60,8 +61,33 @@ def _entrypoint(kind: Kind, func: F | None, hooks: Sequence[RunHook]) -> F | Cal
 
 def execute(func: Callable[..., Coroutine[Any, Any, Any]], *, kind: Kind, hooks: Sequence[RunHook]) -> int:
     settings = RunSettings()
+    params: dict[str, Any] = {}
+    error: BaseException | None = None
+
+    try:
+        parser = build_parser(func, prog=entrypoint_prog())
+        params = parse(parser, sys.argv[1:])
+    except HelpRequested:
+        # Printing the help is not a Run: no hook sees it
+        return 0
+    except UsageError as exc:
+        sys.stderr.write(f"{exc.usage}{parser.prog}: error: {exc}\n")
+        error = exc
+    except Exception as exc:
+        # A broken signature fails the Run, so that hooks see it
+        error = exc
+
     run = asyncio.run(
-        run_entrypoint(func, kind=kind, name=entrypoint_name(func), hooks=hooks, container=DI, settings=settings)
+        run_entrypoint(
+            func,
+            kind=kind,
+            name=entrypoint_name(func),
+            hooks=hooks,
+            container=DI,
+            settings=settings,
+            params=params,
+            error=error,
+        )
     )
     return run.exit_code or 0
 
@@ -73,3 +99,13 @@ def entrypoint_name(func: Callable[..., Any]) -> str:
         # `python -m app.jobs.sync` keeps the importable name in the spec, `python app/jobs/sync.py` has none
         module = main.__spec__.name if main.__spec__ is not None else Path(main.__file__ or "").stem
     return f"{module}.{func.__qualname__}"
+
+
+def entrypoint_prog() -> str | None:
+    """
+    The command shown in `--help`: `python -m <module>`, or the argparse default for a file run by path.
+    """
+    spec = sys.modules["__main__"].__spec__
+    if spec is None:
+        return None
+    return f"python -m {spec.name.removesuffix('.__main__')}"

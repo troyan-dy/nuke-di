@@ -1,6 +1,6 @@
 class InvalidSignatureError(TypeError):
     """
-    A signature contains an argument without a type hint.
+    A signature contains an argument without a type hint, or an entrypoint Parameter that cannot be parsed.
     """
 
 

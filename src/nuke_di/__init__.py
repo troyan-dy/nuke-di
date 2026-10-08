@@ -1,3 +1,4 @@
+from nuke_di.cli import Option, UsageError
 from nuke_di.clients import BackgroundTasks, Shutdown
 from nuke_di.core import DI, Dependencies
 from nuke_di.dataclass import client_dataclass
@@ -18,9 +19,11 @@ __all__ = (
     "InitializeDependencyError",
     "InvalidSignatureError",
     "NotSingletonClient",
+    "Option",
     "Run",
     "RunHook",
     "Shutdown",
+    "UsageError",
     "client_dataclass",
     "job",
     "worker",
