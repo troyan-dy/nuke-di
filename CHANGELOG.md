@@ -6,6 +6,27 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-08
+
+### Added
+
+- `Dependencies.override(cls, new=None)`: a context manager that registers a Replacement for `cls` until the
+  end of the `with` block, across any number of connect / disconnect cycles, and leaves the container
+  flushed. It needs a container without resolved clients on entry. Works with the global `DI`. See
+  "Testing" in the README ([#7](https://github.com/troyan-dy/nuke-di/issues/7)).
+- A pytest plugin, registered through the `pytest11` entry point, with the `di` (a fresh container) and
+  `global_di` (the global `DI`, flushed before and after the test) fixtures. A test that leaves its
+  container connected gets an error at teardown. Nothing is autouse. Turn it off with
+  `pytest -p no:nuke_di`.
+
+### Fixed
+
+- `mock(cls)` after `cls` was resolved silently returned the real client, so a test ran against it while
+  holding what it took for a mock. It now raises `ConnectError`: register Replacements before
+  `resolve()` / `inject()`. Code that relied on the old result gets an error instead of a false pass.
+- `mock(cls, new)` silently ignored `new` when `cls` already had a Replacement; it now raises
+  `ConnectError`. Calling `mock(cls)` again still returns the registered Replacement.
+
 ## [1.2.0] - 2026-10-08
 
 ### Added
@@ -77,7 +98,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/troyan-dy/nuke-di/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/troyan-dy/nuke-di/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/troyan-dy/nuke-di/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/troyan-dy/nuke-di/releases/tag/v1.0.0

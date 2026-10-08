@@ -3,7 +3,7 @@ import contextlib
 import inspect
 import logging
 from collections import OrderedDict, defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, TypeVar, cast, get_type_hints
@@ -43,6 +43,10 @@ class Dependencies:
     connected: bool = field(default=False, init=False)
     # Layer of every client in `connect_clients`, keyed by `id()`: dataclass clients may be unhashable
     _layers: dict[int, int] = field(default_factory=dict, init=False)
+    # Replacements registered by `mock()` and `override()`, a subset of `clients`
+    _replacements: dict[type[NotSingletonClient], NotSingletonClient] = field(default_factory=dict, init=False)
+    # Replacements of the open `override()` blocks, outermost first; `flush()` keeps them
+    _overrides: list[tuple[type[NotSingletonClient], NotSingletonClient]] = field(default_factory=list, init=False)
 
     async def __aenter__(self) -> None:
         await self.connect()
@@ -57,6 +61,16 @@ class Dependencies:
         self.clients = OrderedDict()
         self.connect_clients = []
         self._layers = {}
+        self._replacements = {}
+        for cls, replacement in self._overrides:
+            self._register_replacement(cls, replacement)
+
+    def _abandon(self) -> None:
+        """
+        Forget every client without disconnecting it, for a caller that has no event loop left to do it.
+        """
+        self.connected = False
+        self.flush()
 
     async def connect(self) -> None:
         if self.connected is True:
@@ -198,9 +212,71 @@ class Dependencies:
         return partial(func, **signature)
 
     def mock(self, cls: type[CT], new: CT | None = None) -> CT:
+        """
+        Register a Replacement for `cls`, an autospec mock by default; `flush()` drops it.
+        """
         if self.connected is True:
             raise ConnectError("already connected")
-        return self.clients.setdefault(cls, new or create_autospec(cls))  # type: ignore[return-value]
+
+        name = sname(cls)
+        current = self._replacements.get(cls)
+        if current is not None:
+            if new is not None and new is not current:
+                raise ConnectError(f"{name} already has a replacement")
+            return cast(CT, current)
+        # Consumers resolved before would keep the real client while the caller holds the Replacement
+        if self._is_resolved(cls):
+            raise ConnectError(f"{name} is already resolved, call mock() before resolve() or inject()")
+
+        self._register_replacement(cls, create_autospec(cls) if new is None else new)
+        return cast(CT, self._replacements[cls])
+
+    @contextlib.contextmanager
+    def override(self, cls: type[CT], new: CT | None = None) -> Iterator[CT]:
+        """
+        Register a Replacement for `cls` that lasts until the end of the block, `flush()` included.
+
+        The container must have no resolved clients on entry and is flushed on exit,
+        so nothing resolved with the Replacement outlives the block.
+        """
+        if self.connected is True:
+            raise ConnectError("already connected")
+
+        name = sname(cls)
+        if self.connect_clients:
+            # Flushing them on exit would silently drop what the caller resolved before the block
+            resolved = ", ".join(sorted(map(sname, self.connect_clients)))
+            raise ConnectError(f"override({name}) needs a container without resolved clients, found: {resolved}")
+        if cls in self._replacements:
+            raise ConnectError(f"{name} already has a replacement")
+
+        replacement = self.mock(cls, new)
+        entry: tuple[type[NotSingletonClient], NotSingletonClient] = (cls, replacement)
+        self._overrides.append(entry)
+        try:
+            yield replacement
+        except BaseException:
+            # The exception of the block matters more than the state of the container
+            self._close_override(entry)
+            raise
+
+        self._close_override(entry)
+        if self.connected is True:
+            raise ConnectError(f"override({name}) exited while the container is connected")
+
+    def _close_override(self, entry: tuple[type[NotSingletonClient], NotSingletonClient]) -> None:
+        self._overrides = [other for other in self._overrides if other is not entry]
+        # A connected container is flushed by its disconnect()
+        if self.connected is False:
+            self.flush()
+
+    def _is_resolved(self, cls: type[NotSingletonClient]) -> bool:
+        # A NotSingletonClient is never cached in `clients`, only its instances are in `connect_clients`
+        return cls in self.clients or any(type(client) is cls for client in self.connect_clients)
+
+    def _register_replacement(self, cls: type[NotSingletonClient], replacement: NotSingletonClient) -> None:
+        self.clients[cls] = replacement
+        self._replacements[cls] = replacement
 
     def _inspect(self, func: Callable) -> dict[str, NotSingletonClient]:
         logger.debug('Parsing signature of func "%s"', sname(func))
