@@ -112,6 +112,9 @@ class ClientRouter(APIRouter):
         _include(self, router, kwargs, self._route_cls, "this router")
         super().include_router(router, **kwargs)
 
+    def add_api_websocket_route(self, path: str, endpoint: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+        _add_websocket(self, super().add_api_websocket_route, self._route_cls, path, endpoint, args, kwargs)
+
 
 def setup(app: FastAPI, container: Dependencies = DI) -> None:
     """
@@ -141,6 +144,13 @@ def setup(app: FastAPI, container: Dependencies = DI) -> None:
         include_router(router, **kwargs)
 
     app.router.include_router = include  # type: ignore[method-assign]
+    # FastAPI builds websocket routes without the route class
+    add_websocket = app.router.add_api_websocket_route
+
+    def add_api_websocket_route(path: str, endpoint: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+        _add_websocket(app.router, add_websocket, route_cls, path, endpoint, args, kwargs)
+
+    app.router.add_api_websocket_route = add_api_websocket_route  # type: ignore[method-assign]
 
     @asynccontextmanager
     async def lifespan(app: Any) -> AsyncIterator[Any]:
@@ -181,6 +191,25 @@ def _include(
         binding for depends in kwargs.get("dependencies") or () for binding in _bind(depends.dependency, route_cls)
     ]
     owner.nuke_di_tracked.includes.append((router, bindings))  # type: ignore[attr-defined]
+
+
+def _add_websocket(
+    router: APIRouter,
+    add: Callable[..., None],
+    route_cls: type[_ContainerRoute],
+    path: str,
+    endpoint: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> None:
+    # Before FastAPI reads the signatures, which happens in APIWebSocketRoute.__init__; the dependencies of
+    # the router itself are tracked already
+    bindings = _bind(endpoint, route_cls)
+    for depends in kwargs.get("dependencies") or ():
+        bindings += _bind(depends.dependency, route_cls)
+    add(path, endpoint, *args, **kwargs)
+    # The route FastAPI has just appended
+    router.routes[-1].nuke_di_bindings = bindings  # type: ignore[attr-defined]
 
 
 def _router_bindings(router: APIRouter) -> list[_Binding]:
