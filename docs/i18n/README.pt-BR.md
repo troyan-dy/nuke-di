@@ -360,8 +360,9 @@ Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
 ```
 
 `deps.timings` guarda um `ClientTiming` por cliente do último `connect()`, na ordem de
-conexão. Ele sobrevive ao `disconnect()`, então pode ser lido depois que o contêiner parou,
-por exemplo no fim de um lifespan do FastAPI. Um worker ou um job recebe a mesma lista em
+conexão. Ele sobrevive ao `disconnect()`, então pode ser lido depois que o contêiner parou.
+Em um app FastAPI, o lifespan que você passa para `FastAPI()` roda dentro do contêiner
+conectado, então ele vê os tempos de conexão. Um worker ou um job recebe a mesma lista em
 [`Run.clients`](#startup-metrics-and-structured-logs).
 
 | Campo de `ClientTiming` | Valor |
@@ -369,7 +370,7 @@ por exemplo no fim de um lifespan do FastAPI. Um worker ou um job recebe a mesma
 | `name`               | O nome da classe do cliente |
 | `layer`              | A [camada](#layers) do cliente |
 | `connect`            | Segundos dentro de `connect()`, sem contar a espera por `CONNECT_CONCURRENCY`; `None` se `connect()` nunca rodou |
-| `connect_outcome`    | `"ok"`, `"failed"`, `"timed_out"`, `"cancelled"`, ou `None` se a camada do cliente nunca foi alcançada |
+| `connect_outcome`    | `"ok"`, `"failed"`, `"timed_out"`, `"cancelled"`, ou `None` se `connect()` nunca começou |
 | `disconnect`, `disconnect_outcome` | O mesmo para `disconnect()`; `None` até o cliente se desconectar |
 
 Quando um cliente não consegue se conectar, os clientes da camada dele que ainda estão se
@@ -1131,11 +1132,11 @@ $ python -m app.jobs.startup
 {"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
 postgres: connected
 warehouse: connected
-{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Shutdown 0.00s, Postgres 0.00s, Warehouse 0.00s)", "duration": 0.00017699995078146458}
+{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00015945796621963382}
 startup: done
 postgres: disconnected
 warehouse: disconnected
-{"level": "INFO", "message": "Run app.jobs.startup.startup finished with exit code 0 in 0.001s", "run": "app.jobs.startup.startup", "duration": 0.001302}
+{"level": "INFO", "message": "Run app.jobs.startup.startup finished with exit code 0 in 0.001s", "run": "app.jobs.startup.startup", "duration": 0.001171}
 metric: Shutdown connect=0.000s ok
 metric: BackgroundTasks connect=0.000s ok
 metric: Postgres connect=0.000s ok
@@ -1144,7 +1145,7 @@ metric: Warehouse connect=0.000s ok
 
 | Campo      | Presente em                                                                   |
 |------------|-------------------------------------------------------------------------------|
-| `run`      | Cada registro sobre um worker ou um job: o nome da execução                   |
+| `run`      | Cada registro feito dentro de um worker ou um job, incluindo os do contêiner: o nome da execução |
 | `client`   | Cada registro sobre um cliente: resolução, conexão, desconexão, falhas        |
 | `layer`    | Cada registro sobre um cliente que se conecta ou desconecta, e `Connecting layer` |
 | `duration` | Segundos: um cliente conectado ou desconectado, o resumo de inicialização, uma execução encerrada |

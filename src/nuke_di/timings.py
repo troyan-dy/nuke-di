@@ -10,7 +10,7 @@ class ClientTiming:
     How one client's connect() and disconnect() went in the last connect of its container.
 
     A phase that never started has no duration and no outcome: e.g. a client of a layer
-    that was not reached because a lower layer failed.
+    that was not reached because a lower layer failed, or one cancelled while waiting for CONNECT_CONCURRENCY.
     """
 
     name: str

@@ -8,7 +8,7 @@ from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, TypeVar, Union, cast, get_args, get_origin, get_type_hints
+from typing import Any, Literal, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
 from nuke_di.errors import (
     CircularDependencyError,
@@ -17,8 +17,9 @@ from nuke_di.errors import (
     InitializeDependencyError,
     InvalidSignatureError,
 )
+from nuke_di.logs import fields
 from nuke_di.options import DependenciesSettings
-from nuke_di.timings import ClientTiming
+from nuke_di.timings import ClientTiming, Outcome
 from nuke_di.types import Client, NotSingletonClient
 from nuke_di.utils import isa, sname
 
@@ -106,7 +107,9 @@ class Dependencies:
 
         try:
             for number, layer in enumerate(layers):
-                logger.debug("Connecting layer %d: %s", number, ", ".join(map(sname, layer)), extra={"layer": number})
+                logger.debug(
+                    "Connecting layer %d: %s", number, ", ".join(map(sname, layer)), extra=fields(layer=number)
+                )
                 # The first failure cancels the rest of the layer
                 async with asyncio.TaskGroup() as group:
                     for client in layer:
@@ -135,7 +138,7 @@ class Dependencies:
             _count(layers, "layer"),
             duration,
             ", ".join(f"{timing.name} {timing.connect or 0:.2f}s" for timing in slowest),
-            extra={"duration": duration},
+            extra=fields(duration=duration),
         )
 
         timeout = self.settings.connect_timeout
@@ -146,7 +149,7 @@ class Dependencies:
                     timing.name,
                     timing.connect,
                     timeout,
-                    extra=_extra(timing, timing.connect),
+                    extra=_fields(timing, timing.connect),
                 )
 
     async def _connect_client(
@@ -156,34 +159,23 @@ class Dependencies:
         name = timing.name
         try:
             async with limiter:
-                logger.debug("Connecting client %s", name, extra=_extra(timing))
-                started = time.perf_counter()
-                try:
+                logger.debug("Connecting client %s", name, extra=_fields(timing))
+                with _measure(timing, "connect"):
                     await asyncio.wait_for(client.connect(), timeout=self.settings.connect_timeout)
-                finally:
-                    timing.connect = time.perf_counter() - started
             connected.append(client)
-            timing.connect_outcome = "ok"
-            logger.debug("Connected client %s in %.3fs", name, timing.connect, extra=_extra(timing, timing.connect))
+            logger.debug("Connected client %s in %.3fs", name, timing.connect, extra=_fields(timing, timing.connect))
 
         except TimeoutError as exc:
-            timing.connect_outcome = "timed_out"
-            logger.exception("Timeout occurred connecting client %s", name, extra=_extra(timing, timing.connect))
+            logger.exception("Timeout occurred connecting client %s", name, extra=_fields(timing, timing.connect))
             error: ConnectError = ConnectTimeoutError(f"Timeout occurred connecting client {name}")
             error.__cause__ = exc
             raise _ClientConnectError(error) from exc
 
         except Exception as exc:
-            timing.connect_outcome = "failed"
-            logger.exception("Error occurred connecting client %s", name, extra=_extra(timing, timing.connect))
+            logger.exception("Error occurred connecting client %s", name, extra=_fields(timing, timing.connect))
             error = ConnectError(f"Error occurred connecting client {name}")
             error.__cause__ = exc
             raise _ClientConnectError(error) from exc
-
-        except asyncio.CancelledError:
-            # Another client of the layer failed, or the whole connect was cancelled
-            timing.connect_outcome = "cancelled"
-            raise
 
     async def disconnect(self) -> None:
         if self.connected is False:
@@ -192,7 +184,7 @@ class Dependencies:
         await self._disconnect_layers(self.connect_clients)
 
     async def _rollback(self, connected: list[NotSingletonClient]) -> None:
-        logger.debug("Connect failed, disconnecting %d connected clients", len(connected))
+        logger.debug("Connect failed, disconnecting %d connected clients", len(connected), extra=fields())
         await self._disconnect_layers(connected)
 
     async def _disconnect_layers(self, clients: list[NotSingletonClient]) -> None:
@@ -209,26 +201,17 @@ class Dependencies:
         name = timing.name
         try:
             async with limiter:
-                logger.debug("Disconnecting client %s", name, extra=_extra(timing))
-                started = time.perf_counter()
-                try:
+                logger.debug("Disconnecting client %s", name, extra=_fields(timing))
+                with _measure(timing, "disconnect"):
                     await asyncio.wait_for(client.disconnect(), timeout=self.settings.disconnect_timeout)
-                finally:
-                    timing.disconnect = time.perf_counter() - started
-            timing.disconnect_outcome = "ok"
             logger.debug(
-                "Disconnected client %s in %.3fs", name, timing.disconnect, extra=_extra(timing, timing.disconnect)
+                "Disconnected client %s in %.3fs", name, timing.disconnect, extra=_fields(timing, timing.disconnect)
             )
         except TimeoutError:
-            timing.disconnect_outcome = "timed_out"
-            logger.exception("Timeout occurred disconnecting client %s", name, extra=_extra(timing, timing.disconnect))
+            logger.exception("Timeout occurred disconnecting client %s", name, extra=_fields(timing, timing.disconnect))
         except Exception:
             # The client failed, but the rest still have to be stopped
-            timing.disconnect_outcome = "failed"
-            logger.exception("Failed to disconnect client %s", name, extra=_extra(timing, timing.disconnect))
-        except asyncio.CancelledError:
-            timing.disconnect_outcome = "cancelled"
-            raise
+            logger.exception("Failed to disconnect client %s", name, extra=_fields(timing, timing.disconnect))
 
     def _limiter(self) -> Limiter:
         if self.settings.connect_concurrency == 0:
@@ -259,7 +242,7 @@ class Dependencies:
             raise CircularDependencyError(f"Circular dependency: {self._path(cls)}")
 
         name = sname(cls)
-        logger.debug('Resolving dependency "%s"', name, extra={"client": name})
+        logger.debug('Resolving dependency "%s"', name, extra=fields(client=name))
 
         self._resolving.append(cls)
         try:
@@ -270,7 +253,7 @@ class Dependencies:
         try:
             inst = cls(**init)
         except Exception as e:
-            logger.exception("Error occurred during initialize client %s", name, extra={"client": name})
+            logger.exception("Error occurred during initialize client %s", name, extra=fields(client=name))
             raise InitializeDependencyError(f"Error occurred during initialize client {name}") from e
 
         if isclient(cls):
@@ -418,7 +401,7 @@ class Dependencies:
         self._replacements[cls] = replacement
 
     def _inspect(self, func: Callable) -> dict[str, NotSingletonClient]:
-        logger.debug('Parsing signature of func "%s"', sname(func))
+        logger.debug('Parsing signature of func "%s"', sname(func), extra=fields())
         signature: dict[str, NotSingletonClient] = {}
 
         # get_type_hints silently skips unannotated arguments, so they are looked up in the signature
@@ -443,14 +426,33 @@ class Dependencies:
         return signature
 
 
-def _extra(timing: ClientTiming, duration: float | None = None) -> dict[str, Any]:
+def _fields(timing: ClientTiming, duration: float | None = None) -> dict[str, Any]:
     """
-    The structured fields of a log record about one client, for `logging`'s `extra=`.
+    The structured fields of a log record about one client.
     """
-    extra: dict[str, Any] = {"client": timing.name, "layer": timing.layer}
-    if duration is not None:
-        extra["duration"] = duration
-    return extra
+    return fields(client=timing.name, layer=timing.layer, duration=duration)
+
+
+@contextlib.contextmanager
+def _measure(timing: ClientTiming, phase: Literal["connect", "disconnect"]) -> Iterator[None]:
+    """
+    Record how long the block took and how it ended as the `phase` of `timing`.
+    """
+    started = time.perf_counter()
+    outcome: Outcome = "failed"
+    try:
+        yield
+        outcome = "ok"
+    except TimeoutError:
+        outcome = "timed_out"
+        raise
+    except asyncio.CancelledError:
+        # Another client of the layer failed, or the whole connect or disconnect was cancelled
+        outcome = "cancelled"
+        raise
+    finally:
+        setattr(timing, phase, time.perf_counter() - started)
+        setattr(timing, f"{phase}_outcome", outcome)
 
 
 def _count(number: int, noun: str) -> str:

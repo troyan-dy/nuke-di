@@ -18,8 +18,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - An `INFO` summary after a successful connect, e.g. `Connected 12 clients in 3 layers in 1.84s (slowest: Kafka
   1.52s, Postgres 0.21s, Redis 0.05s)`, and a `WARNING` for every client that used more than half of
   `CONNECT_TIMEOUT_SECONDS`. `DEBUG` records of a connected or disconnected client now carry its duration.
-- Structured fields on the log records of `nuke_di`, for `logging`'s `extra=`: `client`, `layer`, `duration` and,
-  on the records of a worker or a job, `run`. The container does not know the Run, so its own records have no `run`.
+- Structured fields on every log record of `nuke_di`, for `logging`'s `extra=`: `client`, `layer`, `duration` and,
+  on every record made inside a worker or a job (the container's and background tasks' included), `run`.
 
 ### Changed
 

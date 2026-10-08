@@ -1,13 +1,16 @@
+import ast
 import asyncio
 import logging
 import re
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from nuke_di import Client, ClientTiming, ConnectError, Dependencies, DependenciesSettings, Run
+import nuke_di
+from nuke_di import BackgroundTasks, Client, ClientTiming, ConnectError, Dependencies, DependenciesSettings, Run
 from nuke_di.run import RunSettings, run_entrypoint
 
 
@@ -326,20 +329,53 @@ async def test_run_failed_before_connect_has_no_timings() -> None:
     assert run.clients == []
 
 
-async def test_run_records_carry_run_name(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.INFO, logger="nuke_di")
+async def test_records_of_a_run_carry_its_name(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG, logger="nuke_di")
 
-    async def entry() -> None:
-        pass
+    async def entry(pg: Postgres, tasks: BackgroundTasks) -> None:
+        async def broken() -> None:
+            raise RuntimeError("boom")
+
+        tasks.spawn(broken(), name="broken")
+        await asyncio.sleep(0.1)
 
     await start(entry, Dependencies())
 
-    records = [record for record in caplog.records if record.name == "nuke_di.run"]
-    assert records
-    for record in records:
-        assert record.run == "tests.entry"  # type: ignore[attr-defined]
-    [finished] = [record for record in records if "finished" in record.getMessage()]
+    messages = {record.getMessage(): record for record in caplog.records}
+    assert "Background task broken failed" in messages
+    assert "Connected client Postgres in" in caplog.text
+    for record in caplog.records:
+        assert record.run == "tests.entry", record.getMessage()  # type: ignore[attr-defined]
+    [finished] = [record for record in caplog.records if "finished with exit code" in record.getMessage()]
     assert finished.duration >= 0  # type: ignore[attr-defined]
+
+
+async def test_records_outside_a_run_have_no_run(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG, logger="nuke_di")
+    dep = Dependencies()
+    dep.resolve(Postgres)
+
+    async with dep:
+        pass
+
+    assert caplog.records
+    assert not any(hasattr(record, "run") for record in caplog.records)
+
+
+def test_every_log_call_passes_structured_fields() -> None:
+    package = Path(nuke_di.__file__).parent
+    calls = [
+        (path.name, node.lineno)
+        for path in package.glob("*.py")
+        for node in ast.walk(ast.parse(path.read_text()))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "logger"
+        and not any(keyword.arg == "extra" for keyword in node.keywords)
+    ]
+
+    assert calls == []
 
 
 def test_import_skips_unittest_and_argparse() -> None:
@@ -348,3 +384,20 @@ def test_import_skips_unittest_and_argparse() -> None:
     run = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)  # noqa: S603 - fixed code
 
     assert run.stdout.strip() == "[]"
+
+
+async def test_client_cancelled_while_waiting_for_a_slot_never_started() -> None:
+    dep = Dependencies(settings=DependenciesSettings(connect_concurrency=1))
+    dep.resolve(Slow)
+    dep.resolve(Sleepy)
+
+    task = asyncio.create_task(dep.connect())
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    timings = by_name(dep.timings)
+    assert timings["Slow"].connect_outcome == "cancelled"
+    assert timings["Sleepy"].connect is None
+    assert timings["Sleepy"].connect_outcome is None

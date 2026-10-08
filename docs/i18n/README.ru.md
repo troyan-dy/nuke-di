@@ -361,7 +361,8 @@ Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
 
 `deps.timings` хранит по одному `ClientTiming` на каждый клиент последнего `connect()`, в
 порядке подключения. Список переживает `disconnect()`, поэтому его можно прочитать после
-остановки контейнера, например в конце lifespan FastAPI. Воркер или джоба получают тот же
+остановки контейнера. В приложении FastAPI lifespan, переданный в `FastAPI()`, работает внутри
+подключённого контейнера и видит тайминги подключения. Воркер или джоба получают тот же
 список в [`Run.clients`](#startup-metrics-and-structured-logs).
 
 | Поле `ClientTiming`  | Значение |
@@ -369,7 +370,7 @@ Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
 | `name`               | Имя класса клиента |
 | `layer`              | [Слой](#layers) клиента |
 | `connect`            | Секунды внутри `connect()` без ожидания `CONNECT_CONCURRENCY`; `None`, если `connect()` не запускался |
-| `connect_outcome`    | `"ok"`, `"failed"`, `"timed_out"`, `"cancelled"` или `None`, если до слоя клиента дело не дошло |
+| `connect_outcome`    | `"ok"`, `"failed"`, `"timed_out"`, `"cancelled"` или `None`, если `connect()` не начинался |
 | `disconnect`, `disconnect_outcome` | То же для `disconnect()`; `None`, пока клиент не отключился |
 
 Когда клиент не может подключиться, клиенты его слоя, которые ещё подключаются, получают
@@ -1134,11 +1135,11 @@ $ python -m app.jobs.startup
 {"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
 postgres: connected
 warehouse: connected
-{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Shutdown 0.00s, Postgres 0.00s, Warehouse 0.00s)", "duration": 0.00017699995078146458}
+{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00015945796621963382}
 startup: done
 postgres: disconnected
 warehouse: disconnected
-{"level": "INFO", "message": "Run app.jobs.startup.startup finished with exit code 0 in 0.001s", "run": "app.jobs.startup.startup", "duration": 0.001302}
+{"level": "INFO", "message": "Run app.jobs.startup.startup finished with exit code 0 in 0.001s", "run": "app.jobs.startup.startup", "duration": 0.001171}
 metric: Shutdown connect=0.000s ok
 metric: BackgroundTasks connect=0.000s ok
 metric: Postgres connect=0.000s ok
@@ -1147,7 +1148,7 @@ metric: Warehouse connect=0.000s ok
 
 | Поле       | Где есть                                                                      |
 |------------|-------------------------------------------------------------------------------|
-| `run`      | Каждая запись о воркере или джобе: имя запуска                                |
+| `run`      | Каждая запись внутри воркера или джобы, включая записи контейнера: имя запуска |
 | `client`   | Каждая запись об одном клиенте: разрешение, подключение, отключение, ошибки   |
 | `layer`    | Каждая запись о подключении или отключении клиента и `Connecting layer`       |
 | `duration` | Секунды: подключённый или отключённый клиент, сводка старта, завершённый запуск |

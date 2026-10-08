@@ -341,7 +341,8 @@ Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
 ```
 
 `deps.timings` は直近の `connect()` のクライアントごとに `ClientTiming` を接続順に 1 つずつ保持します。
-`disconnect()` の後も残るので、コンテナの停止後、たとえば FastAPI の lifespan の最後に読み取れます。
+`disconnect()` の後も残るので、コンテナの停止後にも読み取れます。FastAPI アプリでは、`FastAPI()` に渡した
+lifespan は接続済みのコンテナの内側で動くので、接続時間を参照できます。
 ワーカーやジョブは同じリストを [`Run.clients`](#startup-metrics-and-structured-logs) で受け取ります。
 
 | `ClientTiming` のフィールド | 値 |
@@ -349,7 +350,7 @@ Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
 | `name`               | クライアントのクラス名 |
 | `layer`              | クライアントの[レイヤー](#layers) |
 | `connect`            | `connect()` にかかった秒数。`CONNECT_CONCURRENCY` の待ち時間は含みません。`connect()` が一度も実行されなかった場合は `None` |
-| `connect_outcome`    | `"ok"`、`"failed"`、`"timed_out"`、`"cancelled"`。クライアントのレイヤーに到達しなかった場合は `None` |
+| `connect_outcome`    | `"ok"`、`"failed"`、`"timed_out"`、`"cancelled"`。`connect()` が始まらなかった場合は `None` |
 | `disconnect`、`disconnect_outcome` | `disconnect()` について同じもの。クライアントが切断されるまでは `None` |
 
 あるクライアントの接続が失敗すると、同じレイヤーでまだ接続中のクライアントは `"cancelled"` になり、
@@ -1057,11 +1058,11 @@ $ python -m app.jobs.startup
 {"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
 postgres: connected
 warehouse: connected
-{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Shutdown 0.00s, Postgres 0.00s, Warehouse 0.00s)", "duration": 0.00017699995078146458}
+{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00015945796621963382}
 startup: done
 postgres: disconnected
 warehouse: disconnected
-{"level": "INFO", "message": "Run app.jobs.startup.startup finished with exit code 0 in 0.001s", "run": "app.jobs.startup.startup", "duration": 0.001302}
+{"level": "INFO", "message": "Run app.jobs.startup.startup finished with exit code 0 in 0.001s", "run": "app.jobs.startup.startup", "duration": 0.001171}
 metric: Shutdown connect=0.000s ok
 metric: BackgroundTasks connect=0.000s ok
 metric: Postgres connect=0.000s ok
@@ -1070,7 +1071,7 @@ metric: Warehouse connect=0.000s ok
 
 | フィールド | 付くレコード                                                                  |
 |------------|-------------------------------------------------------------------------------|
-| `run`      | ワーカーやジョブに関するすべてのレコード：実行の名前                          |
+| `run`      | ワーカーやジョブの内側で出るすべてのレコード（コンテナのものを含む）：実行の名前 |
 | `client`   | 1 つのクライアントに関するすべてのレコード：解決、接続、切断、失敗            |
 | `layer`    | クライアントの接続や切断に関するすべてのレコードと `Connecting layer`         |
 | `duration` | 秒数：接続または切断したクライアント、起動の要約、終了した実行                |

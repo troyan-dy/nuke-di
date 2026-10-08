@@ -351,7 +351,8 @@ Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
 ```
 
 `deps.timings` 按连接顺序为最近一次 `connect()` 的每个客户端保存一个 `ClientTiming`。
-它在 `disconnect()` 之后依然保留，因此可以在容器停止后读取，例如在 FastAPI lifespan 的末尾。
+它在 `disconnect()` 之后依然保留，因此可以在容器停止后读取。在 FastAPI 应用中，传给 `FastAPI()`
+的 lifespan 运行在已连接的容器内部，因此能看到连接耗时。
 worker 或 job 会在 [`Run.clients`](#startup-metrics-and-structured-logs) 中得到同一个列表。
 
 | `ClientTiming` 字段  | 值 |
@@ -359,7 +360,7 @@ worker 或 job 会在 [`Run.clients`](#startup-metrics-and-structured-logs) 中�
 | `name`               | 客户端的类名 |
 | `layer`              | 客户端所在的[层](#layers) |
 | `connect`            | 在 `connect()` 中花费的秒数，不含等待 `CONNECT_CONCURRENCY` 的时间；`connect()` 从未运行时为 `None` |
-| `connect_outcome`    | `"ok"`、`"failed"`、`"timed_out"`、`"cancelled"`；客户端所在的层从未开始时为 `None` |
+| `connect_outcome`    | `"ok"`、`"failed"`、`"timed_out"`、`"cancelled"`；`connect()` 从未开始时为 `None` |
 | `disconnect`、`disconnect_outcome` | `disconnect()` 的对应值；客户端断开之前为 `None` |
 
 当某个客户端连接失败时，同一层中仍在连接的客户端为 `"cancelled"`，更高的层保持 `None`，
@@ -1113,11 +1114,11 @@ $ python -m app.jobs.startup
 {"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
 postgres: connected
 warehouse: connected
-{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Shutdown 0.00s, Postgres 0.00s, Warehouse 0.00s)", "duration": 0.00017699995078146458}
+{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00015945796621963382}
 startup: done
 postgres: disconnected
 warehouse: disconnected
-{"level": "INFO", "message": "Run app.jobs.startup.startup finished with exit code 0 in 0.001s", "run": "app.jobs.startup.startup", "duration": 0.001302}
+{"level": "INFO", "message": "Run app.jobs.startup.startup finished with exit code 0 in 0.001s", "run": "app.jobs.startup.startup", "duration": 0.001171}
 metric: Shutdown connect=0.000s ok
 metric: BackgroundTasks connect=0.000s ok
 metric: Postgres connect=0.000s ok
@@ -1126,7 +1127,7 @@ metric: Warehouse connect=0.000s ok
 
 | 字段       | 出现在                                                                        |
 |------------|-------------------------------------------------------------------------------|
-| `run`      | 关于 worker 或 job 的每条记录：运行的名称                                     |
+| `run`      | 在 worker 或 job 内产生的每条记录，包括容器的记录：运行的名称                 |
 | `client`   | 关于单个客户端的每条记录：解析、连接、断开、失败                              |
 | `layer`    | 关于客户端连接或断开的每条记录，以及 `Connecting layer`                       |
 | `duration` | 秒数：已连接或已断开的客户端、启动汇总、已结束的运行                          |
