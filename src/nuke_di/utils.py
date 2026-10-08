@@ -1,20 +1,6 @@
 import inspect
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable
 from typing import Any
-
-
-def iteritems(col: Any) -> Any:
-    if isinstance(col, dict):
-        return col.items()
-    return col
-
-
-def select_values(pred: Callable[[Any], bool], col: Iterable) -> Iterator:
-    return (i for i in iteritems(col) if pred(i[1]))
-
-
-def walk_values(prim: Callable[[Any], Any], col: Iterable) -> Iterator:
-    return ((k, prim(v)) for k, v in iteritems(col))
 
 
 def sname(obj: Any) -> str:

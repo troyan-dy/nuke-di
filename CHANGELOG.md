@@ -6,6 +6,31 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-08
+
+### Added
+
+- `CircularDependencyError`, a subclass of `InvalidSignatureError`, names the cycle:
+  `Circular dependency: Orders -> Payments -> Orders`
+  ([#6](https://github.com/troyan-dy/nuke-di/issues/6)).
+
+### Changed
+
+- Resolution checks a client's `__init__` before calling it. A required argument without a type hint,
+  of a type that is not a client (e.g. a `Protocol`), of an optional client (`Client | None`), or a
+  positional-only client now raises `InvalidSignatureError` naming the argument and the resolution path,
+  e.g. `(resolving Checkout -> Profiles)`. Before, `__init__` was called anyway and failed with an
+  `InitializeDependencyError` wrapping `TypeError: missing 1 required positional argument`.
+- A type hint that cannot be evaluated, in a client's `__init__` or in a function given to `inject()`,
+  raises `InvalidSignatureError` instead of a bare `NameError`.
+- These signatures failed before too, only with another exception. Code that caught
+  `InitializeDependencyError` or `NameError` for them should catch `InvalidSignatureError`; in a worker or
+  a job the exit code stays `1`.
+
+### Fixed
+
+- Clients that depend on each other in a cycle raised `RecursionError` with a thousand-frame traceback.
+
 ## [1.3.0] - 2026-10-08
 
 ### Added
@@ -98,7 +123,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/troyan-dy/nuke-di/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/troyan-dy/nuke-di/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/troyan-dy/nuke-di/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/troyan-dy/nuke-di/compare/v1.0.0...v1.1.0
