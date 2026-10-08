@@ -25,6 +25,7 @@ and has no runtime dependencies.
 - [Clients](#clients): [singletons](#client-and-notsingletonclient), [lifecycle](#connect-and-disconnect), [dataclasses](#dataclass-clients), [layers](#layers), [connect failures](#when-a-client-fails-to-connect), [resolution errors](#when-the-tree-cannot-be-built)
 - [The container](#the-container)
 - [Workers and jobs](#workers-and-jobs): [a job](#your-first-job), [parameters](#parameters), [a worker](#your-first-worker), [grace period](#grace-period), [background tasks](#background-tasks), [exit codes](#exit-codes), [hooks](#hooks), [Kubernetes](#running-in-kubernetes)
+- [FastAPI](#fastapi)
 - [Testing](#testing)
 - [Configuration](#configuration) · [Errors](#errors) · [Development](#development)
 
@@ -1041,6 +1042,224 @@ A one-off backfill is the same image with other parameters:
 kubectl run sync-backfill --rm -it --restart=Never --image=registry.example.com/app:1.0 \
   --command -- python -m app.jobs.sync --day 2026-09-30 --mode FULL
 ```
+
+## FastAPI
+
+A FastAPI path operation takes a client the way a job does, by its type hint. Nothing else is
+written per handler: no `Depends`, no `inject()`.
+
+```bash
+pip install "nuke-di[fastapi]"
+```
+
+Requires FastAPI 0.100 or newer. The examples share one module of clients:
+
+```python
+# app/clients.py
+from nuke_di import Client
+
+
+class Database(Client):
+    async def connect(self) -> None:
+        print("database: connected")
+
+    async def disconnect(self) -> None:
+        print("database: disconnected")
+
+    async def fetch_user(self, user_id: int) -> str:
+        return f"user-{user_id}"
+
+
+class UserService(Client):
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def greet(self, user_id: int) -> str:
+        return f"Hello, {await self._db.fetch_user(user_id)}!"
+```
+
+The API:
+
+```python
+# app/api.py
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Header
+
+from app.clients import Database, UserService
+from nuke_di.fastapi import ClientRouter, setup
+
+app = FastAPI()
+setup(app)  # before the routes: clients connect on startup, disconnect on shutdown
+
+
+@app.get("/users/{user_id}")
+async def get_user(user_id: int, users: UserService) -> str:
+    return await users.greet(user_id)
+
+
+async def current_user(x_user_id: Annotated[int, Header()], db: Database) -> str:
+    return await db.fetch_user(x_user_id)
+
+
+account = ClientRouter(prefix="/me")
+
+
+@account.get("")
+async def me(user: Annotated[str, Depends(current_user)]) -> str:
+    return user
+
+
+app.include_router(account)
+```
+
+```console
+$ uvicorn app.api:app
+INFO:     Started server process [80948]
+INFO:     Waiting for application startup.
+database: connected
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:54682 - "GET /users/42 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54684 - "GET /me HTTP/1.1" 200 OK
+^C
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+database: disconnected
+INFO:     Application shutdown complete.
+INFO:     Finished server process [80948]
+```
+
+```console
+$ curl localhost:8000/users/42
+"Hello, user-42!"
+$ curl localhost:8000/me -H "X-User-Id: 7"
+"user-7"
+```
+
+What happened:
+
+1. `setup(app)` made every route declared on `app` afterwards fill its client arguments from the
+   global `DI`, and wrapped the app's lifespan.
+2. `@app.get` saw `users: UserService` and only registered it; nothing was built on import.
+3. On startup the lifespan resolved the registered clients and connected them, layer by layer. On
+   shutdown it disconnected them.
+4. A request to `/users/42` got the connected `UserService`. `/me` went through the dependency
+   `current_user`, which takes `db: Database` the same way.
+
+The rules:
+
+- **Where clients are filled.** In the arguments of path operations and of every dependency function
+  they use, at any depth, including `dependencies=` of the route, of its router and of the app. An
+  argument is a client when its type hint is a client, also inside `Annotated[UserService, ...]`
+  without a `Depends`. Every other argument is FastAPI's: path, query, header, body, `Depends`.
+- **Routers.** Create them with `ClientRouter(...)`, which takes the same arguments as `APIRouter`.
+  `APIRouter(route_class=ClientRoute)` works too, except for the dependencies a router applies to
+  the routers it includes (its own `dependencies=` and those of its `include_router()`): only
+  `ClientRouter` fills clients there. For another container, use
+  `setup(app, container)` and `ClientRouter(container=container)`.
+- **Call `setup(app)` before the routes.** A route with a client declared before it fails at once
+  with the `TypeError` described [below](#not-supported).
+- **Instances.** As with `inject()`, a `Client` is one instance per container, and a
+  `NotSingletonClient` is one instance per argument that declares it, not one per request.
+- **Lifespan.** The app's own `lifespan=` runs inside: its startup code sees connected clients, and
+  its shutdown code runs before they disconnect. On shutdown `Shutdown` is set and
+  `BackgroundTasks` are stopped, if the app uses them, before the clients disconnect, as in a
+  worker. FastAPI's own `BackgroundTasks` is a different class and is not a client.
+- **The function stays a function.** Its signature now shows `Annotated[UserService, Depends(...)]`
+  to FastAPI, but calling it directly with a client, e.g. in a unit test, works as before.
+
+**Testing.** Importing the app builds nothing, so a test replaces a client before `TestClient`
+starts the app, with [`override()`](#testing) or the `global_di` fixture:
+
+```python
+# tests/test_api.py
+from fastapi.testclient import TestClient
+
+from app.api import app
+from app.clients import Database
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+def test_get_user() -> None:
+    with DI.override(Database, FakeDatabase()), TestClient(app) as client:
+        assert client.get("/users/1").json() == "Hello, alice!"
+        assert client.get("/me", headers={"X-User-Id": "7"}).json() == "alice"
+```
+
+```console
+$ pytest -q tests/test_api.py
+.                                                                        [100%]
+1 passed in 0.16s
+```
+
+`app.dependency_overrides` keeps working, also for a dependency function that takes clients.
+
+**A client that fails to connect** fails the startup. The lifespan raises a plain `RuntimeError`
+from the `ConnectError`, since a `SystemExit` would escape the server's event loop, and the server
+reports it and exits:
+
+```python
+# app/broken.py
+from fastapi import FastAPI
+
+from nuke_di import Client
+from nuke_di.fastapi import setup
+
+
+class Kafka(Client):
+    async def connect(self) -> None:
+        raise OSError("broker kafka-1:9092 is unreachable")
+
+
+app = FastAPI()
+setup(app)
+
+
+@app.post("/events")
+async def publish(kafka: Kafka) -> None: ...
+```
+
+```console
+$ uvicorn app.broken:app
+INFO:     Started server process [81379]
+INFO:     Waiting for application startup.
+Error occurred connecting client Kafka
+Traceback (most recent call last):
+  ...
+OSError: broker kafka-1:9092 is unreachable
+ERROR:    Traceback (most recent call last):
+  ...
+nuke_di.errors.ConnectError: Error occurred connecting client Kafka
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  ...
+RuntimeError: nuke-di clients failed to start: Error occurred connecting client Kafka
+
+ERROR:    Application startup failed. Exiting.
+$ echo $?
+3
+```
+
+#### Not supported
+
+These places take no clients and raise a `TypeError` that says so when a client appears there:
+
+| Place                                              | Instead                                              |
+|----------------------------------------------------|------------------------------------------------------|
+| A router created without `ClientRouter` / `ClientRoute` | Create it with `ClientRouter(...)`               |
+| A websocket endpoint and its dependencies          | Not supported yet                                    |
+| `app.include_router(router, dependencies=[...])`   | `ClientRouter(dependencies=[...])` on the router     |
+
+A request that arrives without the lifespan, e.g. through `TestClient(app)` without `with`, gets a
+`RuntimeError`: `UserService is not connected: start the app with its lifespan`.
 
 ## Testing
 

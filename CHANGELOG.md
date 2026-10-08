@@ -6,6 +6,21 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-08
+
+### Added
+
+- FastAPI integration, `nuke_di.fastapi` (`pip install "nuke-di[fastapi]"`, FastAPI 0.100 or newer): path
+  operations and their dependency functions take clients by plain type hints, e.g.
+  `async def get_user(user_id: int, users: UserService)`. `setup(app)` connects the clients on startup and
+  disconnects them on shutdown; `ClientRouter` is an `APIRouter` that does the same for its routes. A test
+  replaces a client with `override()` before `TestClient` starts the app. See "FastAPI" in the README,
+  `docs/specs/fastapi.md` and `docs/adr/0003-fastapi-signature-rewrite.md`
+  ([#12](https://github.com/troyan-dy/nuke-di/issues/12)).
+- A client used where pydantic expects a field type, e.g. in a router without `ClientRouter`, raises a
+  `TypeError` that names the fix instead of pydantic's schema error. Models with `arbitrary_types_allowed`
+  are unaffected.
+
 ## [1.4.0] - 2026-10-08
 
 ### Added
@@ -123,7 +138,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/troyan-dy/nuke-di/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/troyan-dy/nuke-di/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/troyan-dy/nuke-di/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/troyan-dy/nuke-di/compare/v1.1.0...v1.2.0

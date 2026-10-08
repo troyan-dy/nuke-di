@@ -29,3 +29,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --locked
       - run: uv run pytest --cov --cov-report=term
+
+  fastapi-min:
+    # The lowest FastAPI the `fastapi` extra allows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv sync --locked
+      - run: make test-fastapi-min
