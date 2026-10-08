@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from functools import partial
 from typing import Any, Literal, Protocol, cast
 
@@ -62,6 +63,11 @@ class Anything(Client):
 class Mode(Client):
     def __init__(self, mode: Literal["fast"]) -> None:
         self.mode = mode
+
+
+class Callbacks(Client):
+    def __init__(self, on_item: Callable[[int], str], on_any: Callable[..., int], empty: tuple[()]) -> None:
+        self.on_item, self.on_any, self.empty = on_item, on_any, empty
 
 
 class Handler(Client):
@@ -227,3 +233,40 @@ def test_inject_class_is_not_part_of_a_cycle() -> None:
     injected = cast(partial[Handler], Dependencies().inject(Handler))
 
     assert isinstance(injected.keywords["feed"].handler, Handler)
+
+
+def test_callable_and_empty_tuple_are_named_as_written() -> None:
+    with pytest.raises(InvalidSignatureError, match=r" is Callable\[\[int\], str\], which"):
+        Dependencies().resolve(Callbacks)
+
+    class AnyCallback(Client):
+        def __init__(self, on_any: Callable[..., int]) -> None:
+            self.on_any = on_any
+
+    class EmptyTuple(Client):
+        def __init__(self, empty: tuple[()]) -> None:
+            self.empty = empty
+
+    with pytest.raises(InvalidSignatureError, match=r" is Callable\[\.\.\., int\], which"):
+        Dependencies().resolve(AnyCallback)
+    with pytest.raises(InvalidSignatureError, match=r" is tuple\[\(\)\], which"):
+        Dependencies().resolve(EmptyTuple)
+
+
+def test_nested_inject_keeps_the_outer_path() -> None:
+    dep = Dependencies()
+
+    async def inner_handler() -> None: ...
+
+    class Inner(Client):
+        def __init__(self) -> None:
+            dep.inject(inner_handler)  # a client that injects on its own, while the outer inject() runs
+
+    class Outer(Client):
+        def __init__(self, inner: Inner, retries: Retries) -> None:
+            self.inner, self.retries = inner, retries
+
+    async def outer_handler(outer: Outer) -> None: ...
+
+    with pytest.raises(InvalidSignatureError, match=r"\(resolving outer_handler -> Outer -> Retries\)$"):
+        dep.inject(outer_handler)

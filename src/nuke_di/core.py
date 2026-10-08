@@ -356,13 +356,14 @@ class Dependencies:
         sig: dict[str, Any] = self._type_hints(func, sname(func))
         sig.pop("return", None)
 
-        self._injecting = func
+        # A client may inject() on its own while this one resolves, so the outer root is restored after it
+        outer, self._injecting = self._injecting, func
         try:
             for key, value in sig.items():
                 if isnotsingleton(value):
                     signature[key] = self.resolve(value)
         finally:
-            self._injecting = None
+            self._injecting = outer
 
         return signature
 
@@ -381,11 +382,16 @@ def _type_name(hint: Any) -> str:
     """
     if hint is type(None):
         return "None"
+    if hint is Ellipsis:
+        return "..."
+    if isinstance(hint, list):
+        # The parameters of a Callable
+        return f"[{', '.join(map(_type_name, hint))}]"
     origin = get_origin(hint)
     if origin in {Union, types.UnionType}:
         return " | ".join(map(_type_name, get_args(hint)))
     if origin is not None:
-        return f"{_type_name(origin)}[{', '.join(map(_type_name, get_args(hint)))}]"
+        return f"{_type_name(origin)}[{', '.join(map(_type_name, get_args(hint))) or '()'}]"
     if inspect.isclass(hint):
         return hint.__name__
     return repr(hint).replace("typing.", "")

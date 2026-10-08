@@ -408,7 +408,8 @@ argument needs a default, which is left alone. These fail with `InvalidSignature
 Clients that depend on each other in a cycle fail with `CircularDependencyError`, a subclass of
 `InvalidSignatureError`, and a type hint that cannot be evaluated, e.g. a class defined inside a
 function or imported under `TYPE_CHECKING`, with an `InvalidSignatureError` that says so. When the
-error comes from `inject()`, the path starts at the function: `(resolving handler -> Checkout -> Profiles)`. In a [worker or a job](#workers-and-jobs)
+error comes from `inject()`, the path starts at the function:
+`(resolving handler -> Checkout -> Profiles)`. In a [worker or a job](#workers-and-jobs)
 each of these fails the run with exit code `1` before anything connects.
 
 ## The container
