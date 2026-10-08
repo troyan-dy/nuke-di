@@ -1,5 +1,5 @@
 """
-FastAPI integration: path operations and their dependency functions take clients by type hint.
+FastAPI integration: path operations and their dependencies take clients by type hint.
 
 See docs/specs/fastapi.md and docs/adr/0003-fastapi-signature-rewrite.md.
 """
@@ -8,7 +8,7 @@ import inspect
 import weakref
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Annotated, Any, ClassVar, get_args, get_origin, get_type_hints
+from typing import Annotated, Any, ClassVar, cast, get_args, get_origin, get_type_hints
 
 from fastapi import APIRouter, Depends, FastAPI, params
 from fastapi.routing import APIRoute
@@ -19,6 +19,10 @@ from nuke_di.types import NotSingletonClient
 from nuke_di.utils import sname
 
 __all__ = ("ClientRoute", "ClientRouter", "setup")
+
+# Where a container keeps its route class: the container is an unhashable dataclass, and keeping it here
+# lets both be garbage collected together
+_ROUTE_CLASS = "_nuke_di_route_class"
 
 
 class _Binding:
@@ -39,42 +43,39 @@ class _Binding:
         return self.instance
 
 
-class ClientRoute(APIRoute):
+class _ContainerRoute(APIRoute):
     """
-    Route class that fills the arguments typed as clients, from the global `DI`.
-
-    `ClientRouter(container=...)` uses the route class of another container.
+    Route class that fills the arguments typed as clients from `container`; one subclass per container.
     """
 
-    container: ClassVar[Dependencies] = DI
-    bindings: ClassVar[list[_Binding]] = []
+    container: ClassVar[Dependencies]
 
     def __init__(self, path: str, endpoint: Callable[..., Any], **kwargs: Any) -> None:
         # Before FastAPI reads the signatures, which happens in APIRoute.__init__
-        _bind(endpoint, type(self))
+        route_cls = type(self)
+        self.nuke_di_bindings = _bind(endpoint, route_cls)
         for depends in kwargs.get("dependencies") or ():
-            _bind_depends(depends, type(self))
+            self.nuke_di_bindings += _bind(depends.dependency, route_cls)
         super().__init__(path, endpoint, **kwargs)
 
 
-# A container is an unhashable dataclass, so its route class is kept by id(), with a weak reference to tell
-# a live container from a new one that got the same id
-_route_classes: dict[int, tuple[weakref.ref[Dependencies], type[ClientRoute]]] = {
-    id(DI): (weakref.ref(DI), ClientRoute),
-}
-
-
-def _route_class(container: Dependencies) -> type[ClientRoute]:
+class ClientRoute(_ContainerRoute):
     """
-    The route class of `container`, one per container.
+    Route class that fills the arguments typed as clients from the global `DI`.
     """
-    known = _route_classes.get(id(container))
-    if known is not None and known[0]() is container:
-        return known[1]
 
-    route = type("ClientRoute", (ClientRoute,), {"container": container, "bindings": []})
-    _route_classes[id(container)] = (weakref.ref(container), route)
-    return route
+    container = DI
+
+
+vars(DI)[_ROUTE_CLASS] = ClientRoute
+
+
+def _route_class(container: Dependencies) -> type[_ContainerRoute]:
+    route_cls: type[_ContainerRoute] | None = vars(container).get(_ROUTE_CLASS)
+    if route_cls is None:
+        route_cls = type("ClientRoute", (_ContainerRoute,), {"container": container})
+        vars(container)[_ROUTE_CLASS] = route_cls
+    return route_cls
 
 
 class ClientRouter(APIRouter):
@@ -86,21 +87,19 @@ class ClientRouter(APIRouter):
     """
 
     def __init__(self, *, container: Dependencies = DI, **kwargs: Any) -> None:
-        route = _route_class(container)
-        route_class = kwargs.setdefault("route_class", route)
-        if not issubclass(route_class, route):
+        route_cls = _route_class(container)
+        route_class = kwargs.setdefault("route_class", route_cls)
+        if not issubclass(route_class, route_cls):
             raise TypeError(
                 f"route_class={sname(route_class)} does not fill clients from the container of this router: "
-                f"derive it from the route class of the container, e.g. ClientRoute for DI"
+                f"leave it out, or derive it from ClientRoute for DI"
             )
         super().__init__(**kwargs)
-        self._container_route = route
-        for depends in self.dependencies:
-            _bind_depends(depends, route)
+        self._route_cls = route_cls
+        _track(self, route_cls)
 
     def include_router(self, router: APIRouter, **kwargs: Any) -> None:
-        for depends in kwargs.get("dependencies") or ():
-            _bind_depends(depends, self._container_route)
+        _include(self, router, kwargs, self._route_cls, "this router")
         super().include_router(router, **kwargs)
 
 
@@ -109,48 +108,105 @@ def setup(app: FastAPI, container: Dependencies = DI) -> None:
     Fill client arguments of the routes declared on `app` from now on, and run `container` with the app:
     connect it on startup, disconnect it on shutdown.
     """
-    route = _route_class(container)
+    route_cls = _route_class(container)
     current = app.router.route_class
-    if not issubclass(current, route):
+    if not issubclass(current, route_cls):
         if current is not APIRoute:
             raise TypeError(
                 f"app.router.route_class is {sname(current)}, which does not fill clients from this container, "
-                f"and setup() would replace it: derive it from the route class of the container, e.g. ClientRoute "
-                f"for DI"
+                f"and setup() would replace it: derive it from ClientRoute for DI"
             )
-        app.router.route_class = route
+        app.router.route_class = route_cls
 
     original = app.router.lifespan_context
     if getattr(original, "__nuke_di__", False):
         raise TypeError("setup() was already called for this app")
 
-    # FastAPI(dependencies=...) also applies to included routers, which FastAPI builds without the route class
-    for depends in app.router.dependencies:
-        _bind_depends(depends, route)
+    _track(app.router, route_cls)
+    include_router = app.include_router
+
+    def include(router: APIRouter, **kwargs: Any) -> None:
+        _include(app.router, router, kwargs, route_cls, "this app")
+        include_router(router, **kwargs)
+
+    app.include_router = include  # type: ignore[method-assign]
 
     @asynccontextmanager
     async def lifespan(app: Any) -> AsyncIterator[Any]:
         # The app's own lifespan runs inside, so its startup and shutdown code can use the clients
-        async with _connected(route), original(app) as state:
+        async with _connected(route_cls.container, _router_bindings(app.router)), original(app) as state:
             yield state
 
     lifespan.__nuke_di__ = True  # type: ignore[attr-defined]
     app.router.lifespan_context = lifespan
 
 
+class _Tracked:
+    """
+    What a router adds to the routes it includes, kept on the router; FastAPI 0.14x applies it lazily, out
+    of reach of the route class, and only nuke-di knows which routers an app includes.
+    """
+
+    def __init__(self, dependencies: list[_Binding]) -> None:
+        # The clients of the router's own dependencies, applied to the routes of the routers it includes
+        self.dependencies = dependencies
+        # Each included router with the clients of the dependencies given to include_router()
+        self.includes: list[tuple[APIRouter, list[_Binding]]] = []
+
+
+def _track(router: APIRouter, route_cls: type[_ContainerRoute]) -> None:
+    bindings = [binding for depends in router.dependencies for binding in _bind(depends.dependency, route_cls)]
+    router.nuke_di_tracked = _Tracked(bindings)  # type: ignore[attr-defined]
+
+
+def _include(
+    owner: APIRouter, router: APIRouter, kwargs: dict[str, Any], route_cls: type[_ContainerRoute], name: str
+) -> None:
+    other = router.route_class
+    if issubclass(other, _ContainerRoute) and other.container is not route_cls.container:
+        # Its clients would never be resolved: the startup of this container does not know them
+        raise TypeError(f"the router fills clients from another container than {name}")
+    bindings = [
+        binding for depends in kwargs.get("dependencies") or () for binding in _bind(depends.dependency, route_cls)
+    ]
+    owner.nuke_di_tracked.includes.append((router, bindings))  # type: ignore[attr-defined]
+
+
+def _router_bindings(router: APIRouter) -> list[_Binding]:
+    """
+    The clients of every route an app serves through `router`, each once.
+    """
+    found: dict[int, _Binding] = {}
+
+    def visit(router: APIRouter) -> None:
+        for route in router.routes:
+            found.update((id(binding), binding) for binding in getattr(route, "nuke_di_bindings", ()))
+        tracked: _Tracked | None = getattr(router, "nuke_di_tracked", None)
+        if tracked is None:
+            return
+        found.update((id(binding), binding) for binding in tracked.dependencies)
+        for included, bindings in tracked.includes:
+            found.update((id(binding), binding) for binding in bindings)
+            visit(included)
+
+    visit(router)
+    return list(found.values())
+
+
 @asynccontextmanager
-async def _connected(route: type[ClientRoute]) -> AsyncIterator[None]:
-    container = route.container
+async def _connected(container: Dependencies, bindings: list[_Binding]) -> AsyncIterator[None]:
+    if container.connected:
+        # E.g. by another app on the same container; its clients are left as they are
+        raise RuntimeError("nuke-di clients failed to start: the container is already connected")
+
     try:
-        for binding in route.bindings:
+        for binding in bindings:
             binding.instance = container.resolve(binding.cls)
         await container.connect()
     except BaseException as exc:
-        _forget(route)
-        # A failed connect() has already flushed the container, a failed resolution has not; a container that
-        # was connected before startup is not ours to flush
-        if not container.connected:
-            container.flush()
+        _forget(bindings)
+        # A failed connect() has already flushed the container, a failed resolution has not
+        container.flush()
         if isinstance(exc, SystemExit):
             # ConnectError and InitializeDependencyError are SystemExit, which escapes the event loop of the
             # server; a plain error lets it report a failed startup and exit
@@ -170,64 +226,99 @@ async def _connected(route: type[ClientRoute]) -> AsyncIterator[None]:
         try:
             await container.disconnect()
         finally:
-            _forget(route)
+            _forget(bindings)
 
 
-def _forget(route: type[ClientRoute]) -> None:
-    for binding in route.bindings:
+def _forget(bindings: list[_Binding]) -> None:
+    for binding in bindings:
         binding.instance = None
 
 
-def _bind(call: Callable[..., Any] | None, route: type[ClientRoute]) -> None:
+class _ClassSignature:
     """
-    Rewrite the signature of `call` and of the dependency functions it uses, so FastAPI fills its clients.
+    The rewritten signature of one class, hidden from its subclasses, which inherit class attributes.
     """
-    # Classes, callable objects and the `None` of `Depends()` are left to FastAPI: no signature to replace in place
-    if not inspect.isfunction(call):
-        return
 
-    # Bound to this container already, e.g. a route of an included router copied by an older FastAPI. A function
-    # bound to another container is bound again: the routes declared before keep the dependencies they captured
-    if getattr(call, "__nuke_di_container__", None) is route.container:
-        return
+    def __init__(self, owner: type, signature: inspect.Signature) -> None:
+        self.owner = owner
+        self.signature = signature
+
+    def __get__(self, instance: object, owner: type) -> inspect.Signature | None:
+        # `None` makes inspect.signature() compute the signature as usual
+        return self.signature if instance is None and owner is self.owner else None
+
+
+def _bind(call: Callable[..., Any] | None, route_cls: type[_ContainerRoute]) -> list[_Binding]:
+    """
+    Rewrite the signature of `call` and of the dependencies it uses, so FastAPI fills its clients;
+    return the clients of all of them.
+    """
+    if inspect.isclass(call):
+        init: Callable[..., Any] = call.__init__
+    elif inspect.isfunction(call):
+        init = call
+    else:
+        # Bound methods, callable objects and the `None` of `Depends()`: no signature to replace in place
+        return []
+
+    # `vars()`, not getattr(): a subclass must not look bound because its base class is
+    marks = vars(call)
+    container = marks.get("__nuke_di_container__")
+    if container is not None and container() is route_cls.container:
+        # Bound already, e.g. a route of an included router copied by an older FastAPI. A function bound to
+        # another container is bound again: the routes declared before keep the dependencies they captured
+        return cast(list[_Binding], marks["__nuke_di_bindings__"])
 
     try:
-        hints = get_type_hints(call, include_extras=True)
+        hints = get_type_hints(init, include_extras=True)
+        # The signature as written, not the one a binding to another container replaced it with
+        signature: inspect.Signature = marks.get("__nuke_di_signature__") or inspect.signature(call)
     except NameError:
         # E.g. a name imported under TYPE_CHECKING: FastAPI copes with it, or reports it itself
-        return
+        return []
 
-    # The signature as written, not the one a binding to another container replaced it with
-    signature: inspect.Signature = getattr(call, "__nuke_di_signature__", None) or inspect.signature(call)
     parameters = []
-    bindings = []
+    own: list[_Binding] = []
+    reachable: list[_Binding] = []
     for param in signature.parameters.values():
         hint = hints.get(param.name, param.annotation)
         client = _client(hint)
         if client is None:
             depends = _depends(param, hint)
             if depends is not None:
-                _bind(depends.dependency, route)
+                # `Annotated[Auth, Depends()]` depends on the annotated class
+                reachable += _bind(depends.dependency or _hint_class(hint), route_cls)
             parameters.append(param.replace(annotation=hint))
             continue
 
         binding = _Binding(client)
-        bindings.append(binding)
+        own.append(binding)
         parameters.append(param.replace(annotation=Annotated[client, Depends(binding.get)]))
 
-    if bindings:
-        # Annotations are evaluated already: FastAPI would resolve strings against the wrong module otherwise
-        return_annotation = hints.get("return", signature.return_annotation)
-        call.__signature__ = signature.replace(  # type: ignore[attr-defined]
-            parameters=parameters, return_annotation=return_annotation
-        )
-        call.__nuke_di_container__ = route.container  # type: ignore[attr-defined]
-        call.__nuke_di_signature__ = signature  # type: ignore[attr-defined]
-        route.bindings.extend(bindings)
+    reachable += own
+    if not own:
+        # Nothing to rewrite here; the clients of its dependencies are found again on the next declaration
+        return reachable
+
+    # Annotations are evaluated already: FastAPI would resolve strings against the wrong module otherwise
+    rewritten = signature.replace(
+        parameters=parameters, return_annotation=hints.get("return", signature.return_annotation)
+    )
+    if inspect.isclass(call):
+        call.__signature__ = _ClassSignature(call, rewritten)  # type: ignore[attr-defined]
+    else:
+        call.__signature__ = rewritten  # type: ignore[attr-defined]
+    call.__nuke_di_container__ = weakref.ref(route_cls.container)  # type: ignore[union-attr]
+    call.__nuke_di_signature__ = signature  # type: ignore[union-attr]
+    call.__nuke_di_bindings__ = reachable  # type: ignore[union-attr]
+    return reachable
 
 
-def _bind_depends(depends: params.Depends, route: type[ClientRoute]) -> None:
-    _bind(depends.dependency, route)
+def _hint_class(hint: Any) -> Any:
+    """
+    The class an `Annotated[Class, ...]` hint names.
+    """
+    return get_args(hint)[0] if get_origin(hint) is Annotated else hint
 
 
 def _client(hint: Any) -> type[NotSingletonClient] | None:
@@ -235,11 +326,11 @@ def _client(hint: Any) -> type[NotSingletonClient] | None:
     The client a type hint asks for: `Client`, or `Annotated[Client, ...]` without a `Depends`.
     """
     if isnotsingleton(hint):
-        return hint  # type: ignore[no-any-return]
+        return cast(type[NotSingletonClient], hint)
     if get_origin(hint) is Annotated:
         inner, *metadata = get_args(hint)
         if isnotsingleton(inner) and not any(isinstance(item, params.Depends) for item in metadata):
-            return inner  # type: ignore[no-any-return]
+            return cast(type[NotSingletonClient], inner)
     return None
 
 

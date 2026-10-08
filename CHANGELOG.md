@@ -12,9 +12,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 - FastAPI integration, `nuke_di.fastapi` (`pip install "nuke-di[fastapi]"`, FastAPI 0.100 or newer): path
   operations and their dependency functions take clients by plain type hints, e.g.
-  `async def get_user(user_id: int, users: UserService)`. `setup(app)` connects the clients on startup and
-  disconnects them on shutdown; `ClientRouter` is an `APIRouter` that does the same for its routes. A test
-  replaces a client with `override()` before `TestClient` starts the app. See "FastAPI" in the README,
+  `async def get_user(user_id: int, users: UserService)`; classes used as dependencies too. `setup(app)`
+  connects the clients of the routes the app serves on startup and disconnects them on shutdown;
+  `ClientRouter` is an `APIRouter` whose routes take clients the same way. A test replaces a client with
+  `override()` before `TestClient` starts the app. See "FastAPI" in the README,
   `docs/specs/fastapi.md` and `docs/adr/0003-fastapi-signature-rewrite.md`
   ([#12](https://github.com/troyan-dy/nuke-di/issues/12)).
 - A client used where pydantic expects a field type, e.g. in a router without `ClientRouter`, raises a

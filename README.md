@@ -1141,25 +1141,28 @@ What happened:
 
 1. `setup(app)` made every route declared on `app` afterwards fill its client arguments from the
    global `DI`, and wrapped the app's lifespan.
-2. `@app.get` saw `users: UserService` and only registered it; nothing was built on import.
-3. On startup the lifespan resolved the registered clients and connected them, layer by layer. On
-   shutdown it disconnected them.
+2. `@app.get` saw `users: UserService` and only recorded it; nothing was built on import.
+3. On startup the lifespan resolved the clients of the routes the app serves, its own and those of
+   the routers it includes, and connected them, layer by layer. On shutdown it disconnected them.
 4. A request to `/users/42` got the connected `UserService`. `/me` went through the dependency
    `current_user`, which takes `db: Database` the same way.
 
 The rules:
 
-- **Where clients are filled.** In the arguments of path operations and of every dependency function
-  they use, at any depth, including `dependencies=` of the route, of its router and of the app. An
+- **Where clients are filled.** In the arguments of path operations and of every dependency they use,
+  at any depth: functions, and classes used as `Depends(Auth)` or `Annotated[Auth, Depends()]`,
+  including `dependencies=` of the route, of its router, of `include_router()` and of the app. An
   argument is a client when its type hint is a client, also inside `Annotated[UserService, ...]`
   without a `Depends`. Every other argument is FastAPI's: path, query, header, body, `Depends`.
-- **Routers.** Create them with `ClientRouter(...)`, which takes the same arguments as `APIRouter`.
-  `APIRouter(route_class=ClientRoute)` works too, except for the dependencies a router applies to
-  the routers it includes (its own `dependencies=` and those of its `include_router()`): only
-  `ClientRouter` fills clients there. For another container, use
-  `setup(app, container)` and `ClientRouter(container=container)`.
+- **Routers.** Create them with `ClientRouter(...)`, which takes the same arguments as `APIRouter`,
+  and include them into the app or into another `ClientRouter`. `APIRouter(route_class=ClientRoute)`
+  works for a router that includes no other routers. For another container, use
+  `setup(app, container)` and `ClientRouter(container=container)`; including a router of another
+  container raises `TypeError` at once.
 - **Call `setup(app)` before the routes.** A route with a client declared before it fails at once
   with the `TypeError` described [below](#not-supported).
+- **Only what the app serves.** A router that the app does not include, e.g. one imported only by a
+  test, connects nothing on the app's startup.
 - **Instances.** As with `inject()`, a `Client` is one instance per container, and a
   `NotSingletonClient` is one instance per argument that declares it, not one per request.
 - **Lifespan.** The app's own `lifespan=` runs inside: its startup code sees connected clients, and
@@ -1248,15 +1251,19 @@ $ echo $?
 3
 ```
 
-#### Not supported
+### Not supported
 
-These places take no clients and raise a `TypeError` that says so when a client appears there:
+These places take no clients. Each raises a `TypeError` that says so when the route is declared:
 
-| Place                                              | Instead                                              |
-|----------------------------------------------------|------------------------------------------------------|
-| A router created without `ClientRouter` / `ClientRoute` | Create it with `ClientRouter(...)`               |
-| A websocket endpoint and its dependencies          | Not supported yet                                    |
-| `app.include_router(router, dependencies=[...])`   | `ClientRouter(dependencies=[...])` on the router     |
+| Place                                                   | Instead                                       |
+|---------------------------------------------------------|-----------------------------------------------|
+| A router created without `ClientRouter` / `ClientRoute` | Create it with `ClientRouter(...)`            |
+| A websocket endpoint and its dependencies               | Not supported yet ([#19](https://github.com/troyan-dy/nuke-di/issues/19)) |
+| An optional client, `Database \| None`                  | A plain `Database`                            |
+| A bound method or a callable object as an endpoint or a dependency | A function or a class              |
+
+A route of a router included into a plain `APIRouter` instead of a `ClientRouter` is found by older
+FastAPI only; on FastAPI 0.14x its requests get the `RuntimeError` below.
 
 A request that arrives without the lifespan, e.g. through `TestClient(app)` without `with`, gets a
 `RuntimeError`: `UserService is not connected: start the app with its lifespan`.

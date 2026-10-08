@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import gc
+import weakref
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Annotated, Any
@@ -54,6 +56,11 @@ class FakeDatabase(Database):
 
 class Session(NotSingletonClient):
     pass
+
+
+class Pooled(NotSingletonClient):
+    async def connect(self) -> None:
+        events.append("pooled: connected")
 
 
 class Broken(Client):
@@ -303,6 +310,36 @@ def test_router_route_class_must_match_its_container() -> None:
     with pytest.raises(TypeError, match=r"route_class=CustomRoute does not fill clients"):
         ClientRouter(route_class=CustomRoute)
 
+    other = ClientRouter(container=Dependencies()).route_class
+    assert not issubclass(other, ClientRoute)
+    with pytest.raises(TypeError, match=r"route_class=ClientRoute does not fill clients"):
+        ClientRouter(route_class=other)
+
+
+def test_app_include_router_dependencies_get_clients() -> None:
+    deps = Dependencies()
+    app = make_app(deps)
+    router = ClientRouter(container=deps)
+    router.get("/ping")(ping)
+    app.include_router(router, dependencies=[Depends(include_audit)])
+
+    with TestClient(app) as client:
+        assert client.get("/ping").json() == "pong"
+
+    assert events[1:-1] == ["include audit"]
+
+
+def test_router_of_another_container_is_refused() -> None:
+    app = make_app(Dependencies())
+    module_router = ClientRouter()  # bound to DI, e.g. declared in a module
+    outer = ClientRouter(container=Dependencies())
+
+    expected = r"the router fills clients from another container than this app"
+    with pytest.raises(TypeError, match=expected):
+        app.include_router(module_router)
+    with pytest.raises(TypeError, match=r"the router fills clients from another container than this router"):
+        outer.include_router(module_router)
+
 
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     events.append("app: startup")
@@ -405,6 +442,83 @@ def test_class_dependency_is_left_to_fastapi() -> None:
         assert client.get("/", params={"page": 3}).json() == 3
 
 
+class Auth:
+    def __init__(self, users: UserService, user_id: int = 1) -> None:
+        self.users, self.user_id = users, user_id
+
+
+async def whoami(auth: Annotated[Auth, Depends()]) -> str:
+    return await auth.users.greet(auth.user_id)
+
+
+async def whoami_by_class(auth: Annotated[Auth, Depends(Auth)]) -> str:
+    return await auth.users.greet(auth.user_id)
+
+
+def test_class_dependency_gets_clients() -> None:
+    app = make_app(Dependencies())
+    app.get("/annotated")(whoami)
+    app.get("/default")(whoami_by_class)
+
+    with TestClient(app) as client:
+        assert client.get("/annotated", params={"user_id": 2}).json() == "Hello, user-2!"
+        assert client.get("/default").json() == "Hello, user-1!"
+
+
+async def test_failed_startup_of_another_app_keeps_the_running_one() -> None:
+    deps = Dependencies()
+    first, second = make_app(deps), make_app(deps)
+    first.get("/users/{user_id}")(greet)
+
+    with TestClient(first) as client:
+        with pytest.raises(RuntimeError, match="already connected"), TestClient(second):
+            pass  # pragma: no cover
+
+        assert client.get("/users/1").json() == "Hello, user-1!"
+
+
+def make_closure_app(deps: Dependencies) -> FastAPI:
+    app = make_app(deps)
+
+    @app.get("/")
+    async def endpoint(pooled: Pooled) -> None: ...
+
+    return app
+
+
+def test_routes_of_dropped_apps_are_not_connected() -> None:
+    deps = Dependencies()
+    make_closure_app(deps)
+    gc.collect()
+
+    with TestClient(make_closure_app(deps)):
+        pass
+
+    assert events.count("pooled: connected") == 1
+
+
+def test_container_is_garbage_collected() -> None:
+    deps = Dependencies()
+    app = make_app(deps)
+    app.get("/users/{user_id}")(greet)
+    collected = weakref.ref(deps)
+
+    del deps, app
+    gc.collect()
+
+    assert collected() is None
+
+
+async def optional(db: Database | None = None) -> None: ...
+
+
+def test_optional_client_is_not_filled() -> None:
+    app = make_app(Dependencies())
+
+    with pytest.raises(TypeError, match=r"Database is a nuke-di client.*not as an optional"):
+        app.get("/")(optional)
+
+
 def test_request_without_lifespan_explains() -> None:
     app = make_app(Dependencies())
     app.get("/users/{user_id}")(greet)
@@ -423,7 +537,7 @@ async def plain(users: UserService) -> None: ...
 def test_router_without_route_class_explains() -> None:
     router = APIRouter()
 
-    with pytest.raises(TypeError, match=r"UserService is a nuke-di client, not a pydantic type.*ClientRouter"):
+    with pytest.raises(TypeError, match=r"UserService is a nuke-di client, not a pydantic type.*FastAPI"):
         router.get("/")(plain)
 
 
@@ -507,3 +621,36 @@ def test_pydantic_arbitrary_types_still_work() -> None:
     users = UserService(Database())
 
     assert Holder(users=users).users is users
+
+
+def test_routes_outside_the_app_are_not_connected() -> None:
+    deps = Dependencies()
+    app = make_app(deps)
+    app.get("/users/{user_id}")(greet)
+    unused = ClientRouter(container=deps)
+    unused.get("/")(two_pooled)
+
+    with TestClient(app):
+        pass
+
+    assert "pooled: connected" not in events
+
+
+async def two_pooled(pooled: Pooled) -> None: ...
+
+
+class Prefix:
+    def __call__(self, prefix: str = "Dear") -> str:
+        return prefix
+
+
+async def addressed(prefix: Annotated[str, Depends(Prefix())], users: UserService) -> str:
+    return f"{prefix} {await users.greet(1)}"
+
+
+def test_callable_object_dependency_is_left_to_fastapi() -> None:
+    app = make_app(Dependencies())
+    app.get("/")(addressed)
+
+    with TestClient(app) as client:
+        assert client.get("/").json() == "Dear Hello, user-1!"
