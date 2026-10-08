@@ -5,8 +5,9 @@ from collections.abc import Callable, Coroutine, Sequence
 from pathlib import Path
 from typing import Any, TypeVar, overload
 
-from nuke_di.cli import HelpRequested, UsageError, build_parser, parse
+from nuke_di.cli import HelpRequested, build_parser, parse_parameters
 from nuke_di.core import DI
+from nuke_di.errors import UsageError
 from nuke_di.run import Kind, RunHook, RunSettings, run_entrypoint
 
 F = TypeVar("F", bound=Callable[..., Coroutine[Any, Any, Any]])
@@ -66,7 +67,7 @@ def execute(func: Callable[..., Coroutine[Any, Any, Any]], *, kind: Kind, hooks:
 
     try:
         parser = build_parser(func, prog=entrypoint_prog())
-        params = parse(parser, sys.argv[1:])
+        params = parse_parameters(parser, sys.argv[1:])
     except HelpRequested:
         # Printing the help is not a Run: no hook sees it
         return 0

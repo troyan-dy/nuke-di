@@ -36,7 +36,7 @@ _Avoid_: Cron, task, script
 
 **Parameter**:
 A command-line option of an entrypoint, declared as an annotated argument of its function that is not a client.
-_Avoid_: Argument, flag, CLI arg
+_Avoid_: Argument, CLI arg
 
 **Worker**:
 An entrypoint that runs until the process is asked to stop.

@@ -7,10 +7,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
-from nuke_di.cli import UsageError
 from nuke_di.clients import BackgroundTasks, Shutdown
 from nuke_di.core import Dependencies
-from nuke_di.errors import InitializeDependencyError
+from nuke_di.errors import InitializeDependencyError, UsageError
 
 logger = logging.getLogger(__name__)
 

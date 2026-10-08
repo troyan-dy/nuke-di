@@ -571,7 +571,8 @@ postgres: disconnected
 warehouse: disconnected
 ```
 
-`--help` is generated from the signature and the docstring. It does not connect anything:
+`--help` is generated from the signature and the docstring. It does not connect anything
+(Python 3.13+ prints `-d, --day DAY` instead of `-d DAY, --day DAY`):
 
 ```console
 $ python -m app.jobs.sync --help

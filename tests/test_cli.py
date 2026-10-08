@@ -8,7 +8,7 @@ from typing import Annotated, Any, Optional
 import pytest
 
 from nuke_di import Client, InvalidSignatureError, Option, UsageError
-from nuke_di.cli import HelpRequested, build_parser, parse
+from nuke_di.cli import HelpRequested, build_parser, parse_parameters
 
 
 class Db(Client):
@@ -21,7 +21,7 @@ class Color(enum.Enum):
 
 
 def run(func: Callable[..., Any], *argv: str) -> dict[str, Any]:
-    return parse(build_parser(func), list(argv))
+    return parse_parameters(build_parser(func), list(argv))
 
 
 def help_of(func: Callable[..., Any]) -> str:

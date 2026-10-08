@@ -8,11 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, NoReturn, Union, get_args, get_origin, get_type_hints
 
-from nuke_di.errors import InvalidSignatureError
-from nuke_di.types import NotSingletonClient
-from nuke_di.utils import isa, sname
-
-isnotsingleton = isa(NotSingletonClient)
+from nuke_di.core import isnotsingleton
+from nuke_di.errors import InvalidSignatureError, UsageError
+from nuke_di.utils import sname
 
 Converter = Callable[[str], Any]
 
@@ -26,16 +24,6 @@ class Option:
     help: str | None = None
     # One letter or digit, e.g. "d" for "-d"
     short: str | None = None
-
-
-class UsageError(Exception):
-    """
-    The command line does not match the Parameters of the entrypoint.
-    """
-
-    def __init__(self, message: str, usage: str) -> None:
-        super().__init__(message)
-        self.usage = usage
 
 
 class HelpRequested(Exception):  # noqa: N818 - not an error, argparse already printed the help
@@ -83,7 +71,7 @@ def build_parser(func: Callable[..., Any], prog: str | None = None) -> Parser:
     return parser
 
 
-def parse(parser: argparse.ArgumentParser, argv: Sequence[str]) -> dict[str, Any]:
+def parse_parameters(parser: argparse.ArgumentParser, argv: Sequence[str]) -> dict[str, Any]:
     """
     Return the Parameters given on the command line; the ones left out keep the defaults of the function.
     """
@@ -158,16 +146,16 @@ def _help(option: Option, param: inspect.Parameter) -> str | None:
     parts = [] if option.help is None else [option.help]
     # A default of None means "not given", showing it says nothing
     if param.default is not param.empty and param.default is not None:
-        parts.append(f"(default: {_show(param.default)})")
+        parts.append(f"(default: {_format_default(param.default)})")
     # argparse expands %-formatting in help texts
     return " ".join(parts).replace("%", "%%") or None
 
 
-def _show(value: Any) -> str:
+def _format_default(value: Any) -> str:
     if isinstance(value, enum.Enum):
         return value.name
     if isinstance(value, list | tuple):
-        return " ".join(map(_show, value))
+        return " ".join(map(_format_default, value))
     return str(value)
 
 
