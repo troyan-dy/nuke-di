@@ -2,17 +2,24 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import types
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, TypeVar, cast, get_type_hints
+from typing import Any, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 from unittest.mock import create_autospec
 
-from nuke_di.errors import ConnectError, ConnectTimeoutError, InitializeDependencyError, InvalidSignatureError
+from nuke_di.errors import (
+    CircularDependencyError,
+    ConnectError,
+    ConnectTimeoutError,
+    InitializeDependencyError,
+    InvalidSignatureError,
+)
 from nuke_di.options import DependenciesSettings
 from nuke_di.types import Client, NotSingletonClient
-from nuke_di.utils import isa, select_values, sname, walk_values
+from nuke_di.utils import isa, sname
 
 logger = logging.getLogger(__name__)
 isclient = isa(Client)
@@ -47,6 +54,8 @@ class Dependencies:
     _replacements: dict[type[NotSingletonClient], NotSingletonClient] = field(default_factory=dict, init=False)
     # Replacements of the open `override()` blocks, outermost first; `flush()` keeps them
     _overrides: list[tuple[type[NotSingletonClient], NotSingletonClient]] = field(default_factory=list, init=False)
+    # What is being resolved right now, outermost first: finds cycles and names the path in errors
+    _resolving: list[Callable[..., Any]] = field(default_factory=list, init=False)
 
     async def __aenter__(self) -> None:
         await self.connect()
@@ -174,17 +183,18 @@ class Dependencies:
         if inst is not None:
             return cast(CT, inst)
 
+        if cls in self._resolving:
+            raise CircularDependencyError(f"Circular dependency: {' -> '.join(map(sname, [*self._resolving, cls]))}")
+
         name = sname(cls)
         logger.debug('Resolving dependency "%s"', name)
 
-        # A client may appear in the class annotations but not in __init__,
-        # which means it is not _our_ dependency
-        type_hints = get_type_hints(cls.__init__)
-        type_hints.pop("self", None)
+        self._resolving.append(cls)
+        try:
+            init = {key: self.resolve(dep) for key, dep in self._client_arguments(cls).items()}
+        finally:
+            self._resolving.pop()
 
-        deps = select_values(isnotsingleton, type_hints)
-
-        init = dict(walk_values(self.resolve, deps))
         try:
             inst = cls(**init)
         except Exception as e:
@@ -198,6 +208,44 @@ class Dependencies:
         self._layers[id(inst)] = 1 + max((self._layers.get(id(d), -1) for d in init.values()), default=-1)
         self.connect_clients.append(inst)
         return inst
+
+    def _client_arguments(self, cls: type[NotSingletonClient]) -> dict[str, type[NotSingletonClient]]:
+        """
+        The arguments of `cls.__init__` to fill with clients; fail on any other required argument.
+        """
+        where = f"{sname(cls)}.__init__"
+        try:
+            hints = get_type_hints(cls.__init__)
+        except NameError as exc:
+            raise InvalidSignatureError(f'Cannot evaluate the type hints of "{where}": {exc}{self._path()}') from exc
+
+        clients: dict[str, type[NotSingletonClient]] = {}
+        # The first parameter is `self`
+        for param in list(inspect.signature(cls.__init__).parameters.values())[1:]:
+            if param.kind in {param.VAR_POSITIONAL, param.VAR_KEYWORD}:
+                continue
+
+            hint: Any = hints.get(param.name)
+            if isnotsingleton(hint):
+                if param.kind is param.POSITIONAL_ONLY:
+                    raise self._signature_error(where, param, "is positional-only, a client is passed by keyword")
+                clients[param.name] = hint
+            elif param.default is not param.empty:
+                # Not ours to fill: the default stays
+                continue
+            elif hint is None:
+                raise self._signature_error(where, param, "has no type hint")
+            elif (client := _optional_client(hint)) is not None:
+                raise self._signature_error(where, param, f"is {sname(client)} | None, a client cannot be optional")
+            else:
+                raise self._signature_error(where, param, f"is a {_type_name(hint)}, which is not a client")
+        return clients
+
+    def _signature_error(self, where: str, param: inspect.Parameter, reason: str) -> InvalidSignatureError:
+        return InvalidSignatureError(f'Argument "{param.name}" of "{where}" {reason}{self._path()}')
+
+    def _path(self) -> str:
+        return f" (resolving {' -> '.join(map(sname, self._resolving))})"
 
     def inject(self, func: Callable) -> Callable:
         """
@@ -292,11 +340,30 @@ class Dependencies:
         sig: dict[str, Any] = get_type_hints(func)
         sig.pop("return", None)
 
-        for key, value in sig.items():
-            if isnotsingleton(value):
-                signature[key] = self.resolve(value)
+        self._resolving.append(func)
+        try:
+            for key, value in sig.items():
+                if isnotsingleton(value):
+                    signature[key] = self.resolve(value)
+        finally:
+            self._resolving.pop()
 
         return signature
+
+
+def _optional_client(hint: Any) -> type[NotSingletonClient] | None:
+    if get_origin(hint) not in {Union, types.UnionType}:
+        return None
+    args = get_args(hint)
+    clients = [arg for arg in args if isnotsingleton(arg)]
+    return clients[0] if type(None) in args and clients else None
+
+
+def _type_name(hint: Any) -> str:
+    if inspect.isclass(hint) and get_origin(hint) is None:
+        return hint.__name__
+    # A generic or a union: its repr names the parts, without the `typing.` noise
+    return repr(hint).replace("typing.", "")
 
 
 DI = Dependencies()

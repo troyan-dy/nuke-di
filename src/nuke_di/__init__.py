@@ -4,6 +4,7 @@ from nuke_di.core import DI, Dependencies
 from nuke_di.dataclass import client_dataclass
 from nuke_di.entrypoint import job, worker
 from nuke_di.errors import (
+    CircularDependencyError,
     ConnectError,
     ConnectTimeoutError,
     InitializeDependencyError,
@@ -17,6 +18,7 @@ from nuke_di.types import Client, NotSingletonClient
 __all__ = (
     "DI",
     "BackgroundTasks",
+    "CircularDependencyError",
     "Client",
     "ConnectError",
     "ConnectTimeoutError",

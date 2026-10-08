@@ -1,6 +1,13 @@
 class InvalidSignatureError(TypeError):
     """
-    A signature contains an argument without a type hint, or an entrypoint Parameter that cannot be parsed.
+    A signature cannot be injected: an argument without a type hint, a required `__init__` argument that is not
+    a client, or an entrypoint Parameter that cannot be parsed.
+    """
+
+
+class CircularDependencyError(InvalidSignatureError):
+    """
+    Clients depend on each other in a cycle, so none of them can be built.
     """
 
 

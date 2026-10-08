@@ -22,7 +22,7 @@ and has no runtime dependencies.
 
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [Clients](#clients): [singletons](#client-and-notsingletonclient), [lifecycle](#connect-and-disconnect), [dataclasses](#dataclass-clients), [layers](#layers), [connect failures](#when-a-client-fails-to-connect)
+- [Clients](#clients): [singletons](#client-and-notsingletonclient), [lifecycle](#connect-and-disconnect), [dataclasses](#dataclass-clients), [layers](#layers), [connect failures](#when-a-client-fails-to-connect), [wiring errors](#when-the-tree-cannot-be-built)
 - [The container](#the-container)
 - [Workers and jobs](#workers-and-jobs): [a job](#your-first-job), [parameters](#parameters), [a worker](#your-first-worker), [grace period](#grace-period), [background tasks](#background-tasks), [exit codes](#exit-codes), [hooks](#hooks), [Kubernetes](#running-in-kubernetes)
 - [Testing](#testing)
@@ -343,6 +343,72 @@ connected: False
 The same cleanup happens when `connect()` itself is cancelled. `ConnectError` derives from
 `SystemExit`, so an application that does not catch it stops, which is usually what you want
 when a dependency is down. Mocked clients are not connected and do not affect the layers.
+
+### When the tree cannot be built
+
+Resolution checks every `__init__` before it calls it, so a wiring mistake fails at once, names
+the argument and shows the path from the client you asked for:
+
+```python
+from typing import Protocol
+
+from nuke_di import Client, Dependencies, InvalidSignatureError
+
+
+class Postgres(Client):
+    pass
+
+
+class UserRepository(Protocol):
+    async def get(self, user_id: int) -> str: ...
+
+
+class Profiles(Client):
+    def __init__(self, pg: Postgres, users: UserRepository) -> None:
+        self.pg, self.users = pg, users
+
+
+class Checkout(Client):
+    def __init__(self, profiles: Profiles) -> None:
+        self.profiles = profiles
+
+
+class Orders(Client):
+    def __init__(self, payments: "Payments") -> None:
+        self.payments = payments
+
+
+class Payments(Client):
+    def __init__(self, orders: Orders) -> None:
+        self.orders = orders
+
+
+for root in (Checkout, Orders):
+    try:
+        Dependencies().resolve(root)
+    except InvalidSignatureError as exc:
+        print(f"{type(exc).__name__}: {exc}")
+```
+
+```text
+InvalidSignatureError: Argument "users" of "Profiles.__init__" is a UserRepository, which is not a client (resolving Checkout -> Profiles)
+CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
+```
+
+An argument of `__init__` is filled with a client when its type hint is a client. Any other
+argument needs a default, which is left alone. These fail with `InvalidSignatureError`:
+
+| `__init__` argument without a default | Message                                           |
+|---------------------------------------|---------------------------------------------------|
+| no type hint                          | `has no type hint`                                |
+| a type that is not a client           | `is a UserRepository, which is not a client`      |
+| `Client \| None`                      | `is Postgres \| None, a client cannot be optional` |
+| a client, positional-only (`/`)       | `is positional-only, a client is passed by keyword` |
+
+Clients that depend on each other in a cycle fail with `CircularDependencyError`, a subclass of
+`InvalidSignatureError`, and a type hint that cannot be evaluated, e.g. a class defined inside a
+function, with an `InvalidSignatureError` that says so. In a [worker or a job](#workers-and-jobs)
+each of these fails the run with exit code `1` before anything connects.
 
 ## The container
 
@@ -1203,7 +1269,8 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 | `InitializeDependencyError` | A client's `__init__` raised                              |
 | `ConnectError`              | A client's `connect()` raised, or the container state is wrong (e.g. resolving after connect, mocking a client that is already resolved, overriding a container that has resolved clients) |
 | `ConnectTimeoutError`       | A client's `connect()` exceeded `CONNECT_TIMEOUT_SECONDS` |
-| `InvalidSignatureError`     | `inject()` got a function with an argument without a type hint, or an entrypoint parameter has an unsupported type or a clashing flag |
+| `InvalidSignatureError`     | A client's `__init__` has a required argument that is not a client, `inject()` got a function with an argument without a type hint, or an entrypoint parameter has an unsupported type or a clashing flag; see [When the tree cannot be built](#when-the-tree-cannot-be-built) |
+| `CircularDependencyError`   | Clients depend on each other in a cycle; a subclass of `InvalidSignatureError` |
 | `UsageError`                | The command line of a worker or a job does not match its parameters; recorded as `Run.error`, exit code `2` |
 
 `InitializeDependencyError` and `ConnectError` derive from `SystemExit`: an application
