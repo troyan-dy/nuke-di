@@ -18,7 +18,7 @@ from litestar.handlers.websocket_handlers import WebsocketListenerRouteHandler
 from litestar.plugins import InitPlugin
 from litestar.routes import HTTPRoute
 
-from nuke_di._integration import Binding, Framework, client_of, connected
+from nuke_di._integration import Binding, Framework, client_of, running
 from nuke_di.core import DI, Dependencies
 from nuke_di.types import NotSingletonClient
 from nuke_di.utils import sname
@@ -27,6 +27,7 @@ __all__ = ("ClientPlugin",)
 
 # Litestar has no `Depends`: it matches dependencies by name, see `_Clients`
 _LITESTAR = Framework(
+    name="Litestar",
     not_started="{client} was not started with the app: register its handler when the app is created",
     not_connected="{client} is not connected: start the app with its lifespan, e.g. `with TestClient(app)`",
 )
@@ -54,6 +55,8 @@ class ClientPlugin(InitPlugin):
         self.container = container
 
     def on_app_init(self, app_config: AppConfig) -> AppConfig:
+        if any(getattr(lifespan, "__nuke_di__", False) for lifespan in app_config.lifespan):
+            raise TypeError("ClientPlugin was already added to this app")
         clients = _Clients(app_config.dependencies)
         # A router of our own lays out every handler the app is created with: those of nested routers and
         # controllers too. Registering into it copies them and parses nothing, and it is dropped afterwards
@@ -74,13 +77,14 @@ class ClientPlugin(InitPlugin):
 
         @asynccontextmanager
         async def lifespan(app: Litestar) -> AsyncIterator[None]:
-            await stack.enter_async_context(connected(container, list(bindings.values())))
+            await stack.enter_async_context(running(container, list(bindings.values())))
             yield
 
         async def disconnect() -> None:
             await stack.aclose()
 
         # The outermost lifespan, so the app's own lifespans and startup hooks see connected clients
+        lifespan.__nuke_di__ = True  # type: ignore[attr-defined]
         app_config.lifespan.insert(0, lifespan)
         app_config.on_shutdown.append(disconnect)
         return app_config

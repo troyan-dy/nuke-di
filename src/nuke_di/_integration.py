@@ -24,6 +24,7 @@ class Framework:
     What the users of one framework are told when a client is missing; `{client}` is its class name.
     """
 
+    name: str
     not_started: str
     not_connected: str
 
@@ -38,6 +39,10 @@ class DependsFramework(Framework):
     depends: type
     # Builds the marker for a callable
     make_depends: Callable[[Callable[..., Any]], Any]
+    # Whether a function is bound again for every container: FastAPI analyses a route once, when it is
+    # declared, so each app keeps the bindings it captured. Otherwise a function is bound once, and every
+    # app that starts resolves the same bindings
+    per_container: bool = True
 
 
 class Binding:
@@ -47,6 +52,7 @@ class Binding:
 
     def __init__(self, cls: type[NotSingletonClient], container: Dependencies, framework: Framework) -> None:
         self.cls = cls
+        # The container that resolves it, or would: it tells "not started" from "not connected"
         self.container = weakref.ref(container)
         self.framework = framework
         self.instance: NotSingletonClient | None = None
@@ -68,17 +74,27 @@ def unique(bindings: Iterable[Binding]) -> list[Binding]:
 
 
 @asynccontextmanager
-async def connected(container: Dependencies, bindings: list[Binding]) -> AsyncIterator[None]:
+async def running(container: Dependencies, bindings: list[Binding]) -> AsyncIterator[None]:
     """
     Resolve the clients of `bindings` and connect `container` for the time an app runs.
     """
     if container.connected:
         # E.g. by another app on the same container; its clients are left as they are
         raise RuntimeError("nuke-di clients failed to start: the container is already connected")
+    busy = next((binding for binding in bindings if binding.instance is not None), None)
+    if busy is not None:
+        # A function bound once, shared with an app that runs: filling it would hand that app our clients
+        raise RuntimeError(
+            f"nuke-di clients failed to start: {sname(busy.cls)} is filled for another app that is running; "
+            f"apps that share a handler function run one at a time"
+        )
 
+    # A failed resolution would leave the timings of an earlier connect
+    container.timings = []
     try:
         for binding in bindings:
             binding.instance = container.resolve(binding.cls)
+            binding.container = weakref.ref(container)
         await container.connect()
     except BaseException as exc:
         _forget(bindings)
@@ -119,7 +135,7 @@ def wrap_lifespan(
     @asynccontextmanager
     async def lifespan(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
         # The app's own lifespan runs inside, so its startup and shutdown code can use the clients
-        async with connected(container, bindings()), original(*args, **kwargs) as state:
+        async with running(container, bindings()), original(*args, **kwargs) as state:
             yield state
 
     lifespan.__nuke_di__ = True  # type: ignore[attr-defined]
@@ -161,9 +177,14 @@ def bind(call: Callable[..., Any] | None, container: Dependencies, framework: De
     # `vars()`, not getattr(): a subclass must not look bound because its base class is
     marks = vars(call)
     owner = marks.get("__nuke_di_owner__")
-    if owner is not None and owner[0]() is container and owner[1] is framework:
+    if owner is not None and owner[1] is not framework:
+        raise TypeError(
+            f"{sname(call)} takes clients in both {owner[1].name} and {framework.name} handlers: nuke-di rewrites "
+            f"its signature for one framework, so give each framework its own function"
+        )
+    if owner is not None and (owner[0]() is container or not framework.per_container):
         # Bound already, e.g. a route of an included router copied by an older FastAPI. A function bound to
-        # another container is bound again: the routes declared before keep the dependencies they captured
+        # another container is bound again for FastAPI: the routes declared before keep their dependencies
         return cast(list[Binding], marks["__nuke_di_bindings__"])
 
     try:

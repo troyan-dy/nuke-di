@@ -1674,6 +1674,10 @@ Las reglas:
   `NotSingletonClient` es una instancia por cada argumento que lo declara, no una por mensaje.
 - **La función sigue siendo una función.** Su firma le muestra a FastStream `Annotated[UserService, Depends(...)]`,
   igual que en [FastAPI](#fastapi).
+- **Una app a la vez.** Una función subscriber y sus dependencias se reescriben una sola vez, sea cual sea el
+  contenedor, así que las apps que las comparten, p. ej. una app por test sobre un broker a nivel de módulo,
+  se ejecutan una tras otra: una app que arranca mientras corre otra con la misma función no logra arrancar.
+  Una función de dependencia que recibe clientes sirve handlers de FastAPI o de FastStream, no de ambos.
 
 **Pruebas.** El broker de pruebas de FastStream no ejecuta los hooks de la app, así que arranca la app
 con `TestApp` dentro de él:

@@ -22,6 +22,7 @@ _ROUTE_CLASS = "_nuke_di_route_class"
 
 
 _FASTAPI = DependsFramework(
+    name="FastAPI",
     depends=params.Depends,
     make_depends=Depends,
     not_started=(
@@ -41,10 +42,7 @@ class _ContainerRoute(APIRoute):
 
     def __init__(self, path: str, endpoint: Callable[..., Any], **kwargs: Any) -> None:
         # Before FastAPI reads the signatures, which happens in APIRoute.__init__
-        route_cls = type(self)
-        self.nuke_di_bindings = _bind(endpoint, route_cls)
-        for depends in kwargs.get("dependencies") or ():
-            self.nuke_di_bindings += _bind(depends.dependency, route_cls)
+        self.nuke_di_bindings = _bind_route(endpoint, kwargs, type(self))
         super().__init__(path, endpoint, **kwargs)
 
 
@@ -176,9 +174,7 @@ def _add_websocket(
 ) -> None:
     # Before FastAPI reads the signatures, which happens in APIWebSocketRoute.__init__; the dependencies of
     # the router itself are tracked already
-    bindings = _bind(endpoint, route_cls)
-    for depends in kwargs.get("dependencies") or ():
-        bindings += _bind(depends.dependency, route_cls)
+    bindings = _bind_route(endpoint, kwargs, route_cls)
     add(path, endpoint, *args, **kwargs)
     # The route FastAPI has just appended
     router.routes[-1].nuke_di_bindings = bindings  # type: ignore[attr-defined]
@@ -203,6 +199,18 @@ def _router_bindings(router: APIRouter) -> list[Binding]:
 
     visit(router)
     return unique(found)
+
+
+def _bind_route(
+    endpoint: Callable[..., Any], kwargs: dict[str, Any], route_cls: type[_ContainerRoute]
+) -> list[Binding]:
+    """
+    The clients of a route's endpoint and of the `dependencies=` it is declared with.
+    """
+    bindings = _bind(endpoint, route_cls)
+    for depends in kwargs.get("dependencies") or ():
+        bindings += _bind(depends.dependency, route_cls)
+    return bindings
 
 
 def _bind(call: Callable[..., Any] | None, route_cls: type[_ContainerRoute]) -> list[Binding]:

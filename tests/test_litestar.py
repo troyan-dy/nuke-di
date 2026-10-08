@@ -377,6 +377,11 @@ def test_one_name_for_two_clients_is_refused() -> None:
         make_app(Dependencies(), [get_user, users_is_billing])
 
 
+def test_plugin_twice() -> None:
+    with pytest.raises(TypeError, match=r"ClientPlugin was already added to this app"):
+        Litestar([get_user], plugins=[ClientPlugin(), ClientPlugin()])
+
+
 @get("/reserved")
 async def reserved(state: Database) -> None: ...
 

@@ -6,11 +6,14 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 import pytest
+from fastapi import Depends as FastAPIDepends
+from fastapi import FastAPI
 from faststream import Depends, FastStream, TestApp
 from faststream.asgi import AsgiFastStream
 from faststream.nats import NatsBroker, NatsRouter, TestNatsBroker
 
 from nuke_di import DI, BackgroundTasks, Client, Dependencies, NotSingletonClient, Shutdown
+from nuke_di.fastapi import setup as fastapi_setup
 from nuke_di.faststream import setup
 
 events: list[str] = []
@@ -321,10 +324,20 @@ async def test_asgi_app() -> None:
     assert events[1:-1] == ["Hello, user-6!"]
 
 
+async def nested_name(user_id: int, db: Database) -> str:
+    return await db.fetch_user(user_id)
+
+
+async def nested(name: Annotated[str, Depends(nested_name)]) -> None:
+    # No client of its own: only its dependency is rewritten
+    events.append(f"Hello, nested {name}!")
+
+
 async def test_app_per_container_on_one_broker() -> None:
     # E.g. a module-level broker and an app factory per test
     broker = NatsBroker()
     broker.subscriber("greet")(greet)
+    broker.subscriber("nested")(nested)
     first, second = Dependencies(), Dependencies()
     first_app = make_app(first, broker)
     second_app = make_app(second, broker)
@@ -333,11 +346,15 @@ async def test_app_per_container_on_one_broker() -> None:
         for app in (first_app, second_app, first_app):
             async with TestNatsBroker(broker) as test_broker, TestApp(app):
                 await test_broker.publish(1, "greet")
+                await test_broker.publish(2, "nested")
 
     assert [event for event in events if event.startswith("Hello")] == [
         "Hello, user-1!",
+        "Hello, nested user-2!",
         "Hello, alice!",
+        "Hello, nested alice!",
         "Hello, user-1!",
+        "Hello, nested user-2!",
     ]
     # One decorator per broker, however many apps were set up on it
     assert len(broker.config.fd_config.call_decorators) == 1
@@ -375,6 +392,44 @@ async def test_subscriber_added_after_startup_explains() -> None:
         expected = r"UserService was not started with the app: declare its subscriber on a broker of the app before"
         with pytest.raises(RuntimeError, match=expected):
             await test_broker.publish(None, "late")
+
+
+async def test_apps_sharing_a_function_run_one_at_a_time() -> None:
+    first_broker, second_broker = NatsBroker(), NatsBroker()
+    first_broker.subscriber("greet")(greet)
+    second_broker.subscriber("greet")(greet)
+    first_app = make_app(Dependencies(), first_broker)
+    second_app = make_app(Dependencies(), second_broker)
+
+    expected = r"UserService is filled for another app that is running; apps that share a handler function run one"
+    async with TestNatsBroker(first_broker), TestApp(first_app):
+        with pytest.raises(RuntimeError, match=expected):
+            async with TestNatsBroker(second_broker), TestApp(second_app):
+                pass  # pragma: no cover
+
+
+async def shared_user(user_id: int, db: Database) -> str:
+    return await db.fetch_user(user_id)
+
+
+async def shared(user: Annotated[str, Depends(shared_user)]) -> None: ...
+
+
+async def test_function_shared_with_fastapi_is_refused() -> None:
+    fastapi_app = FastAPI()
+    fastapi_setup(fastapi_app, Dependencies())
+    fastapi_app.get("/shared")(shared_fastapi)
+    app = make_app(Dependencies())
+    broker_of(app).subscriber("shared")(shared)
+
+    expected = r"shared_user takes clients in both FastAPI and FastStream handlers: .* its own function"
+    with pytest.raises(TypeError, match=expected):
+        async with TestNatsBroker(broker_of(app)), TestApp(app):
+            pass  # pragma: no cover
+
+
+async def shared_fastapi(user: Annotated[str, FastAPIDepends(shared_user)]) -> str:
+    return user
 
 
 def test_setup_twice() -> None:

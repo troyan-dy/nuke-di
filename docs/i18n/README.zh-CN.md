@@ -1647,6 +1647,9 @@ asyncio.run(main())
   `NotSingletonClient` 是每个声明它的参数一个实例，而不是每条消息一个。
 - **函数仍然是函数。** FastStream 看到的签名是 `Annotated[UserService, Depends(...)]`，
   与 [FastAPI](#fastapi) 中相同。
+- **一次一个应用。** 订阅者函数及其依赖只会被重写一次，与容器无关，因此共享它们的应用
+  （例如在模块级 broker 上每个测试一个应用）要依次运行：当另一个使用同一函数的应用正在运行时，
+  新启动的应用会启动失败。接收客户端的依赖函数只能服务于 FastAPI 或 FastStream 的处理函数，不能同时服务两者。
 
 **测试。** FastStream 的测试 broker 不运行任何应用钩子，因此要在其中用 `TestApp` 启动应用：
 

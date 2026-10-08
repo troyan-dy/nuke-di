@@ -1671,6 +1671,10 @@ The rules:
   `NotSingletonClient` is one instance per argument that declares it, not one per message.
 - **The function stays a function.** Its signature shows `Annotated[UserService, Depends(...)]` to
   FastStream, as in [FastAPI](#fastapi).
+- **One app at a time.** A subscriber function and its dependencies are rewritten once, whatever the
+  container, so apps that share them, e.g. an app per test on a module-level broker, run one after
+  another: an app that starts while another one with the same function runs fails to start. A
+  dependency function that takes clients serves either FastAPI or FastStream handlers, not both.
 
 **Testing.** FastStream's test broker runs no app hooks, so start the app with `TestApp` inside it:
 

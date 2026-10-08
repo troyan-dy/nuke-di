@@ -3,7 +3,7 @@
 Status: implemented.
 Issue: [#19](https://github.com/troyan-dy/nuke-di/issues/19), a follow-up of [#12](https://github.com/troyan-dy/nuke-di/issues/12).
 Decision record: [ADR-0004](../adr/0004-litestar-clients-by-name.md).
-Terms: see [CONTEXT.md](../../CONTEXT.md). This spec uses **Client**, **Container**, **Resolution**, **Replacement** and **Override** as defined there.
+Terms: see [CONTEXT.md](../../CONTEXT.md). This spec uses **Client**, **Container**, **Resolution**, **Replacement**, **Override**, **Run**, **Shutdown** and **Background task** as defined there.
 
 ## Problem
 

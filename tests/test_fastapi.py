@@ -437,6 +437,21 @@ def test_failed_resolution_fails_startup_and_flushes() -> None:
     assert deps.clients == {}
 
 
+def test_failed_resolution_leaves_no_timings_of_an_earlier_run() -> None:
+    deps = Dependencies()
+    app = make_app(deps)
+    app.get("/users/{user_id}")(greet)
+    with TestClient(app):
+        pass
+    assert deps.timings != []
+
+    app.get("/")(unbuildable)
+    with pytest.raises(TypeError), TestClient(app):
+        pass  # pragma: no cover
+
+    assert deps.timings == []
+
+
 async def test_container_connected_before_startup_is_left_alone() -> None:
     deps = Dependencies()
     app = make_app(deps)

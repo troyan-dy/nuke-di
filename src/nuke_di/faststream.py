@@ -5,7 +5,7 @@ See docs/specs/faststream.md and docs/adr/0003-fastapi-signature-rewrite.md.
 """
 
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 from faststream import Depends, FastStream
 from faststream.asgi import AsgiFastStream
@@ -20,6 +20,7 @@ def _noop() -> None: ...  # pragma: no cover
 
 
 _FASTSTREAM = DependsFramework(
+    name="FastStream",
     # FastStream takes `Depends` from fast-depends, whose marker class moved between its versions
     depends=type(Depends(_noop)),
     make_depends=Depends,
@@ -28,6 +29,9 @@ _FASTSTREAM = DependsFramework(
         "starts, or on a router included into that broker"
     ),
     not_connected="{client} is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`",
+    # FastStream builds a subscriber on every start, and FastStream 0.6 under a test broker before the app's
+    # lifespan runs: the signature must not change from one app to the next
+    per_container=False,
 )
 
 
@@ -46,14 +50,14 @@ class _Rewrite:
     """
     Rewrites a subscriber's function whenever FastStream builds the subscriber, i.e. on every broker start:
     a broker started without the app then raises "not connected" instead of reading the client from the
-    message. One per broker: the bindings do not depend on the container.
+    message. One per broker: a function is bound once, whatever the container.
     """
 
     def __init__(self, container: Dependencies) -> None:
         self.container = container
 
     def __call__(self, call: Callable[..., Any]) -> Callable[..., Any]:
-        _bind(call, self.container)
+        bind(call, self.container, _FASTSTREAM)
         return call
 
 
@@ -77,26 +81,12 @@ def _app_bindings(app: FastStream | AsgiFastStream, container: Dependencies) -> 
             # The dependencies of the broker and of the routers on the way
             outer = getattr(subscriber, "_outer_config", None)
             for depends in getattr(outer, "broker_dependencies", ()):
-                bindings += _bind(depends.dependency, container)
+                bindings += bind(depends.dependency, container, _FASTSTREAM)
             for item in subscriber.calls:
-                bindings += _bind(_declared(item.handler), container)
+                bindings += bind(_declared(item.handler), container, _FASTSTREAM)
                 for depends in item.dependencies:
-                    bindings += _bind(depends.dependency, container)
+                    bindings += bind(depends.dependency, container, _FASTSTREAM)
     return unique(bindings)
-
-
-def _bind(call: Callable[..., Any] | None, container: Dependencies) -> list[Binding]:
-    """
-    Rewrite `call` once, whatever the container: FastStream may build a subscriber before the app that
-    starts it, e.g. FastStream 0.6 under a test broker, so its signature must not change with the app.
-    Every startup resolves the same bindings from the container of the app that starts, so the apps that
-    share a subscriber, e.g. an app per test on a module-level broker, run one at a time.
-    """
-    marks = getattr(call, "__dict__", {})
-    owner = marks.get("__nuke_di_owner__")
-    if owner is not None and owner[1] is _FASTSTREAM:
-        return cast(list[Binding], marks["__nuke_di_bindings__"])
-    return bind(call, container, _FASTSTREAM)
 
 
 def _declared(handler: Any) -> Callable[..., Any]:
