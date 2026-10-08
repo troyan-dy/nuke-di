@@ -14,6 +14,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   duration of a `with` block and flushes the container on exit, keeping the replacements registered
   before the block. Works with the global `DI`. See "Testing" in the README
   ([#7](https://github.com/troyan-dy/nuke-di/issues/7)).
+- A pytest plugin, registered through the `pytest11` entry point, with the `di` (a fresh container) and
+  `global_di` (the global `DI`, flushed before and after the test) fixtures. They fail a test that leaves
+  its container connected. Nothing is autouse. Turn it off with `pytest -p no:nuke_di`.
 
 ### Changed
 

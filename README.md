@@ -1059,6 +1059,56 @@ The rules, shared by `mock()` and `override()`:
   Leaving a block while the container is still connected raises `ConnectError`: disconnect first,
   e.g. with `async with`.
 
+**pytest fixtures.** Installing `nuke-di` registers a pytest plugin with two fixtures. Neither is
+autouse, so existing tests run exactly as before:
+
+| Fixture     | Gives                                                  |
+|-------------|--------------------------------------------------------|
+| `di`        | A fresh `Dependencies` for one test                    |
+| `global_di` | The global `DI`, flushed before and after the test     |
+
+Both fail the test, at teardown, if it leaves the container connected, and still flush it, so the
+next test starts clean:
+
+```python
+# test_users.py, with Database, UserService and handler from the Quick start
+from nuke_di import Dependencies
+
+
+async def test_greet(di: Dependencies) -> None:
+    di.mock(Database).fetch_user.return_value = "alice"
+    users = di.resolve(UserService)
+    async with di:
+        assert await users.greet(1) == "Hello, alice!"
+
+
+async def test_handler(global_di: Dependencies) -> None:  # e.g. code that calls DI.inject()
+    global_di.mock(Database).fetch_user.return_value = "bob"
+    injected = global_di.inject(handler)
+    async with global_di:
+        assert await injected(2) == "Hello, bob!"
+
+
+async def test_forgets_to_disconnect(di: Dependencies) -> None:
+    di.resolve(UserService)
+    await di.connect()
+```
+
+```console
+$ pytest -q test_users.py
+...E                                                                     [100%]
+==================================== ERRORS ====================================
+_______________ ERROR at teardown of test_forgets_to_disconnect ________________
+the test left the container of the "di" fixture connected; its clients were not disconnected, use `async with` or call disconnect()
+=========================== short test summary info ============================
+ERROR test_users.py::test_forgets_to_disconnect - Failed: the test left the c...
+3 passed, 1 error in 0.01s
+```
+
+The fixtures cannot disconnect a forgotten container themselves: by teardown the event loop of the
+test may be closed. A project that defines its own `di` fixture keeps it, since a `conftest.py`
+fixture wins over a plugin one; `pytest -p no:nuke_di` turns the plugin off.
+
 **A job, directly.** Importing the module does not run the job, so call the function with
 mocks and parameters:
 

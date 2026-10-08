@@ -30,6 +30,9 @@ Repository = "https://github.com/troyan-dy/nuke-di"
 Issues = "https://github.com/troyan-dy/nuke-di/issues"
 Changelog = "https://github.com/troyan-dy/nuke-di/blob/master/CHANGELOG.md"
 
+[project.entry-points.pytest11]
+nuke_di = "nuke_di.pytest_plugin"
+
 [dependency-groups]
 dev = [
   "mypy>=1.13",
@@ -63,6 +66,8 @@ strict = true
 disallow_any_generics = false
 
 [tool.pytest.ini_options]
+# The plugin of this package would import nuke_di before coverage starts; tests/test_pytest_plugin.py loads it
+addopts = "-p no:nuke_di"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
