@@ -34,6 +34,10 @@ _Avoid_: Command, main, executable
 An entrypoint that runs once: it finishes when its function returns. How often it runs is decided by an external scheduler.
 _Avoid_: Cron, task, script
 
+**Parameter**:
+A command-line option of an entrypoint, declared as an annotated argument of its function that is not a client.
+_Avoid_: Argument, flag, CLI arg
+
 **Worker**:
 An entrypoint that runs until the process is asked to stop.
 _Avoid_: Daemon, consumer
