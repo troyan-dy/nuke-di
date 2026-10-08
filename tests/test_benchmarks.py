@@ -64,6 +64,9 @@ def test_compares_libraries(tmp_path: Path) -> None:
     assert lines[1].startswith("nuke-di ") and "dishka " in lines[1] and "wireup " in lines[1]
     assert lines[3].startswith("| Library ") and lines[4].startswith("|---")
     assert any(line.startswith("| dependency-injector | warm: the root again") and "| deep " in line for line in lines)
+    # The summary after the table: the best per figure in bold, the others with their ratio to it
+    assert any(line.startswith("| Lower is better ") for line in lines)
+    assert any(line.startswith("| A cached root ") and "**" in line and "×)" in line for line in lines)  # noqa: RUF001
 
     data = json.loads(out.read_text())
     assert set(data["libraries"]) == {"nuke-di", "dishka", "wireup", "dependency-injector", "injector"}

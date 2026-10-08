@@ -39,6 +39,7 @@ from run import (
     allow_recursion,
     collect,
     environment,
+    fmt,
     measure,
     request_samples,
     summary,
@@ -286,6 +287,83 @@ SCENARIOS: dict[str, Callable[[list[int], int], Iterator[Result]]] = {
 }
 
 
+# The summary: three figures that answer "which one is faster", one column per library
+
+
+@dataclass(frozen=True)
+class Figure:
+    label: str
+    scenario: str
+    shape: str
+    # None: not a tree figure; "N": the summary size
+    n: int | str | None
+
+
+FIGURES = [
+    Figure("Cold start: a container and a tree of N clients", "cold: container, registration, root", "mixed", "N"),
+    Figure("A cached root", "warm: the root again", "mixed", "N"),
+    Figure("A FastAPI request with a client", "one request, a client in the handler", "FastAPI", None),
+]
+
+
+def summary_size(sizes: list[int]) -> int:
+    # The size of an ordinary application if measured, the largest otherwise
+    return 100 if 100 in sizes else max(sizes)
+
+
+def summary_figures(results: list[Result], sizes: list[int]) -> list[tuple[str, str, dict[str, float | None]]]:
+    """
+    For every figure: its label, its unit and the median per library, `None` where the library failed.
+    """
+    n = summary_size(sizes)
+    figures = []
+    for figure in FIGURES:
+        wanted = n if figure.n == "N" else figure.n
+        label = figure.label.replace(" N ", f" {n} ")
+        medians: dict[str, float | None] = {}
+        unit = "s"
+        for result in results:
+            if result.scenario == figure.scenario and result.shape == figure.shape and result.n == wanted:
+                assert result.library is not None
+                medians[result.library] = None if result.error is not None else result.median
+                unit = result.unit
+        if medians:
+            figures.append((label, unit, medians))
+    return figures
+
+
+def pivot(results: list[Result], sizes: list[int]) -> str:
+    """
+    One row per figure, one column per library: the best in bold, the others with their ratio to it.
+    """
+    libraries = [library.name for library in LIBRARIES]
+    rows = [["Lower is better", *libraries]]
+    for label, unit, medians in summary_figures(results, sizes):
+        measured = [median for median in medians.values() if median is not None]
+        best = min(measured) if measured else None
+        cells = []
+        for library in libraries:
+            median = medians.get(library)
+            if median is None:
+                cells.append("—")
+            elif median == best:
+                cells.append(f"**{fmt(median, unit)}**")
+            else:
+                assert best is not None
+                cells.append(f"{fmt(median, unit)} ({median / best:.1f}×)")  # noqa: RUF001
+        rows.append([label, *cells])
+    widths = [max(len(row[column]) for row in rows) for column in range(len(rows[0]))]
+    lines = [
+        "| " + " | ".join(cell.ljust(width) for cell, width in zip(row, widths, strict=True)) + " |" for row in rows
+    ]
+    rule = (
+        "|"
+        + "|".join("-" * (width + 2) if column == 0 else "-" * (width + 1) + ":" for column, width in enumerate(widths))
+        + "|"
+    )
+    return "\n".join([lines[0], rule, *lines[1:]])
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="nuke-di against other DI libraries; see docs/benchmarks.md.")
     parser.add_argument(
@@ -300,6 +378,9 @@ def main(argv: list[str] | None = None) -> int:
         help=f"run one scenario, repeatable: {', '.join(SCENARIOS)}",
     )
     parser.add_argument("--json", type=Path, metavar="PATH", help="also write the figures as JSON")
+    parser.add_argument(
+        "--summary", action="store_true", help="print only the summary: the best per figure and the ratios"
+    )
     args = parser.parse_args(argv)
 
     sizes: list[int] = sorted(set(args.size or SIZES))
@@ -315,7 +396,9 @@ def main(argv: list[str] | None = None) -> int:
     for name in args.only or SCENARIOS:
         print(f"{name}...", file=sys.stderr)
         results += SCENARIOS[name](sizes, args.repeat)
-    print(table(results))
+    if not args.summary:
+        print(table(results), end="\n\n")
+    print(pivot(results, sizes))
 
     if args.json is not None:
         args.json.write_text(to_json(env, results))

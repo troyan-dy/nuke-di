@@ -26,13 +26,13 @@ which is where the baseline below comes from. CI runs `--size 10 --repeat 1` on 
 non-blocking smoke test, so the suite keeps working; there is no regression gate, a GitHub runner is too
 noisy for one.
 
-`benchmarks/compare.py` takes the same flags and runs `nuke-di` against other libraries, see
+`benchmarks/compare.py` takes the same flags, plus `--summary`, and runs `nuke-di` against other libraries, see
 [Comparison with other libraries](#comparison-with-other-libraries); its scenarios are `cold`, `warm`
 and `request`, and the libraries are the `compare` dependency group, which `uv sync` installs with the
 dev dependencies:
 
 ```console
-$ uv run --group compare python benchmarks/compare.py [--size N]... [--repeat K] [--only SCENARIO]... [--json PATH]
+$ uv run python benchmarks/compare.py [--size N]... [--repeat K] [--only SCENARIO]... [--json PATH] [--summary]
 ```
 
 ## What is measured
@@ -123,6 +123,18 @@ What is done once outside the timing, as a user does it at import: wireup's `@in
 injector's `@inject` on the classes. What stays inside: everything a container creation involves.
 The warm figure of `nuke-di` is `resolve()` of the root on a resolved container; `inject()` and the
 framework integrations use the same cache.
+
+![nuke-di against other DI libraries: lower is better](benchmarks/compare.png)
+
+The chart is `benchmarks/chart.py` over the JSON of a run, and `compare.py --summary` prints the same
+three figures as a table, the best per row in bold with the ratio of the others to it; here at
+`N = 100`, from the full run below:
+
+| Lower is better                                   | nuke-di       | dishka          | wireup          | dependency-injector | injector        |
+|---------------------------------------------------|--------------:|----------------:|----------------:|--------------------:|----------------:|
+| Cold start: a container and a tree of 100 clients | **827 µs**    | 12.6 ms (15.2×) | 21.7 ms (26.2×) | 960 µs (1.2×)       | 1.50 ms (1.8×)  |
+| A cached root                                     | 106 ns (2.8×) | 275 ns (7.3×)   | 96.8 ns (2.6×)  | **37.7 ns**         | 1.26 µs (33.4×) |
+| A FastAPI request with a client                   | **107 µs**    | 108 µs (1.0×)   | 219 µs (2.0×)   | 231 µs (2.2×)       | —               |
 
 The comparison was taken on the same machine, Python 3.11.7, with `N = 10, 100, 1000` and 20 repeats,
 on dishka 1.10.1, wireup 2.12.1, dependency-injector 4.49.1 and injector 0.24.0.

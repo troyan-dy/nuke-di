@@ -65,9 +65,10 @@ bench-all: ## Run the benchmarks on every supported Python version, JSON into do
 	done
 
 .PHONY: bench-compare
-bench-compare: ## Run the comparison with other DI libraries, JSON into docs/benchmarks/
+bench-compare: ## Run the comparison with other DI libraries, JSON and the chart into docs/benchmarks/
 	@mkdir -p docs/benchmarks
-	uv run --group compare python benchmarks/compare.py --json docs/benchmarks/compare-py$$(uv run python -c 'import sys; print("%d.%d" % sys.version_info[:2])').json
+	uv run python benchmarks/compare.py --json docs/benchmarks/compare-py$$(uv run python -c 'import sys; print("%d.%d" % sys.version_info[:2])').json
+	uv run python benchmarks/chart.py docs/benchmarks/compare-py$$(uv run python -c 'import sys; print("%d.%d" % sys.version_info[:2])').json docs/benchmarks/compare.png
 
 .PHONY: check-version
 check-version: ## Check that the version is bumped against origin/master, as CI does for a pull request

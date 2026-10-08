@@ -1990,34 +1990,24 @@ and one FastAPI request through each library's integration. The libraries are th
 group:
 
 ```console
-$ uv run --group compare python benchmarks/compare.py --only cold --size 100
-nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit e65257d · N = 100 · 20 repeats
+$ uv run python benchmarks/compare.py --size 100 --summary
+nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit e766c7b · N = 100 · 20 repeats
 nuke-di 1.8.0 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 
-| Library             | Scenario                            | Shape |   N |  Median |     p95 | Per client |
-|---------------------|-------------------------------------|-------|----:|--------:|--------:|-----------:|
-| nuke-di             | cold: container, registration, root | wide  | 100 |  687 µs |  726 µs |    6.87 µs |
-| dishka              | cold: container, registration, root | wide  | 100 | 9.16 ms | 10.6 ms |    91.6 µs |
-| wireup              | cold: container, registration, root | wide  | 100 | 18.8 ms | 19.9 ms |     188 µs |
-| dependency-injector | cold: container, registration, root | wide  | 100 |  794 µs |  809 µs |    7.94 µs |
-| injector            | cold: container, registration, root | wide  | 100 | 1.09 ms | 1.16 ms |    10.9 µs |
-| nuke-di             | cold: container, registration, root | deep  | 100 |  838 µs |  889 µs |    8.38 µs |
-| dishka              | cold: container, registration, root | deep  | 100 | 12.2 ms | 13.6 ms |     122 µs |
-| wireup              | cold: container, registration, root | deep  | 100 | 22.3 ms | 22.7 ms |     223 µs |
-| dependency-injector | cold: container, registration, root | deep  | 100 |  843 µs |  936 µs |    8.43 µs |
-| injector            | cold: container, registration, root | deep  | 100 | 1.35 ms | 1.61 ms |    13.5 µs |
-| nuke-di             | cold: container, registration, root | mixed | 100 |  836 µs |  880 µs |    8.36 µs |
-| dishka              | cold: container, registration, root | mixed | 100 | 12.4 ms | 12.8 ms |     124 µs |
-| wireup              | cold: container, registration, root | mixed | 100 | 20.5 ms | 21.1 ms |     205 µs |
-| dependency-injector | cold: container, registration, root | mixed | 100 |  961 µs | 1.08 ms |    9.61 µs |
-| injector            | cold: container, registration, root | mixed | 100 | 1.33 ms | 1.56 ms |    13.3 µs |
+| Lower is better                                   | nuke-di       | dishka          | wireup          | dependency-injector | injector        |
+|---------------------------------------------------|--------------:|----------------:|----------------:|--------------------:|----------------:|
+| Cold start: a container and a tree of 100 clients | **830 µs**    | 12.5 ms (15.1×) | 20.5 ms (24.7×) | 930 µs (1.1×)       | 1.33 ms (1.6×)  |
+| A cached root                                     | 101 ns (2.6×) | 263 ns (6.8×)   | 101 ns (2.6×)   | **38.8 ns**         | 1.25 µs (32.3×) |
+| A FastAPI request with a client                   | **104 µs**    | 105 µs (1.0×)   | 217 µs (2.1×)   | 216 µs (2.1×)       | —               |
 ```
 
-`nuke-di` builds a tree as fast as the fastest of them and 10–45 times faster than the two that
-validate the graph when the container is created; a cached root costs 40–280 ns in every library but
-injector, where it costs 1.2 µs; a FastAPI request through `nuke-di` or dishka costs 105–110 µs,
-through wireup or dependency-injector twice that. The whole table, with the method, is in
-[docs/benchmarks.md](docs/benchmarks.md#comparison-with-other-libraries).
+![nuke-di against other DI libraries: lower is better](docs/benchmarks/compare.png)
+
+So, is `nuke-di` the fastest? At building a tree and at a FastAPI request, yes: dishka and wireup pay
+15–25 times more at startup for validating the graph when the container is created, and wireup and
+dependency-injector twice as much per request. On a cached root the Cython `get()` of
+dependency-injector wins by about 70 ns, a difference no application notices. The whole table, with the
+method, is in [docs/benchmarks.md](docs/benchmarks.md#comparison-with-other-libraries).
 
 ## Development
 

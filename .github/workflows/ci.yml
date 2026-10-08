@@ -85,3 +85,4 @@ jobs:
       - run: uv sync --locked
       - run: uv run python benchmarks/run.py --size 10 --repeat 1
       - run: uv run python benchmarks/compare.py --size 10 --repeat 1
+      - run: uv run python benchmarks/chart.py docs/benchmarks/compare-py3.11.json compare.png
