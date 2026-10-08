@@ -366,9 +366,9 @@ the whole tree is built before startup.
 async def main() -> None:
     deps = Dependencies()
     injected = deps.inject(handler)  # build the tree
-    async with deps:                 # connect
+    async with deps:  # connect
         await injected(42)
-        deps.resolve(Cache)          # ConnectError: already connected
+        deps.resolve(Cache)  # ConnectError: already connected
 ```
 
 ## Workers and jobs
@@ -533,7 +533,9 @@ async def sync(
     pg: Postgres,
     warehouse: Warehouse,
     day: Annotated[datetime.date, Option(help="Day to copy, YYYY-MM-DD", short="d")],
-    tables: Annotated[list[str] | None, Option(help="Table to copy, repeat for several; all by default", short="t")] = None,
+    tables: Annotated[
+        list[str] | None, Option(help="Table to copy, repeat for several; all by default", short="t")
+    ] = None,
     mode: Mode = Mode.INCREMENTAL,
     dry_run: Annotated[bool, Option(help="Read the changes, write nothing")] = False,
 ) -> None:
@@ -647,10 +649,10 @@ These signatures are bugs in the code rather than in the command line. They fail
 `InvalidSignatureError` and exit code `1`:
 
 ```python
-async def sync(day: dict[str, int]) -> None: ...                       # unsupported type
+async def sync(day: dict[str, int]) -> None: ...  # unsupported type
 async def sync(pg: Annotated[Postgres, Option(help="...")]) -> None: ...  # Option on a client
-async def sync(help: bool = False) -> None: ...                        # clashes with --help
-async def sync(day: int, /) -> None: ...                               # positional-only
+async def sync(help: bool = False) -> None: ...  # clashes with --help
+async def sync(day: int, /) -> None: ...  # positional-only
 ```
 
 #### Parameters in tests
