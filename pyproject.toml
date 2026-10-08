@@ -23,6 +23,9 @@ keywords = [
   "graceful-shutdown",
   "cli",
   "fastapi",
+  "litestar",
+  "faststream",
+  "kafka",
   "pytest",
   "microservices",
   "kubernetes",
@@ -58,11 +61,19 @@ nuke_di = "nuke_di.pytest_plugin"
 fastapi = [
     "fastapi>=0.105",
 ]
+faststream = [
+    "faststream>=0.6",
+]
+litestar = [
+    "litestar>=2.15",
+]
 
 [dependency-groups]
 dev = [
   "fastapi>=0.142.4",
+  "faststream[nats]>=0.7.7",
   "httpx2>=2.13.1",
+  "litestar>=2.24",
   "mypy>=1.13",
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
