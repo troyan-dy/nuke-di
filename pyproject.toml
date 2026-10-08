@@ -25,7 +25,6 @@ keywords = [
   "fastapi",
   "litestar",
   "faststream",
-  "kafka",
   "pytest",
   "microservices",
   "kubernetes",
