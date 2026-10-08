@@ -3,7 +3,7 @@ from unittest.mock import call
 
 import pytest
 
-from nuke_di import DI, Client, Dependencies
+from nuke_di import DI, Client, ConnectError, Dependencies, NotSingletonClient
 
 
 class InnerDeps(Client):
@@ -55,3 +55,52 @@ async def test_with_fixture(mock_client: PublicClient, app_like_fixture: Depende
     await cli.add(1, 2)
 
     assert mock_client.add.await_args_list == [call(1, 2)]  # type: ignore
+
+
+class Session(NotSingletonClient):
+    pass
+
+
+class UsesSession(Client):
+    def __init__(self, session: Session):
+        self.session = session
+
+
+def test_mock_after_resolve_raises() -> None:
+    dep = Dependencies()
+    dep.resolve(PublicClient)
+
+    with pytest.raises(ConnectError, match=r"InnerDeps is already resolved, call mock\(\) before resolve\(\)"):
+        dep.mock(InnerDeps)
+
+
+def test_mock_not_singleton_after_resolve_raises() -> None:
+    dep = Dependencies()
+    dep.resolve(UsesSession)
+
+    with pytest.raises(ConnectError, match="Session is already resolved"):
+        dep.mock(Session)
+
+
+def test_mock_twice_returns_the_same_mock() -> None:
+    dep = Dependencies()
+
+    assert dep.mock(InnerDeps) is dep.mock(InnerDeps)
+
+
+def test_mock_with_another_replacement_raises() -> None:
+    dep = Dependencies()
+    dep.mock(InnerDeps)
+
+    with pytest.raises(ConnectError, match="InnerDeps is already mocked"):
+        dep.mock(InnerDeps, InnerDeps())
+
+
+def test_mock_after_flush() -> None:
+    dep = Dependencies()
+    dep.resolve(PublicClient)
+    dep.flush()
+
+    inner = dep.mock(InnerDeps)
+
+    assert dep.resolve(PublicClient).inner is inner

@@ -356,10 +356,11 @@ when you need isolation, e.g. in tests.
 | `connect()`          | Call `connect()` on every resolved client, layer by layer.              |
 | `disconnect()`       | Call `disconnect()` layer by layer in reverse, then `flush()` the container. |
 | `async with`         | `connect()` on enter, `disconnect()` on exit.                           |
-| `mock(cls, new=None)`| Register a replacement for `cls` (an autospec mock by default).         |
+| `mock(cls, new=None)`| Register a replacement for `cls` (an autospec mock by default). Must come before `cls` is resolved. |
+| `override(cls, new=None)` | `mock()` for the duration of a `with` block, then `flush()`; see [Testing](#testing). |
 | `flush()`            | Forget every resolved client.                                           |
 
-`resolve`, `inject`, `mock` and `flush` only work while the container is disconnected:
+`resolve`, `inject`, `mock`, `override` and `flush` only work while the container is disconnected:
 the whole tree is built before startup.
 
 ```python
@@ -996,6 +997,68 @@ async def test_greet() -> None:
     assert db.fetch_user.await_args_list == [call(1)]
 ```
 
+**A client for one block, with `override()`.** `override(cls, new=None)` registers a replacement
+like `mock()` and cleans up after the block: on exit the container is flushed, so nothing resolved
+with the replacement leaks into the next test. It works with the global `DI` too:
+
+```python
+# test_greet.py, with Database, UserService and handler from the Quick start
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+async def test_greet_with_fake() -> None:
+    with DI.override(Database, FakeDatabase()):
+        injected = DI.inject(handler)
+        async with DI:
+            print(await injected(1))
+
+    print("after the block:", DI.clients)
+
+
+async def test_greet_with_autospec() -> None:
+    with DI.override(Database) as db:  # an autospec mock by default
+        db.fetch_user.return_value = "bob"
+        injected = DI.inject(handler)
+        async with DI:
+            print(await injected(2))
+
+    db.fetch_user.assert_awaited_once_with(2)
+```
+
+```console
+$ pytest -q -s test_greet.py
+Hello, alice!
+after the block: OrderedDict()
+.Hello, bob!
+.
+2 passed in 0.01s
+```
+
+The rules, shared by `mock()` and `override()`:
+
+- **Replace before you resolve.** A replacement registered after `cls` was resolved would reach
+  only the consumers resolved later, while the earlier ones keep the real client. Both methods raise
+  instead:
+
+  ```python
+  DI.inject(handler)  # resolves UserService -> Database
+  DI.mock(Database)  # ConnectError: Database is already resolved, call mock() before resolve() or inject()
+  ```
+
+- **One replacement per class.** Asking for the same class again returns the replacement already
+  registered; passing a different `new` raises `ConnectError: Database is already mocked`.
+- **Replacements are not connected.** Their `connect()` / `disconnect()` are never called, and they
+  do not take part in the [layers](#layers).
+- **`override()` blocks nest.** Leaving a block keeps the replacements registered before it, e.g.
+  by an outer block or by `mock()`.
+  Leaving a block while the container is still connected raises `ConnectError`: disconnect first,
+  e.g. with `async with`.
+
 **A job, directly.** Importing the module does not run the job, so call the function with
 mocks and parameters:
 
@@ -1069,7 +1132,7 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 | Exception                   | Raised when                                               |
 |-----------------------------|-----------------------------------------------------------|
 | `InitializeDependencyError` | A client's `__init__` raised                              |
-| `ConnectError`              | A client's `connect()` raised, or the container state is wrong (e.g. resolving after connect) |
+| `ConnectError`              | A client's `connect()` raised, or the container state is wrong (e.g. resolving after connect, mocking a client that is already resolved) |
 | `ConnectTimeoutError`       | A client's `connect()` exceeded `CONNECT_TIMEOUT_SECONDS` |
 | `InvalidSignatureError`     | `inject()` got a function with an argument without a type hint, or an entrypoint parameter has an unsupported type or a clashing flag |
 | `UsageError`                | The command line of a worker or a job does not match its parameters; recorded as `Run.error`, exit code `2` |

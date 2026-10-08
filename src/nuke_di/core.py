@@ -3,7 +3,7 @@ import contextlib
 import inspect
 import logging
 from collections import OrderedDict, defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, TypeVar, cast, get_type_hints
@@ -43,6 +43,8 @@ class Dependencies:
     connected: bool = field(default=False, init=False)
     # Layer of every client in `connect_clients`, keyed by `id()`: dataclass clients may be unhashable
     _layers: dict[int, int] = field(default_factory=dict, init=False)
+    # Replacements registered by `mock()`, a subset of `clients`
+    _mocks: dict[type[NotSingletonClient], NotSingletonClient] = field(default_factory=dict, init=False)
 
     async def __aenter__(self) -> None:
         await self.connect()
@@ -57,6 +59,7 @@ class Dependencies:
         self.clients = OrderedDict()
         self.connect_clients = []
         self._layers = {}
+        self._mocks = {}
 
     async def connect(self) -> None:
         if self.connected is True:
@@ -200,7 +203,46 @@ class Dependencies:
     def mock(self, cls: type[CT], new: CT | None = None) -> CT:
         if self.connected is True:
             raise ConnectError("already connected")
-        return self.clients.setdefault(cls, new or create_autospec(cls))  # type: ignore[return-value]
+
+        name = sname(cls)
+        current = self._mocks.get(cls)
+        if current is not None:
+            if new is not None and new is not current:
+                raise ConnectError(f"{name} is already mocked")
+            return cast(CT, current)
+        # Consumers resolved before would keep the real client while the caller holds the mock
+        if self._is_resolved(cls):
+            raise ConnectError(f"{name} is already resolved, call mock() before resolve() or inject()")
+
+        self._register_mock(cls, create_autospec(cls) if new is None else new)
+        return cast(CT, self._mocks[cls])
+
+    @contextlib.contextmanager
+    def override(self, cls: type[CT], new: CT | None = None) -> Iterator[CT]:
+        """
+        Replace `cls` like `mock()` for the duration of the block.
+
+        On exit the container is flushed, keeping only the replacements registered before the block,
+        so nothing resolved with this replacement outlives the block.
+        """
+        enclosing = dict(self._mocks)
+        mocked = self.mock(cls, new)
+        try:
+            yield mocked
+        finally:
+            if self.connected is True:
+                raise ConnectError(f"override({sname(cls)}) exited while the container is connected")
+            self.flush()
+            for enclosing_cls, enclosing_new in enclosing.items():
+                self._register_mock(enclosing_cls, enclosing_new)
+
+    def _is_resolved(self, cls: type[NotSingletonClient]) -> bool:
+        # A NotSingletonClient is never cached in `clients`, only its instances are in `connect_clients`
+        return cls in self.clients or any(type(client) is cls for client in self.connect_clients)
+
+    def _register_mock(self, cls: type[NotSingletonClient], new: NotSingletonClient) -> None:
+        self.clients[cls] = new
+        self._mocks[cls] = new
 
     def _inspect(self, func: Callable) -> dict[str, NotSingletonClient]:
         logger.debug('Parsing signature of func "%s"', sname(func))

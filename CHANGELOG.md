@@ -6,6 +6,23 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-08
+
+### Added
+
+- `Dependencies.override(cls, new=None)`: a context manager that replaces a client like `mock()` for the
+  duration of a `with` block and flushes the container on exit, keeping the replacements registered
+  before the block. Works with the global `DI`. See "Testing" in the README
+  ([#7](https://github.com/troyan-dy/nuke-di/issues/7)).
+
+### Changed
+
+- `mock(cls)` raises `ConnectError` when `cls` is already resolved. Before, it silently returned the real
+  client and the test ran against it while holding what it took for a mock. Register replacements
+  before `resolve()` / `inject()`.
+- `mock(cls, new)` raises `ConnectError` when `cls` already has a different replacement; before, `new`
+  was silently ignored. Calling `mock(cls)` again still returns the registered replacement.
+
 ## [1.2.0] - 2026-10-08
 
 ### Added
@@ -77,7 +94,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/troyan-dy/nuke-di/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/troyan-dy/nuke-di/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/troyan-dy/nuke-di/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/troyan-dy/nuke-di/releases/tag/v1.0.0
