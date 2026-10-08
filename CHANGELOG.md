@@ -6,6 +6,16 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-10-08
+
+### Added
+
+- `docs/adr/0005-third-party-objects-as-client-classes.md`: third-party objects are wrapped in `Client`
+  subclasses; provider functions and built-in connectors
+  ([#8](https://github.com/troyan-dy/nuke-di/issues/8)) are rejected, with the design principle behind
+  it, also stated in AGENTS.md: keep the apparent simplicity, a feature reachable in a simpler existing
+  way is not added.
+
 ## [1.7.0] - 2026-10-08
 
 ### Added
@@ -201,7 +211,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/troyan-dy/nuke-di/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/troyan-dy/nuke-di/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/troyan-dy/nuke-di/compare/v1.5.2...v1.6.0
 [1.5.2]: https://github.com/troyan-dy/nuke-di/compare/v1.5.1...v1.5.2
