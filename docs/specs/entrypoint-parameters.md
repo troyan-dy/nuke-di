@@ -84,7 +84,7 @@ The command line does not match the Parameters: an unknown option, a missing req
 ## Mapping
 
 - The flag is `--` plus the argument name with `_` replaced by `-`; `dest` is the argument name. `Option.short` adds `-<short>`.
-- An argument without a default is a required option. An argument with a default is optional, and the default is appended to its help as `(default: …)`, an `Enum` member shown by name.
+- An argument without a default is a required option. An argument with a default is optional, and the default is appended to its help as `(default: …)`, an `Enum` member shown by name; a default of `None` is not shown.
 - The parser never sets defaults (`default=argparse.SUPPRESS`): an option that is not given is left out, and Python applies the function's default.
 - `T | None` and `Optional[T]` are unwrapped to `T`. `Annotated` is unwrapped outside and inside the union.
 

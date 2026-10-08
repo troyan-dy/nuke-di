@@ -156,7 +156,8 @@ def _by_name(cls: type[enum.Enum]) -> Converter:
 
 def _help(option: Option, param: inspect.Parameter) -> str | None:
     parts = [] if option.help is None else [option.help]
-    if param.default is not param.empty:
+    # A default of None means "not given", showing it says nothing
+    if param.default is not param.empty and param.default is not None:
         parts.append(f"(default: {_show(param.default)})")
     # argparse expands %-formatting in help texts
     return " ".join(parts).replace("%", "%%") or None

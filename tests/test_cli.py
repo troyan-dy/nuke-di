@@ -198,7 +198,8 @@ def test_help_text() -> None:
     assert "Day to sync, 100%" in text
     assert "--color {RED,GREEN}" in text
     assert "(default: RED)" in text
-    assert "(default: None)" in text
+    # None means "not given", showing it is noise
+    assert "(default: None)" not in text
     assert "--dry-run, --no-dry-run" in text
     assert "Only print (default: False)" in text
     assert "(default: a b)" in text
