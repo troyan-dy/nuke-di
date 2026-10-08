@@ -1991,6 +1991,41 @@ nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 11f591
 прогоняет набор как smoke-тест, без порога: раннер GitHub слишком шумный, чтобы на нём что-то
 блокировать.
 
+`benchmarks/compare.py` прогоняет те же деревья через dishka, wireup, dependency-injector и injector,
+регистрируя одни и те же классы так, как принято в каждой библиотеке: холодный контейнер с
+разрешённым корнем, повторное получение корня и один запрос FastAPI через интеграцию каждой
+библиотеки. Библиотеки лежат в группе зависимостей `compare`:
+
+```console
+$ uv run --group compare python benchmarks/compare.py --only cold --size 100
+nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit e65257d · N = 100 · 20 repeats
+nuke-di 1.8.0 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+| Library             | Scenario                            | Shape |   N |  Median |     p95 | Per client |
+|---------------------|-------------------------------------|-------|----:|--------:|--------:|-----------:|
+| nuke-di             | cold: container, registration, root | wide  | 100 |  687 µs |  726 µs |    6.87 µs |
+| dishka              | cold: container, registration, root | wide  | 100 | 9.16 ms | 10.6 ms |    91.6 µs |
+| wireup              | cold: container, registration, root | wide  | 100 | 18.8 ms | 19.9 ms |     188 µs |
+| dependency-injector | cold: container, registration, root | wide  | 100 |  794 µs |  809 µs |    7.94 µs |
+| injector            | cold: container, registration, root | wide  | 100 | 1.09 ms | 1.16 ms |    10.9 µs |
+| nuke-di             | cold: container, registration, root | deep  | 100 |  838 µs |  889 µs |    8.38 µs |
+| dishka              | cold: container, registration, root | deep  | 100 | 12.2 ms | 13.6 ms |     122 µs |
+| wireup              | cold: container, registration, root | deep  | 100 | 22.3 ms | 22.7 ms |     223 µs |
+| dependency-injector | cold: container, registration, root | deep  | 100 |  843 µs |  936 µs |    8.43 µs |
+| injector            | cold: container, registration, root | deep  | 100 | 1.35 ms | 1.61 ms |    13.5 µs |
+| nuke-di             | cold: container, registration, root | mixed | 100 |  836 µs |  880 µs |    8.36 µs |
+| dishka              | cold: container, registration, root | mixed | 100 | 12.4 ms | 12.8 ms |     124 µs |
+| wireup              | cold: container, registration, root | mixed | 100 | 20.5 ms | 21.1 ms |     205 µs |
+| dependency-injector | cold: container, registration, root | mixed | 100 |  961 µs | 1.08 ms |    9.61 µs |
+| injector            | cold: container, registration, root | mixed | 100 | 1.33 ms | 1.56 ms |    13.3 µs |
+```
+
+`nuke-di` строит дерево так же быстро, как самая быстрая из них, и в 10–45 раз быстрее двух библиотек,
+которые валидируют граф при создании контейнера; закэшированный корень стоит 40–280 ns во всех
+библиотеках, кроме injector, где он стоит 1,2 µs; запрос FastAPI через `nuke-di` или dishka стоит
+105–110 µs, через wireup или dependency-injector — вдвое больше. Полная таблица с методикой — в
+[docs/benchmarks.md](../benchmarks.md#comparison-with-other-libraries).
+
 ## <a id="development"></a>Разработка
 
 ```bash

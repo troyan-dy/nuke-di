@@ -26,6 +26,14 @@ which is where the baseline below comes from. CI runs `--size 10 --repeat 1` on 
 non-blocking smoke test, so the suite keeps working; there is no regression gate, a GitHub runner is too
 noisy for one.
 
+`benchmarks/compare.py` takes the same flags and runs `nuke-di` against other libraries, see
+[Comparison with other libraries](#comparison-with-other-libraries); its scenarios are `cold`, `warm`
+and `request`, and the libraries are the `compare` dependency group:
+
+```console
+$ uv run --group compare python benchmarks/compare.py [--size N]... [--repeat K] [--only SCENARIO]... [--json PATH]
+```
+
 ## What is measured
 
 Every tree is built from classes made with `dataclasses.make_dataclass`, so each client has a real
@@ -94,6 +102,144 @@ Python 3.11.7, 3.12.5, 3.13.14 and 3.14.6, each in a fresh `uv` environment from
 - **A resolved client takes about 400 bytes**: 400 kB for the 1000-client mixed tree.
 - Between versions, `resolve()` is within 15% (3.11 the fastest), `connect()` is fastest on 3.14, and
   the request figures of 3.14 are a few percent above the others.
+
+## Comparison with other libraries
+
+`benchmarks/compare.py` runs the same trees through [dishka](https://github.com/reagento/dishka),
+[wireup](https://github.com/maldoinc/wireup),
+[dependency-injector](https://github.com/ets-labs/python-dependency-injector) and
+[injector](https://github.com/python-injector/injector), the libraries a project choosing `nuke-di`
+would otherwise consider. `make bench-compare` writes the JSON into `docs/benchmarks/`. Every library
+gets the same classes, with the dependencies in the type hints of `__init__`, and does the same work:
+
+| Scenario | The figure |
+|----------|------------|
+| `cold: container, registration, root` | Create a container, register the `N` classes and get the root, which constructs every client of the tree: what an application pays once at startup. For dishka and wireup it includes the validation of the graph their container does on creation; for dependency-injector, creating one `Singleton` provider per class on a `DynamicContainer`; for injector, an `Injector` with a binding per class |
+| `warm: the root again` | Get the root again from that container: the singleton, independent of `N` |
+| `one request, a client in the handler` | One FastAPI request to a handler that takes one client through the library's integration: `nuke_di.fastapi`, `DishkaRoute` with `FromDishka[...]`, `wireup.integration.fastapi` with `Injected[...]`, `@inject` with `Depends(Provide[...])` for dependency-injector, each as its documentation shows. injector has no integration of its own |
+
+What is done once outside the timing, as a user does it at import: wireup's `@injectable` and
+injector's `@inject` on the classes. What stays inside: everything a container creation involves.
+The warm figure of `nuke-di` is `resolve()` of the root on a resolved container; `inject()` and the
+framework integrations use the same cache.
+
+The comparison was taken on the same machine, Python 3.11.7, with `N = 10, 100, 1000` and 20 repeats,
+on dishka 1.10.1, wireup 2.12.1, dependency-injector 4.49.1 and injector 0.24.0.
+
+- **A cold tree costs 8–13 µs per client in `nuke-di`**, the same as dependency-injector (9–12 µs) and
+  injector (11–16 µs), which, like `nuke-di`, read the signatures and build the tree on demand. dishka
+  (90–135 µs per client) and wireup (190–590 µs) validate the whole graph when the container is created:
+  10–45 times more, 0.1–0.6 s for 1000 clients. That is the price of their startup checks, paid once.
+- **A cached root costs 40–280 ns**: 38 ns in dependency-injector (Cython), 95 ns in wireup, 100–110 ns
+  in `nuke-di`, 270–285 ns in dishka, and 1.2 µs in injector, which resolves the binding on every `get()`.
+- **A FastAPI request through `nuke-di` or dishka costs 107–108 µs**, the same as a plain `Depends()`
+  (102–114 µs in the baseline above). Through wireup it costs 219 µs and through dependency-injector
+  231 µs, twice that: their integrations do more per request, as their documentation wires them; what
+  exactly is not investigated here.
+- A chain of 1000 clients exceeds the default recursion limit in injector as well as in `nuke-di`
+  (see above); the runner raises the limit, which is enough for `nuke-di`, dishka, wireup and
+  dependency-injector but not for injector.
+
+### Python 3.11.7, nuke-di 1.8.0 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit e65257d · N = 10, 100, 1000 · 20 repeats
+
+| Library             | Scenario                             | Shape   |    N |         Median |     p95 | Per client |
+|---------------------|--------------------------------------|---------|-----:|---------------:|--------:|-----------:|
+| nuke-di             | cold: container, registration, root  | wide    |   10 |        71.6 µs | 86.2 µs |    7.16 µs |
+| dishka              | cold: container, registration, root  | wide    |   10 |        1.42 ms | 1.66 ms |     142 µs |
+| wireup              | cold: container, registration, root  | wide    |   10 |        2.27 ms | 2.55 ms |     227 µs |
+| dependency-injector | cold: container, registration, root  | wide    |   10 |        80.4 µs |  107 µs |    8.04 µs |
+| injector            | cold: container, registration, root  | wide    |   10 |         117 µs |  139 µs |    11.7 µs |
+| nuke-di             | cold: container, registration, root  | wide    |  100 |         851 µs | 1.21 ms |    8.51 µs |
+| dishka              | cold: container, registration, root  | wide    |  100 |        9.60 ms | 12.7 ms |    96.0 µs |
+| wireup              | cold: container, registration, root  | wide    |  100 |        22.3 ms | 26.3 ms |     223 µs |
+| dependency-injector | cold: container, registration, root  | wide    |  100 |         803 µs |  899 µs |    8.03 µs |
+| injector            | cold: container, registration, root  | wide    |  100 |        1.17 ms | 1.28 ms |    11.7 µs |
+| nuke-di             | cold: container, registration, root  | wide    | 1000 |        7.85 ms | 9.01 ms |    7.85 µs |
+| dishka              | cold: container, registration, root  | wide    | 1000 |        91.2 ms | 97.6 ms |    91.2 µs |
+| wireup              | cold: container, registration, root  | wide    | 1000 |         191 ms |  210 ms |     191 µs |
+| dependency-injector | cold: container, registration, root  | wide    | 1000 |        11.9 ms | 12.8 ms |    11.9 µs |
+| injector            | cold: container, registration, root  | wide    | 1000 |        11.3 ms | 12.6 ms |    11.3 µs |
+| nuke-di             | cold: container, registration, root  | deep    |   10 |        65.6 µs | 68.5 µs |    6.56 µs |
+| dishka              | cold: container, registration, root  | deep    |   10 |        1.59 ms | 2.08 ms |     159 µs |
+| wireup              | cold: container, registration, root  | deep    |   10 |        2.30 ms | 2.50 ms |     230 µs |
+| dependency-injector | cold: container, registration, root  | deep    |   10 |        86.5 µs |  110 µs |    8.65 µs |
+| injector            | cold: container, registration, root  | deep    |   10 |         169 µs |  251 µs |    16.9 µs |
+| nuke-di             | cold: container, registration, root  | deep    |  100 |         849 µs |  963 µs |    8.49 µs |
+| dishka              | cold: container, registration, root  | deep    |  100 |        12.0 ms | 13.7 ms |     120 µs |
+| wireup              | cold: container, registration, root  | deep    |  100 |        22.2 ms | 27.0 ms |     222 µs |
+| dependency-injector | cold: container, registration, root  | deep    |  100 |         846 µs |  997 µs |    8.46 µs |
+| injector            | cold: container, registration, root  | deep    |  100 |        1.33 ms | 1.84 ms |    13.3 µs |
+| nuke-di             | cold: container, registration, root  | deep    | 1000 |        13.0 ms | 14.5 ms |    13.0 µs |
+| dishka              | cold: container, registration, root  | deep    | 1000 |         134 ms |  195 ms |     134 µs |
+| wireup              | cold: container, registration, root  | deep    | 1000 |         587 ms |  626 ms |     587 µs |
+| dependency-injector | cold: container, registration, root  | deep    | 1000 |        9.05 ms | 9.85 ms |    9.05 µs |
+| injector            | cold: container, registration, root  | deep    | 1000 | RecursionError |         |            |
+| nuke-di             | cold: container, registration, root  | mixed   |   10 |        83.1 µs | 92.3 µs |    8.31 µs |
+| dishka              | cold: container, registration, root  | mixed   |   10 |        1.71 ms | 1.88 ms |     171 µs |
+| wireup              | cold: container, registration, root  | mixed   |   10 |        2.34 ms | 2.46 ms |     234 µs |
+| dependency-injector | cold: container, registration, root  | mixed   |   10 |         103 µs |  109 µs |    10.3 µs |
+| injector            | cold: container, registration, root  | mixed   |   10 |         149 µs |  156 µs |    14.9 µs |
+| nuke-di             | cold: container, registration, root  | mixed   |  100 |         827 µs |  882 µs |    8.27 µs |
+| dishka              | cold: container, registration, root  | mixed   |  100 |        12.6 ms | 16.5 ms |     126 µs |
+| wireup              | cold: container, registration, root  | mixed   |  100 |        21.7 ms | 44.5 ms |     217 µs |
+| dependency-injector | cold: container, registration, root  | mixed   |  100 |         960 µs | 1.21 ms |    9.60 µs |
+| injector            | cold: container, registration, root  | mixed   |  100 |        1.50 ms | 1.68 ms |    15.0 µs |
+| nuke-di             | cold: container, registration, root  | mixed   | 1000 |        8.63 ms | 9.07 ms |    8.63 µs |
+| dishka              | cold: container, registration, root  | mixed   | 1000 |         117 ms |  207 ms |     117 µs |
+| wireup              | cold: container, registration, root  | mixed   | 1000 |         237 ms |  257 ms |     237 µs |
+| dependency-injector | cold: container, registration, root  | mixed   | 1000 |        9.05 ms | 9.54 ms |    9.05 µs |
+| injector            | cold: container, registration, root  | mixed   | 1000 |        15.8 ms | 17.5 ms |    15.8 µs |
+| nuke-di             | warm: the root again                 | wide    |   10 |         108 ns |  110 ns |            |
+| dishka              | warm: the root again                 | wide    |   10 |         279 ns |  282 ns |            |
+| wireup              | warm: the root again                 | wide    |   10 |        96.2 ns | 96.9 ns |            |
+| dependency-injector | warm: the root again                 | wide    |   10 |        38.8 ns | 38.8 ns |            |
+| injector            | warm: the root again                 | wide    |   10 |        1.22 µs | 1.26 µs |            |
+| nuke-di             | warm: the root again                 | wide    |  100 |         105 ns |  116 ns |            |
+| dishka              | warm: the root again                 | wide    |  100 |         262 ns |  268 ns |            |
+| wireup              | warm: the root again                 | wide    |  100 |        99.1 ns |  120 ns |            |
+| dependency-injector | warm: the root again                 | wide    |  100 |        39.2 ns | 43.8 ns |            |
+| injector            | warm: the root again                 | wide    |  100 |        1.23 µs | 1.29 µs |            |
+| nuke-di             | warm: the root again                 | wide    | 1000 |         109 ns |  130 ns |            |
+| dishka              | warm: the root again                 | wide    | 1000 |         265 ns |  292 ns |            |
+| wireup              | warm: the root again                 | wide    | 1000 |        94.5 ns |  101 ns |            |
+| dependency-injector | warm: the root again                 | wide    | 1000 |        38.8 ns | 44.8 ns |            |
+| injector            | warm: the root again                 | wide    | 1000 |        1.21 µs | 1.28 µs |            |
+| nuke-di             | warm: the root again                 | deep    |   10 |         106 ns |  115 ns |            |
+| dishka              | warm: the root again                 | deep    |   10 |         271 ns |  283 ns |            |
+| wireup              | warm: the root again                 | deep    |   10 |        92.2 ns |  102 ns |            |
+| dependency-injector | warm: the root again                 | deep    |   10 |        37.3 ns | 44.6 ns |            |
+| injector            | warm: the root again                 | deep    |   10 |        1.22 µs | 1.25 µs |            |
+| nuke-di             | warm: the root again                 | deep    |  100 |         103 ns |  103 ns |            |
+| dishka              | warm: the root again                 | deep    |  100 |         286 ns |  303 ns |            |
+| wireup              | warm: the root again                 | deep    |  100 |        97.2 ns | 97.6 ns |            |
+| dependency-injector | warm: the root again                 | deep    |  100 |        39.0 ns | 40.3 ns |            |
+| injector            | warm: the root again                 | deep    |  100 |        1.23 µs | 1.29 µs |            |
+| nuke-di             | warm: the root again                 | deep    | 1000 |         101 ns |  101 ns |            |
+| dishka              | warm: the root again                 | deep    | 1000 |         279 ns |  304 ns |            |
+| wireup              | warm: the root again                 | deep    | 1000 |        95.8 ns | 96.5 ns |            |
+| dependency-injector | warm: the root again                 | deep    | 1000 |        37.2 ns | 41.9 ns |            |
+| injector            | warm: the root again                 | deep    | 1000 | RecursionError |         |            |
+| nuke-di             | warm: the root again                 | mixed   |   10 |         110 ns |  138 ns |            |
+| dishka              | warm: the root again                 | mixed   |   10 |         275 ns |  315 ns |            |
+| wireup              | warm: the root again                 | mixed   |   10 |         101 ns |  113 ns |            |
+| dependency-injector | warm: the root again                 | mixed   |   10 |        37.3 ns | 41.8 ns |            |
+| injector            | warm: the root again                 | mixed   |   10 |        1.24 µs | 1.31 µs |            |
+| nuke-di             | warm: the root again                 | mixed   |  100 |         106 ns |  112 ns |            |
+| dishka              | warm: the root again                 | mixed   |  100 |         275 ns |  293 ns |            |
+| wireup              | warm: the root again                 | mixed   |  100 |        96.8 ns |  119 ns |            |
+| dependency-injector | warm: the root again                 | mixed   |  100 |        37.7 ns | 44.6 ns |            |
+| injector            | warm: the root again                 | mixed   |  100 |        1.26 µs | 1.33 µs |            |
+| nuke-di             | warm: the root again                 | mixed   | 1000 |         109 ns |  118 ns |            |
+| dishka              | warm: the root again                 | mixed   | 1000 |         285 ns |  323 ns |            |
+| wireup              | warm: the root again                 | mixed   | 1000 |        97.4 ns | 97.8 ns |            |
+| dependency-injector | warm: the root again                 | mixed   | 1000 |        38.8 ns | 38.9 ns |            |
+| injector            | warm: the root again                 | mixed   | 1000 |        1.24 µs | 1.26 µs |            |
+| nuke-di             | one request, a client in the handler | FastAPI |      |         107 µs |  115 µs |            |
+| dishka              | one request, a client in the handler | FastAPI |      |         108 µs |  121 µs |            |
+| wireup              | one request, a client in the handler | FastAPI |      |         219 µs |  271 µs |            |
+| dependency-injector | one request, a client in the handler | FastAPI |      |         231 µs |  310 µs |            |
 
 ## Baseline
 

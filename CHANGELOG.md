@@ -20,6 +20,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   records the baseline on Python 3.11, 3.12, 3.13 and 3.14, with the JSON in `docs/benchmarks/`; CI runs
   the suite as a non-blocking smoke test; see "Performance" in the README
   ([#25](https://github.com/troyan-dy/nuke-di/issues/25)).
+- `benchmarks/compare.py` runs the same trees through dishka, wireup, dependency-injector and injector:
+  a cold container with its registration and the root, the root again, and one FastAPI request to a
+  handler that takes a client through each library's integration. The libraries are the `compare`
+  dependency group (`uv sync --group compare`), the figures are in `docs/benchmarks.md`.
 
 ## [1.7.1] - 2026-10-08
 

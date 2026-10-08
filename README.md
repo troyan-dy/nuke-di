@@ -1984,6 +1984,41 @@ FastAPI handler that takes a client through `nuke-di` costs the same as one with
 `import nuke_di` takes 26–35 ms, most of it `asyncio`. CI runs the suite as a smoke test, without a
 threshold: a GitHub runner is too noisy to gate on.
 
+`benchmarks/compare.py` runs the same trees through dishka, wireup, dependency-injector and injector,
+each registering the same classes its own way: a cold container with the root resolved, the root again,
+and one FastAPI request through each library's integration. The libraries are the `compare` dependency
+group:
+
+```console
+$ uv run --group compare python benchmarks/compare.py --only cold --size 100
+nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit e65257d · N = 100 · 20 repeats
+nuke-di 1.8.0 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+| Library             | Scenario                            | Shape |   N |  Median |     p95 | Per client |
+|---------------------|-------------------------------------|-------|----:|--------:|--------:|-----------:|
+| nuke-di             | cold: container, registration, root | wide  | 100 |  687 µs |  726 µs |    6.87 µs |
+| dishka              | cold: container, registration, root | wide  | 100 | 9.16 ms | 10.6 ms |    91.6 µs |
+| wireup              | cold: container, registration, root | wide  | 100 | 18.8 ms | 19.9 ms |     188 µs |
+| dependency-injector | cold: container, registration, root | wide  | 100 |  794 µs |  809 µs |    7.94 µs |
+| injector            | cold: container, registration, root | wide  | 100 | 1.09 ms | 1.16 ms |    10.9 µs |
+| nuke-di             | cold: container, registration, root | deep  | 100 |  838 µs |  889 µs |    8.38 µs |
+| dishka              | cold: container, registration, root | deep  | 100 | 12.2 ms | 13.6 ms |     122 µs |
+| wireup              | cold: container, registration, root | deep  | 100 | 22.3 ms | 22.7 ms |     223 µs |
+| dependency-injector | cold: container, registration, root | deep  | 100 |  843 µs |  936 µs |    8.43 µs |
+| injector            | cold: container, registration, root | deep  | 100 | 1.35 ms | 1.61 ms |    13.5 µs |
+| nuke-di             | cold: container, registration, root | mixed | 100 |  836 µs |  880 µs |    8.36 µs |
+| dishka              | cold: container, registration, root | mixed | 100 | 12.4 ms | 12.8 ms |     124 µs |
+| wireup              | cold: container, registration, root | mixed | 100 | 20.5 ms | 21.1 ms |     205 µs |
+| dependency-injector | cold: container, registration, root | mixed | 100 |  961 µs | 1.08 ms |    9.61 µs |
+| injector            | cold: container, registration, root | mixed | 100 | 1.33 ms | 1.56 ms |    13.3 µs |
+```
+
+`nuke-di` builds a tree as fast as the fastest of them and 10–45 times faster than the two that
+validate the graph when the container is created; a cached root costs 40–280 ns in every library but
+injector, where it costs 1.2 µs; a FastAPI request through `nuke-di` or dishka costs 105–110 µs,
+through wireup or dependency-injector twice that. The whole table, with the method, is in
+[docs/benchmarks.md](docs/benchmarks.md#comparison-with-other-libraries).
+
 ## Development
 
 ```bash

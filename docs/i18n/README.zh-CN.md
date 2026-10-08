@@ -1955,6 +1955,37 @@ JSON，便于日后比较。[docs/benchmarks.md](../benchmarks.md) 解释每个�
 `import nuke_di` 耗时 26–35 ms，大部分来自 `asyncio`。CI 把这套基准作为冒烟测试运行，不设阈值：GitHub runner 的噪声太大，
 不适合作为门禁。
 
+`benchmarks/compare.py` 把同样的依赖树交给 dishka、wireup、dependency-injector 和 injector，各自按自己的方式注册同一组类：
+冷启动的容器并解析根节点、再次获取根节点，以及通过各库的集成发起一次 FastAPI 请求。这些库位于 `compare` 依赖组：
+
+```console
+$ uv run --group compare python benchmarks/compare.py --only cold --size 100
+nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit e65257d · N = 100 · 20 repeats
+nuke-di 1.8.0 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+| Library             | Scenario                            | Shape |   N |  Median |     p95 | Per client |
+|---------------------|-------------------------------------|-------|----:|--------:|--------:|-----------:|
+| nuke-di             | cold: container, registration, root | wide  | 100 |  687 µs |  726 µs |    6.87 µs |
+| dishka              | cold: container, registration, root | wide  | 100 | 9.16 ms | 10.6 ms |    91.6 µs |
+| wireup              | cold: container, registration, root | wide  | 100 | 18.8 ms | 19.9 ms |     188 µs |
+| dependency-injector | cold: container, registration, root | wide  | 100 |  794 µs |  809 µs |    7.94 µs |
+| injector            | cold: container, registration, root | wide  | 100 | 1.09 ms | 1.16 ms |    10.9 µs |
+| nuke-di             | cold: container, registration, root | deep  | 100 |  838 µs |  889 µs |    8.38 µs |
+| dishka              | cold: container, registration, root | deep  | 100 | 12.2 ms | 13.6 ms |     122 µs |
+| wireup              | cold: container, registration, root | deep  | 100 | 22.3 ms | 22.7 ms |     223 µs |
+| dependency-injector | cold: container, registration, root | deep  | 100 |  843 µs |  936 µs |    8.43 µs |
+| injector            | cold: container, registration, root | deep  | 100 | 1.35 ms | 1.61 ms |    13.5 µs |
+| nuke-di             | cold: container, registration, root | mixed | 100 |  836 µs |  880 µs |    8.36 µs |
+| dishka              | cold: container, registration, root | mixed | 100 | 12.4 ms | 12.8 ms |     124 µs |
+| wireup              | cold: container, registration, root | mixed | 100 | 20.5 ms | 21.1 ms |     205 µs |
+| dependency-injector | cold: container, registration, root | mixed | 100 |  961 µs | 1.08 ms |    9.61 µs |
+| injector            | cold: container, registration, root | mixed | 100 | 1.33 ms | 1.56 ms |    13.3 µs |
+```
+
+`nuke-di` 构建依赖树的速度与其中最快者相当，比两个在创建容器时校验图的库快 10–45 倍；缓存的根节点在除 injector（1.2 µs）之外的所有库中
+耗时 40–280 ns；通过 `nuke-di` 或 dishka 的 FastAPI 请求耗时 105–110 µs，通过 wireup 或 dependency-injector 则是其两倍。
+完整表格和方法见 [docs/benchmarks.md](../benchmarks.md#comparison-with-other-libraries)。
+
 ## <a id="development"></a>开发
 
 ```bash

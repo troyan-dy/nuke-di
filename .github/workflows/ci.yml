@@ -82,5 +82,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
-      - run: uv sync --locked
+      - run: uv sync --locked --group compare
       - run: uv run python benchmarks/run.py --size 10 --repeat 1
+      - run: uv run python benchmarks/compare.py --size 10 --repeat 1

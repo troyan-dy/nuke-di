@@ -1990,6 +1990,41 @@ por capa; un handler de FastAPI que recibe un cliente a través de `nuke-di` cue
 `Depends()` normal; `import nuke_di` tarda 26–35 ms, la mayor parte en `asyncio`. CI ejecuta la suite como
 prueba de humo, sin umbral: un runner de GitHub es demasiado ruidoso para bloquear con él.
 
+`benchmarks/compare.py` pasa los mismos árboles por dishka, wireup, dependency-injector e injector,
+registrando las mismas clases como lo hace cada biblioteca: un contenedor frío con la raíz resuelta, la
+raíz de nuevo y una petición FastAPI a través de la integración de cada biblioteca. Las bibliotecas están
+en el grupo de dependencias `compare`:
+
+```console
+$ uv run --group compare python benchmarks/compare.py --only cold --size 100
+nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit e65257d · N = 100 · 20 repeats
+nuke-di 1.8.0 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+| Library             | Scenario                            | Shape |   N |  Median |     p95 | Per client |
+|---------------------|-------------------------------------|-------|----:|--------:|--------:|-----------:|
+| nuke-di             | cold: container, registration, root | wide  | 100 |  687 µs |  726 µs |    6.87 µs |
+| dishka              | cold: container, registration, root | wide  | 100 | 9.16 ms | 10.6 ms |    91.6 µs |
+| wireup              | cold: container, registration, root | wide  | 100 | 18.8 ms | 19.9 ms |     188 µs |
+| dependency-injector | cold: container, registration, root | wide  | 100 |  794 µs |  809 µs |    7.94 µs |
+| injector            | cold: container, registration, root | wide  | 100 | 1.09 ms | 1.16 ms |    10.9 µs |
+| nuke-di             | cold: container, registration, root | deep  | 100 |  838 µs |  889 µs |    8.38 µs |
+| dishka              | cold: container, registration, root | deep  | 100 | 12.2 ms | 13.6 ms |     122 µs |
+| wireup              | cold: container, registration, root | deep  | 100 | 22.3 ms | 22.7 ms |     223 µs |
+| dependency-injector | cold: container, registration, root | deep  | 100 |  843 µs |  936 µs |    8.43 µs |
+| injector            | cold: container, registration, root | deep  | 100 | 1.35 ms | 1.61 ms |    13.5 µs |
+| nuke-di             | cold: container, registration, root | mixed | 100 |  836 µs |  880 µs |    8.36 µs |
+| dishka              | cold: container, registration, root | mixed | 100 | 12.4 ms | 12.8 ms |     124 µs |
+| wireup              | cold: container, registration, root | mixed | 100 | 20.5 ms | 21.1 ms |     205 µs |
+| dependency-injector | cold: container, registration, root | mixed | 100 |  961 µs | 1.08 ms |    9.61 µs |
+| injector            | cold: container, registration, root | mixed | 100 | 1.33 ms | 1.56 ms |    13.3 µs |
+```
+
+`nuke-di` construye un árbol tan rápido como la más rápida de ellas y 10–45 veces más rápido que las dos
+que validan el grafo al crear el contenedor; una raíz en caché cuesta 40–280 ns en todas salvo en
+injector, donde cuesta 1,2 µs; una petición FastAPI a través de `nuke-di` o dishka cuesta 105–110 µs, a
+través de wireup o dependency-injector el doble. La tabla completa, con el método, está en
+[docs/benchmarks.md](../benchmarks.md#comparison-with-other-libraries).
+
 ## <a id="development"></a>Desarrollo
 
 ```bash

@@ -68,6 +68,12 @@ litestar = [
 ]
 
 [dependency-groups]
+compare = [
+    "dependency-injector>=4.49.1",
+    "dishka>=1.10.1",
+    "injector>=0.24.0",
+    "wireup>=2.12.1",
+]
 dev = [
   "fastapi>=0.142.4",
   "faststream[nats]>=0.7.7",

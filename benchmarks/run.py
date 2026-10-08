@@ -52,6 +52,10 @@ class Result:
     unit: str = "s"
     # Whether `median / n` means something: not for a cache hit, which does not depend on the tree
     per_client: bool = True
+    # The library measured, in a comparison (benchmarks/compare.py)
+    library: str | None = None
+    # Why there are no samples, e.g. a RecursionError of the library on a deep tree
+    error: str | None = None
 
     @property
     def median(self) -> float:
@@ -65,7 +69,7 @@ class Result:
 
     @property
     def per_client_value(self) -> float | None:
-        if self.n is None or not self.per_client:
+        if self.n is None or not self.per_client or self.error is not None:
             return None
         return self.median / self.n
 
@@ -317,12 +321,14 @@ def overrides_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
 
 def fastapi_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
     try:
-        import httpx
         from fastapi import Depends, FastAPI
 
         from nuke_di.fastapi import setup
     except ImportError as exc:
         print(f"fastapi: skipped, {exc.name} is not installed", file=sys.stderr)
+        return
+    if importlib.util.find_spec("httpx") is None:
+        print("fastapi: skipped, httpx is not installed", file=sys.stderr)
         return
 
     class PlainDatabase:
@@ -353,9 +359,18 @@ def fastapi_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
         ("a plain FastAPI Depends()", plain_app, "/depends"),
         ("no dependencies", plain_app, "/plain"),
     ]
-    loops = 200
+    for shape, app, path in rows:
+        yield Result("one request", shape, None, asyncio.run(request_samples(app, path, repeat)))
 
-    async def requests(http: httpx.AsyncClient, path: str) -> float:
+
+async def request_samples(app: Any, path: str, repeat: int, loops: int = 200) -> list[float]:
+    """
+    Seconds per `GET path` on the FastAPI `app` through the ASGI transport of httpx, `repeat` samples of
+    `loops` requests each after a warm-up, with the lifespan of the app running as on a server.
+    """
+    import httpx
+
+    async def sample(http: httpx.AsyncClient) -> float:
         gc.disable()
         try:
             started = time.perf_counter()
@@ -365,20 +380,12 @@ def fastapi_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
         finally:
             gc.enable()
 
-    async def run() -> list[Result]:
-        results = []
-        # What the server does on startup: connects the clients of the routes
-        async with nuke_app.router.lifespan_context(nuke_app):
-            for shape, app, path in rows:
-                transport = httpx.ASGITransport(app=app)
-                async with httpx.AsyncClient(transport=transport, base_url="http://benchmark") as http:
-                    response = await http.get(path)
-                    assert response.status_code == 200, response.text
-                    samples = [await requests(http, path) for _ in range(repeat)]
-                    results.append(Result("one request", shape, None, samples))
-        return results
-
-    yield from asyncio.run(run())
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://benchmark") as http:
+            response = await http.get(path)
+            assert response.status_code == 200, response.text
+            return [await sample(http) for _ in range(repeat)]
 
 
 def import_seconds(module: str) -> float:
@@ -464,22 +471,32 @@ def fmt(value: float, unit: str) -> str:
 
 
 def table(results: list[Result]) -> str:
-    rows = [["Scenario", "Shape", "N", "Median", "p95", "Per client"]]
+    # The Library column only in a comparison
+    libraries = any(result.library is not None for result in results)
+    rows = [["Library"] * libraries + ["Scenario", "Shape", "N", "Median", "p95", "Per client"]]
     for result in results:
         per_client = result.per_client_value
-        rows.append(
-            [
-                result.scenario,
-                result.shape,
-                "" if result.n is None else str(result.n),
+        figures = (
+            [result.error, "", ""]
+            if result.error is not None
+            else [
                 fmt(result.median, result.unit),
                 fmt(result.p95, result.unit),
                 "" if per_client is None else fmt(per_client, result.unit),
             ]
         )
+        rows.append(
+            [
+                *([result.library or ""] if libraries else []),
+                result.scenario,
+                result.shape,
+                "" if result.n is None else str(result.n),
+                *figures,
+            ]
+        )
     widths = [max(len(row[column]) for row in rows) for column in range(len(rows[0]))]
     # Text columns left-aligned, numbers right-aligned
-    numeric = [False, False, True, True, True, True]
+    numeric = [False] * libraries + [False, False, True, True, True, True]
 
     def line(row: list[str]) -> str:
         cells = [
@@ -526,15 +543,17 @@ def summary(env: dict[str, Any]) -> str:
 def to_json(env: dict[str, Any], results: list[Result]) -> str:
     rows = [
         {
+            **({"library": result.library} if result.library is not None else {}),
             "scenario": result.scenario,
             "shape": result.shape,
             "n": result.n,
             "unit": result.unit,
-            "median": result.median,
-            "p95": result.p95,
-            "min": min(result.samples),
+            "median": None if result.error is not None else result.median,
+            "p95": None if result.error is not None else result.p95,
+            "min": None if result.error is not None else min(result.samples),
             "per_client": result.per_client_value,
             "samples": result.samples,
+            **({"error": result.error} if result.error is not None else {}),
         }
         for result in results
     ]
