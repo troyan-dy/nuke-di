@@ -22,7 +22,7 @@ FastAPI、Litestar 和 FastStream 的处理函数也以同样的方式通过类�
 
 - [安装](#installation)
 - [快速开始](#quick-start)
-- [客户端](#clients)：[单例](#client-and-notsingletonclient)、[生命周期](#connect-and-disconnect)、[dataclass](#dataclass-clients)、[层](#layers)、[连接失败](#when-a-client-fails-to-connect)、[解析错误](#when-the-tree-cannot-be-built)
+- [客户端](#clients)：[单例](#client-and-notsingletonclient)、[生命周期](#connect-and-disconnect)、[dataclass](#dataclass-clients)、[层](#layers)、[启动耗时](#startup-timings)、[连接失败](#when-a-client-fails-to-connect)、[解析错误](#when-the-tree-cannot-be-built)
 - [容器](#the-container)
 - [worker 与 job](#workers-and-jobs)：[第一个 job](#your-first-job)、[参数](#parameters)、[第一个 worker](#your-first-worker)、[宽限期](#grace-period)、[后台任务](#background-tasks)、[退出码](#exit-codes)、[钩子](#hooks)、[Kubernetes](#running-in-kubernetes)
 - 框架：[FastAPI](#fastapi)、[Litestar](#litestar)、[FastStream](#faststream)
@@ -261,16 +261,25 @@ Connecting layer 0: Postgres, Redis
 Connecting client Postgres
 Connecting client Redis
   redis ready
+Connected client Redis in 0.101s
   postgres ready
+Connected client Postgres in 0.201s
 Connecting layer 1: Payments
 Connecting client Payments
+Connected client Payments in 0.000s
 Connecting layer 2: Checkout
 Connecting client Checkout
+Connected client Checkout in 0.000s
+Connected 4 clients in 3 layers in 0.20s (slowest: Postgres 0.20s, Redis 0.10s, Payments 0.00s)
 -- application is running --
 Disconnecting client Checkout
+Disconnected client Checkout in 0.000s
 Disconnecting client Payments
+Disconnected client Payments in 0.000s
 Disconnecting client Postgres
+Disconnected client Postgres in 0.000s
 Disconnecting client Redis
+Disconnected client Redis in 0.000s
 ```
 
 ```text
@@ -281,6 +290,83 @@ Postgres, Redis                  layer 0  <- connect together, in 0.2s rather th
 
 只有在 `__init__` 中声明的依赖才参与排序。如果某个客户端需要另一个客户端先连接好，就把它声明为依赖。
 设置 `CONNECT_CONCURRENCY` 可以限制同时连接的客户端数量。
+
+### <a id="startup-timings"></a>启动耗时
+
+容器会测量每个客户端的 `connect()` 和 `disconnect()`，因此启动变慢时能直接找到原因。
+`connect()` 成功后，它会以 `INFO` 级别输出一条汇总；对于耗时超过 `CONNECT_TIMEOUT_SECONDS`
+一半的客户端，还会输出一条 `WARNING`，远在该客户端开始因超时而失败之前：
+
+```python
+# startup.py
+import asyncio
+import logging
+
+from nuke_di import Client, Dependencies, DependenciesSettings
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+
+class Postgres(Client):
+    async def connect(self) -> None:
+        await asyncio.sleep(0.2)
+
+
+class Kafka(Client):
+    async def connect(self) -> None:
+        await asyncio.sleep(1.6)
+
+    async def disconnect(self) -> None:
+        await asyncio.sleep(0.3)
+
+
+class Orders(Client):
+    def __init__(self, pg: Postgres, kafka: Kafka) -> None:
+        self.pg, self.kafka = pg, kafka
+
+
+async def main() -> None:
+    deps = Dependencies(settings=DependenciesSettings(connect_timeout=3))
+    deps.resolve(Orders)
+    async with deps:
+        print("-- application is running --")
+
+    for t in deps.timings:
+        print(
+            f"{t.name:<8} layer {t.layer}  connect {t.connect:.2f}s {t.connect_outcome:<3}  "
+            f"disconnect {t.disconnect:.2f}s {t.disconnect_outcome}"
+        )
+
+
+asyncio.run(main())
+```
+
+```console
+$ python startup.py
+INFO Connected 3 clients in 2 layers in 1.60s (slowest: Kafka 1.60s, Postgres 0.20s, Orders 0.00s)
+WARNING Client Kafka took 1.60s to connect, more than half of CONNECT_TIMEOUT_SECONDS (3s)
+-- application is running --
+Postgres layer 0  connect 0.20s ok   disconnect 0.00s ok
+Kafka    layer 0  connect 1.60s ok   disconnect 0.30s ok
+Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
+```
+
+`deps.timings` 按连接顺序为最近一次 `connect()` 的每个客户端保存一个 `ClientTiming`。
+它在 `disconnect()` 之后依然保留，因此可以在容器停止后读取。在 FastAPI 应用中，传给 `FastAPI()`
+的 lifespan 运行在已连接的容器内部，因此能看到连接耗时。
+worker 或 job 会在 [`Run.clients`](#startup-metrics-and-structured-logs) 中得到同一个列表。
+
+| `ClientTiming` 字段  | 值 |
+|----------------------|----|
+| `name`               | 客户端的类名 |
+| `layer`              | 客户端所在的[层](#layers) |
+| `connect`            | 在 `connect()` 中花费的秒数，不含等待 `CONNECT_CONCURRENCY` 的时间；`connect()` 从未运行时为 `None` |
+| `connect_outcome`    | `"ok"`、`"failed"`、`"timed_out"`、`"cancelled"`；`connect()` 从未开始时为 `None` |
+| `disconnect`、`disconnect_outcome` | `disconnect()` 的对应值；客户端断开之前为 `None` |
+
+当某个客户端连接失败时，同一层中仍在连接的客户端为 `"cancelled"`，更高的层保持 `None`，
+已经连接的客户端会被回滚，因此会得到 `disconnect_outcome`。库只负责测量：把耗时导出为
+指标或 span 由你的代码完成。
 
 ### <a id="when-a-client-fails-to-connect"></a>客户端连接失败时
 
@@ -420,6 +506,7 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 | `mock(cls, new=None)`| 为 `cls` 注册一个替换对象（默认为 autospec mock），有效期到下一次 `flush()` 为止。必须在 `cls` 被解析之前调用。 |
 | `override(cls, new=None)` | 仅在 `with` 块内有效的替换对象，块结束后执行 `flush()`；参见[测试](#testing)。 |
 | `flush()`            | 丢弃所有已解析的客户端。                                                |
+| `timings`            | 最近一次 `connect()` 的每个客户端一个 `ClientTiming`；见[启动耗时](#startup-timings)。 |
 
 `resolve`、`inject`、`mock`、`override` 和 `flush` 只能在容器未连接时使用：
 整棵树在启动之前就已构建完成。
@@ -540,11 +627,12 @@ $ python -m app.jobs.sync
 INFO  nuke_di.run: Starting job app.jobs.sync.sync
 postgres: connected
 warehouse: connected
+INFO  nuke_di.core: Connected 4 clients in 1 layer in 0.00s (slowest: Warehouse 0.00s, Postgres 0.00s, Shutdown 0.00s)
 postgres: upserted 3 rows into users
 postgres: upserted 3 rows into orders
 postgres: disconnected
 warehouse: disconnected
-INFO  nuke_di.run: Run app.jobs.sync.sync finished with exit code 0 in 0.001s
+INFO  nuke_di.run: Run app.jobs.sync.sync finished with exit code 0 in 0.002s
 ```
 
 #### <a id="one-entrypoint-per-module-defined-last"></a>每个模块一个入口点，并放在最后定义
@@ -976,9 +1064,77 @@ hook: exit code 2 in 0.0s, error: UsageError("argument --limit: invalid int valu
 | `exit_code`   | 进程的退出码，在 `on_finish` 之前设置                                  |
 | `error`       | 导致运行失败的异常，例如 `UsageError`；否则为 `None`                   |
 | `signal`      | 收到的第一个终止信号；否则为 `None`                                    |
+| `clients`     | 每个客户端一个 `ClientTiming`：连接和断开的耗时与结果；运行在连接前失败时为空 |
 
 钩子是普通对象，不是客户端：它们自行管理自己的资源。钩子中的异常
 会被记录到日志，但不会改变退出码。`--help` 不算一次运行，因此钩子看不到它。
+
+#### <a id="startup-metrics-and-structured-logs"></a>启动指标与结构化日志
+
+`run.clients` 是导出启动指标的地方：`on_finish` 能看到每个客户端连接和断开各用了多久。
+此外，`nuke_di` 的每条日志记录都带有结构化字段，JSON formatter 无需解析消息文本即可按客户端
+过滤和聚合：
+
+```python
+# app/jobs/startup.py
+import json
+import logging
+
+from nuke_di import Run, job
+
+from app.clients import Postgres, Warehouse
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        fields = {key: getattr(record, key) for key in ("run", "client", "layer", "duration") if hasattr(record, key)}
+        return json.dumps({"level": record.levelname, "message": record.getMessage(), **fields})
+
+
+handler = logging.StreamHandler()
+handler.setFormatter(JsonFormatter())
+logging.basicConfig(level=logging.INFO, handlers=[handler])
+
+
+class StartupMetrics:
+    async def on_start(self, run: Run) -> None:
+        pass
+
+    async def on_finish(self, run: Run) -> None:
+        for client in run.clients:
+            print(f"metric: {client.name} connect={client.connect:.3f}s {client.connect_outcome}")
+
+
+@job(hooks=[StartupMetrics()])
+async def startup(pg: Postgres, warehouse: Warehouse) -> None:
+    print("startup: done")
+```
+
+```console
+$ python -m app.jobs.startup
+{"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
+postgres: connected
+warehouse: connected
+{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00015945796621963382}
+startup: done
+postgres: disconnected
+warehouse: disconnected
+{"level": "INFO", "message": "Run app.jobs.startup.startup finished with exit code 0 in 0.001s", "run": "app.jobs.startup.startup", "duration": 0.001171}
+metric: Shutdown connect=0.000s ok
+metric: BackgroundTasks connect=0.000s ok
+metric: Postgres connect=0.000s ok
+metric: Warehouse connect=0.000s ok
+```
+
+| 字段       | 出现在                                                                        |
+|------------|-------------------------------------------------------------------------------|
+| `run`      | 在 worker 或 job 内产生的每条记录，包括容器的记录：运行的名称                 |
+| `client`   | 关于单个客户端的每条记录：解析、连接、断开、失败                              |
+| `layer`    | 关于客户端连接或断开的每条记录，以及 `Connecting layer`                       |
+| `duration` | 秒数：已连接或已断开的客户端、启动汇总、已结束的运行                          |
+
+每次运行还会连接它自己的 `Shutdown` 和 `BackgroundTasks` 客户端，所以它们也会出现在
+`run.clients` 和汇总中。
 
 ### <a id="running-in-kubernetes"></a>在 Kubernetes 中运行
 
@@ -1764,7 +1920,8 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 理应停止。如果需要不同的行为，请显式捕获它们；
 原始异常可以通过 `__cause__` 获取。
 
-`nuke-di` 通过标准的 `logging` 模块，以 `nuke_di` logger 输出日志。
+`nuke-di` 通过标准的 `logging` 模块，以 `nuke_di` logger 输出日志，并带有供日志管道使用的
+[结构化字段](#startup-metrics-and-structured-logs)。
 
 ## <a id="development"></a>开发
 

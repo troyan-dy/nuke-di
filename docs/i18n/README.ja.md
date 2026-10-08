@@ -18,7 +18,7 @@
 
 - [インストール](#installation)
 - [クイックスタート](#quick-start)
-- [クライアント](#clients)：[シングルトン](#client-and-notsingletonclient)、[ライフサイクル](#connect-and-disconnect)、[データクラス](#dataclass-clients)、[レイヤー](#layers)、[接続の失敗](#when-a-client-fails-to-connect)、[解決エラー](#when-the-tree-cannot-be-built)
+- [クライアント](#clients)：[シングルトン](#client-and-notsingletonclient)、[ライフサイクル](#connect-and-disconnect)、[データクラス](#dataclass-clients)、[レイヤー](#layers)、[起動時間](#startup-timings)、[接続の失敗](#when-a-client-fails-to-connect)、[解決エラー](#when-the-tree-cannot-be-built)
 - [コンテナ](#the-container)
 - [ワーカーとジョブ](#workers-and-jobs)：[ジョブ](#your-first-job)、[パラメータ](#parameters)、[ワーカー](#your-first-worker)、[猶予期間](#grace-period)、[バックグラウンドタスク](#background-tasks)、[終了コード](#exit-codes)、[フック](#hooks)、[Kubernetes](#running-in-kubernetes)
 - フレームワーク：[FastAPI](#fastapi)、[Litestar](#litestar)、[FastStream](#faststream)
@@ -250,16 +250,25 @@ Connecting layer 0: Postgres, Redis
 Connecting client Postgres
 Connecting client Redis
   redis ready
+Connected client Redis in 0.101s
   postgres ready
+Connected client Postgres in 0.201s
 Connecting layer 1: Payments
 Connecting client Payments
+Connected client Payments in 0.000s
 Connecting layer 2: Checkout
 Connecting client Checkout
+Connected client Checkout in 0.000s
+Connected 4 clients in 3 layers in 0.20s (slowest: Postgres 0.20s, Redis 0.10s, Payments 0.00s)
 -- application is running --
 Disconnecting client Checkout
+Disconnected client Checkout in 0.000s
 Disconnecting client Payments
+Disconnected client Payments in 0.000s
 Disconnecting client Postgres
+Disconnected client Postgres in 0.000s
 Disconnecting client Redis
+Disconnected client Redis in 0.000s
 ```
 
 ```text
@@ -269,6 +278,84 @@ Postgres, Redis                  layer 0  <- connect together, in 0.2s rather th
 ```
 
 順序が保証されるのは、`__init__` で宣言された依存関係だけです。あるクライアントより先に別のクライアントを接続しておく必要があるなら、それを依存関係として宣言してください。同時に接続するクライアントの数を制限するには、`CONNECT_CONCURRENCY` を設定します。
+
+### <a id="startup-timings"></a>起動時間
+
+コンテナはすべてのクライアントの `connect()` と `disconnect()` を計測するため、起動が遅いときに
+原因のクライアントがすぐわかります。`connect()` が成功すると `INFO` で要約を出力し、
+`CONNECT_TIMEOUT_SECONDS` の半分より長くかかったクライアントごとに `WARNING` を出力します。
+そのクライアントがタイムアウトで失敗し始めるよりずっと前に気づけます：
+
+```python
+# startup.py
+import asyncio
+import logging
+
+from nuke_di import Client, Dependencies, DependenciesSettings
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+
+class Postgres(Client):
+    async def connect(self) -> None:
+        await asyncio.sleep(0.2)
+
+
+class Kafka(Client):
+    async def connect(self) -> None:
+        await asyncio.sleep(1.6)
+
+    async def disconnect(self) -> None:
+        await asyncio.sleep(0.3)
+
+
+class Orders(Client):
+    def __init__(self, pg: Postgres, kafka: Kafka) -> None:
+        self.pg, self.kafka = pg, kafka
+
+
+async def main() -> None:
+    deps = Dependencies(settings=DependenciesSettings(connect_timeout=3))
+    deps.resolve(Orders)
+    async with deps:
+        print("-- application is running --")
+
+    for t in deps.timings:
+        print(
+            f"{t.name:<8} layer {t.layer}  connect {t.connect:.2f}s {t.connect_outcome:<3}  "
+            f"disconnect {t.disconnect:.2f}s {t.disconnect_outcome}"
+        )
+
+
+asyncio.run(main())
+```
+
+```console
+$ python startup.py
+INFO Connected 3 clients in 2 layers in 1.60s (slowest: Kafka 1.60s, Postgres 0.20s, Orders 0.00s)
+WARNING Client Kafka took 1.60s to connect, more than half of CONNECT_TIMEOUT_SECONDS (3s)
+-- application is running --
+Postgres layer 0  connect 0.20s ok   disconnect 0.00s ok
+Kafka    layer 0  connect 1.60s ok   disconnect 0.30s ok
+Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
+```
+
+`deps.timings` は直近の `connect()` のクライアントごとに `ClientTiming` を接続順に 1 つずつ保持します。
+`disconnect()` の後も残るので、コンテナの停止後にも読み取れます。FastAPI アプリでは、`FastAPI()` に渡した
+lifespan は接続済みのコンテナの内側で動くので、接続時間を参照できます。
+ワーカーやジョブは同じリストを [`Run.clients`](#startup-metrics-and-structured-logs) で受け取ります。
+
+| `ClientTiming` のフィールド | 値 |
+|-----------------------------|----|
+| `name`               | クライアントのクラス名 |
+| `layer`              | クライアントの[レイヤー](#layers) |
+| `connect`            | `connect()` にかかった秒数。`CONNECT_CONCURRENCY` の待ち時間は含みません。`connect()` が一度も実行されなかった場合は `None` |
+| `connect_outcome`    | `"ok"`、`"failed"`、`"timed_out"`、`"cancelled"`。`connect()` が始まらなかった場合は `None` |
+| `disconnect`、`disconnect_outcome` | `disconnect()` について同じもの。クライアントが切断されるまでは `None` |
+
+あるクライアントの接続が失敗すると、同じレイヤーでまだ接続中のクライアントは `"cancelled"` になり、
+上のレイヤーは `None` のままで、すでに接続していたクライアントはロールバックされて `disconnect_outcome`
+を持ちます。ライブラリは計測するだけです。時間をメトリクスやスパンとしてエクスポートするのはあなたのコードの役割です。
 
 ### <a id="when-a-client-fails-to-connect"></a>クライアントの接続に失敗した場合
 
@@ -399,6 +486,7 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 | `mock(cls, new=None)`| 次の `flush()` まで有効な `cls` の差し替え（デフォルトは autospec モック）を登録します。`cls` が解決される前に呼び出す必要があります。 |
 | `override(cls, new=None)` | `with` ブロックの間だけ有効な差し替えを登録し、ブロックの終了後に `flush()` します。[テスト](#testing)を参照してください。 |
 | `flush()`            | 解決済みのクライアントをすべて破棄します。                              |
+| `timings`            | 直近の `connect()` のクライアントごとの `ClientTiming`。[起動時間](#startup-timings)を参照。 |
 
 `resolve`、`inject`、`mock`、`override`、`flush` は、コンテナが切断されている間しか使えません。ツリー全体は起動前に構築されます。
 
@@ -515,11 +603,12 @@ $ python -m app.jobs.sync
 INFO  nuke_di.run: Starting job app.jobs.sync.sync
 postgres: connected
 warehouse: connected
+INFO  nuke_di.core: Connected 4 clients in 1 layer in 0.00s (slowest: Warehouse 0.00s, Postgres 0.00s, Shutdown 0.00s)
 postgres: upserted 3 rows into users
 postgres: upserted 3 rows into orders
 postgres: disconnected
 warehouse: disconnected
-INFO  nuke_di.run: Run app.jobs.sync.sync finished with exit code 0 in 0.001s
+INFO  nuke_di.run: Run app.jobs.sync.sync finished with exit code 0 in 0.002s
 ```
 
 #### <a id="one-entrypoint-per-module-defined-last"></a>エントリーポイントはモジュールにひとつ、最後に定義する
@@ -919,8 +1008,76 @@ hook: exit code 2 in 0.0s, error: UsageError("argument --limit: invalid int valu
 | `exit_code`        | プロセスの終了コード。`on_finish` の前に設定されます                   |
 | `error`            | 実行を失敗させた例外（`UsageError` など）、または `None`               |
 | `signal`           | 最初に受信した終了シグナル、または `None`                              |
+| `clients`          | クライアントごとの `ClientTiming`：接続と切断の時間と結果。接続前に実行が失敗した場合は空 |
 
 フックはクライアントではなく普通のオブジェクトで、自身のリソースは自分で管理します。フック内で発生した例外はログに記録され、終了コードには影響しません。`--help` は実行ではないので、フックからは見えません。
+
+#### <a id="startup-metrics-and-structured-logs"></a>起動メトリクスと構造化ログ
+
+起動メトリクスをエクスポートするのは `run.clients` です。`on_finish` では、各クライアントの接続と切断に
+かかった時間がわかります。さらに `nuke_di` のすべてのログレコードには構造化フィールドが付くので、
+JSON フォーマッターはメッセージを解析せずにクライアント単位で絞り込みや集計ができます：
+
+```python
+# app/jobs/startup.py
+import json
+import logging
+
+from nuke_di import Run, job
+
+from app.clients import Postgres, Warehouse
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        fields = {key: getattr(record, key) for key in ("run", "client", "layer", "duration") if hasattr(record, key)}
+        return json.dumps({"level": record.levelname, "message": record.getMessage(), **fields})
+
+
+handler = logging.StreamHandler()
+handler.setFormatter(JsonFormatter())
+logging.basicConfig(level=logging.INFO, handlers=[handler])
+
+
+class StartupMetrics:
+    async def on_start(self, run: Run) -> None:
+        pass
+
+    async def on_finish(self, run: Run) -> None:
+        for client in run.clients:
+            print(f"metric: {client.name} connect={client.connect:.3f}s {client.connect_outcome}")
+
+
+@job(hooks=[StartupMetrics()])
+async def startup(pg: Postgres, warehouse: Warehouse) -> None:
+    print("startup: done")
+```
+
+```console
+$ python -m app.jobs.startup
+{"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
+postgres: connected
+warehouse: connected
+{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00015945796621963382}
+startup: done
+postgres: disconnected
+warehouse: disconnected
+{"level": "INFO", "message": "Run app.jobs.startup.startup finished with exit code 0 in 0.001s", "run": "app.jobs.startup.startup", "duration": 0.001171}
+metric: Shutdown connect=0.000s ok
+metric: BackgroundTasks connect=0.000s ok
+metric: Postgres connect=0.000s ok
+metric: Warehouse connect=0.000s ok
+```
+
+| フィールド | 付くレコード                                                                  |
+|------------|-------------------------------------------------------------------------------|
+| `run`      | ワーカーやジョブの内側で出るすべてのレコード（コンテナのものを含む）：実行の名前 |
+| `client`   | 1 つのクライアントに関するすべてのレコード：解決、接続、切断、失敗            |
+| `layer`    | クライアントの接続や切断に関するすべてのレコードと `Connecting layer`         |
+| `duration` | 秒数：接続または切断したクライアント、起動の要約、終了した実行                |
+
+どの実行も自分の `Shutdown` と `BackgroundTasks` クライアントを接続するので、それらも
+`run.clients` と要約に現れます。
 
 ### <a id="running-in-kubernetes"></a>Kubernetes での実行
 
@@ -1629,7 +1786,8 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 
 `InitializeDependencyError` と `ConnectError` は `SystemExit` を継承しています。依存関係を起動できないアプリケーションは停止すべきだ、という前提によるものです。別の動作が必要な場合は明示的に捕捉してください。元の例外は `__cause__` で参照できます。
 
-`nuke-di` は標準の `logging` モジュールを使い、`nuke_di` ロガーにログを出力します。
+`nuke-di` は標準の `logging` モジュールを使い、`nuke_di` ロガーにログを出力します。ログパイプライン向けの
+[構造化フィールド](#startup-metrics-and-structured-logs)付きです。
 
 ## <a id="development"></a>開発
 

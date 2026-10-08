@@ -363,6 +363,26 @@ def test_app_lifespan_runs_inside_connected_clients() -> None:
     assert events == ["database: connected", "app: startup", "app: shutdown", "database: disconnected"]
 
 
+def test_app_lifespan_sees_connect_timings() -> None:
+    deps = Dependencies()
+    seen: list[tuple[str, str | None, str | None]] = []
+
+    @asynccontextmanager
+    async def timed(app: FastAPI) -> AsyncIterator[None]:
+        seen.extend((t.name, t.connect_outcome, t.disconnect_outcome) for t in deps.timings)
+        yield
+
+    app = make_app(deps, lifespan=timed)
+    app.get("/users/{user_id}")(greet)
+
+    with TestClient(app):
+        pass
+
+    assert ("Database", "ok", None) in seen
+    # The container disconnects after the app's lifespan, the timings stay on it
+    assert {t.name: t.disconnect_outcome for t in deps.timings}["Database"] == "ok"
+
+
 async def watch(shutdown: Shutdown, tasks: BackgroundTasks) -> None:
     async def loop() -> None:
         try:

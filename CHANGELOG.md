@@ -6,7 +6,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.6.0] - 2026-10-08
+## [1.7.0] - 2026-10-08
 
 ### Added
 
@@ -23,6 +23,27 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   `docs/specs/faststream.md` ([#19](https://github.com/troyan-dy/nuke-di/issues/19)).
 - FastAPI websocket endpoints and their dependencies take clients by type hint, on the app given to
   `setup()` and on a `ClientRouter` ([#19](https://github.com/troyan-dy/nuke-di/issues/19)).
+
+## [1.6.0] - 2026-10-08
+
+### Added
+
+- Startup timings ([#14](https://github.com/troyan-dy/nuke-di/issues/14)): the container measures every client's
+  `connect()` and `disconnect()`, not counting the wait for `CONNECT_CONCURRENCY`. `Dependencies.timings` holds one
+  `ClientTiming` per client of the last `connect()` (name, layer, durations, and an outcome per phase: `"ok"`,
+  `"failed"`, `"timed_out"` or `"cancelled"`) and outlives `disconnect()`; a worker or a job passes the same list to
+  hooks as `Run.clients`.
+- An `INFO` summary after a successful connect, e.g. `Connected 12 clients in 3 layers in 1.84s (slowest: Kafka
+  1.52s, Postgres 0.21s, Redis 0.05s)`, and a `WARNING` for every client that used more than half of
+  `CONNECT_TIMEOUT_SECONDS`. `DEBUG` records of a connected or disconnected client now carry its duration.
+- Structured fields on every log record of `nuke_di`, for `logging`'s `extra=`: `client`, `layer`, `duration` and,
+  on every record made inside a worker or a job (the container's and background tasks' included), `run`.
+
+### Changed
+
+- `import nuke_di` no longer imports `unittest` (now imported by `mock()`) or `argparse` (now imported when an
+  entrypoint runs): about 5 ms less at the start of every process. `Option` moved to `nuke_di.options`; it is still
+  exported from `nuke_di` and `nuke_di.cli`.
 
 ## [1.5.2] - 2026-10-08
 
@@ -180,7 +201,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/troyan-dy/nuke-di/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/troyan-dy/nuke-di/compare/v1.5.2...v1.6.0
 [1.5.2]: https://github.com/troyan-dy/nuke-di/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/troyan-dy/nuke-di/compare/v1.5.0...v1.5.1

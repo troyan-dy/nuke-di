@@ -10,6 +10,8 @@ from typing import Any, Literal, Protocol
 from nuke_di.clients import BackgroundTasks, Shutdown
 from nuke_di.core import Dependencies
 from nuke_di.errors import InitializeDependencyError, UsageError
+from nuke_di.logs import current_run, fields
+from nuke_di.timings import ClientTiming
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,8 @@ class Run:
     error: BaseException | None = None
     # The first termination signal received
     signal: int | None = None
+    # How every client connected and disconnected; empty when the Run failed before connecting
+    clients: list[ClientTiming] = field(default_factory=list)
 
 
 class RunHook(Protocol):
@@ -73,7 +77,27 @@ async def run_entrypoint(
     Run `func` with its clients and `params`; an `error` found while parsing the command line fails the Run at once.
     """
     run = Run(name=name, kind=kind, started_at=datetime.now(UTC))
-    logger.info("Starting %s %s", kind, name)
+    # Every log record made inside the Run carries its name, the container's included
+    token = current_run.set(name)
+    try:
+        await _run(run, func, hooks=hooks, container=container, settings=settings, params=params, error=error)
+    finally:
+        current_run.reset(token)
+    return run
+
+
+async def _run(
+    run: Run,
+    func: Callable[..., Coroutine[Any, Any, Any]],
+    *,
+    hooks: Sequence[RunHook],
+    container: Dependencies,
+    settings: RunSettings,
+    params: Mapping[str, Any] | None,
+    error: BaseException | None,
+) -> None:
+    name, kind = run.name, run.kind
+    logger.info("Starting %s %s", kind, name, extra=fields())
 
     for hook in hooks:
         await _call_hook(hook, "on_start", run)
@@ -87,16 +111,20 @@ async def run_entrypoint(
     run.exit_code = _exit_code(run)
     if isinstance(run.error, UsageError):
         # argparse has already printed the reason, a traceback of the parser is noise
-        logger.error("Run %s failed: %s", name, run.error)
+        logger.error("Run %s failed: %s", name, run.error, extra=fields())
     elif run.error is not None:
-        logger.error("Run %s failed", name, exc_info=run.error)
+        logger.error("Run %s failed", name, exc_info=run.error, extra=fields())
     duration = (run.finished_at - run.started_at).total_seconds()
-    logger.info("Run %s finished with exit code %d in %.3fs", name, run.exit_code, duration)
+    logger.info(
+        "Run %s finished with exit code %d in %.3fs",
+        name,
+        run.exit_code,
+        duration,
+        extra=fields(duration=duration),
+    )
 
     for hook in reversed(hooks):
         await _call_hook(hook, "on_finish", run)
-
-    return run
 
 
 async def _call_hook(hook: RunHook, method: str, run: Run) -> None:
@@ -104,7 +132,7 @@ async def _call_hook(hook: RunHook, method: str, run: Run) -> None:
         await getattr(hook, method)(run)
     except Exception:
         # A hook observes the Run, it never changes its outcome
-        logger.exception("Hook %r failed in %s", hook, method)
+        logger.exception("Hook %r failed in %s", hook, method, extra=fields())
 
 
 def _exit_code(run: Run) -> int:
@@ -161,6 +189,8 @@ class _Runner:
 
         tasks.watch(self._on_background_failure)
 
+        # A connect cancelled before its first step would leave the timings of an earlier connect
+        self.container.timings = []
         connect = await self._phase(self.container.connect())
         if self._record(connect):
             entrypoint = await self._phase(injected(**params), stoppable=True)
@@ -170,6 +200,7 @@ class _Runner:
         await tasks.stop()
         if self.container.connected:
             await self.container.disconnect()
+        self.run.clients = self.container.timings
 
     async def _phase(
         self, coro: Coroutine[Any, Any, Any], stoppable: bool = False
@@ -192,7 +223,9 @@ class _Runner:
         grace = self.settings.shutdown_grace
         done, _ = await asyncio.wait({task}, timeout=grace)
         if not done:
-            logger.warning("Run %s did not stop within %ss after Shutdown, cancelling it", self.run.name, grace)
+            logger.warning(
+                "Run %s did not stop within %ss after Shutdown, cancelling it", self.run.name, grace, extra=fields()
+            )
 
     def _record(self, task: asyncio.Task[BaseException | None]) -> bool:
         """
@@ -222,11 +255,11 @@ class _Runner:
 
         if self.run.signal is None:
             self.run.signal = signum
-            logger.info("Shutdown requested by %s", signal.Signals(signum).name)
+            logger.info("Shutdown requested by %s", signal.Signals(signum).name, extra=fields())
             self._shutdown.set()
             self._woken.set()
         else:
-            logger.warning("Second %s, cancelling run %s", signal.Signals(signum).name, self.run.name)
+            logger.warning("Second %s, cancelling run %s", signal.Signals(signum).name, self.run.name, extra=fields())
             current.cancel()
 
     def _install_signal_handlers(self, loop: asyncio.AbstractEventLoop) -> Callable[[], None]:
