@@ -156,10 +156,10 @@ Coverage stays at 100%, line and branch.
 
 ## Acceptance criteria
 
-- [ ] Non-client arguments of `@job` and `@worker` functions are filled from the command line, following the mapping table.
-- [ ] `--help` prints the generated help and exits with `0` without starting a Run.
-- [ ] An invalid command line exits with `2`, prints the argparse usage and error, connects no client and is seen by hooks as a `UsageError`.
-- [ ] An unsupported Parameter type, `Option` on a client or a clashing flag exits with `1` as `InvalidSignatureError`.
-- [ ] The decorated function is still returned unchanged on import and callable with Parameters as keyword arguments.
-- [ ] No new runtime dependencies; `make check` passes with 100% coverage.
-- [ ] The README, CONTEXT.md, CHANGELOG and version are updated.
+- [x] Non-client arguments of `@job` and `@worker` functions are filled from the command line, following the mapping table.
+- [x] `--help` prints the generated help and exits with `0` without starting a Run.
+- [x] An invalid command line exits with `2`, prints the argparse usage and error, connects no client and is seen by hooks as a `UsageError`.
+- [x] An unsupported Parameter type, `Option` on a client or a clashing flag exits with `1` as `InvalidSignatureError`.
+- [x] The decorated function is still returned unchanged on import and callable with Parameters as keyword arguments.
+- [x] No new runtime dependencies; `make check` passes with 100% coverage.
+- [x] The README, CONTEXT.md, CHANGELOG and version are updated.

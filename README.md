@@ -196,8 +196,9 @@ async def sync(pg: Postgres, warehouse: Warehouse) -> None:
 python -m app.jobs.sync
 ```
 
-Every argument is a client, injected from the global `DI` container. The process resolves the
-clients, connects them, runs the function, disconnects them and exits with an exit code.
+Every client argument is injected from the global `DI` container; every other argument is a
+[parameter](#parameters) read from the command line. The process resolves the clients, connects
+them, runs the function, disconnects them and exits with an exit code.
 Scheduling is not part of the library: a Kubernetes CronJob, a systemd timer or crontab
 decides when a job runs.
 
@@ -220,6 +221,55 @@ async def test_sync() -> None:
 ```
 
 The decorated function must be declared with `async def`, otherwise `TypeError` is raised on import.
+
+### Parameters
+
+Every annotated argument that is not a client becomes a command-line option:
+
+```python
+import datetime
+from typing import Annotated
+
+from nuke_di import Option, job
+
+
+@job
+async def sync(
+    pg: Postgres,
+    date: Annotated[datetime.date, Option(help="Day to sync", short="d")],
+    tables: list[str] | None = None,
+    dry_run: bool = False,
+) -> None:
+    """Copy one day of changes into the warehouse."""
+```
+
+```bash
+python -m app.jobs.sync --date 2026-10-01 --tables users --tables orders --dry-run
+python -m app.jobs.sync --help
+```
+
+| Annotation                                | Command line                                  |
+|-------------------------------------------|-----------------------------------------------|
+| `str`, `int`, `float`, `pathlib.Path`     | `--name VALUE`                                |
+| `bool`                                    | `--name` / `--no-name`                        |
+| `datetime.date`, `datetime.datetime`      | `--name 2026-10-01`, ISO 8601                 |
+| an `Enum`                                 | `--name MEMBER`, by member name               |
+| `list[T]` of any of the above but `bool`  | repeated: `--name a --name b`                 |
+| `T \| None`                               | as `T`                                        |
+
+- The option is named after the argument, with `_` replaced by `-`: `date_from` is `--date-from`.
+- An argument without a default is a required option; an argument with a default keeps it when
+  the option is not given.
+- `Annotated[T, Option(help=..., short=...)]` adds a help text and a one-letter alias.
+- The function's docstring is the description in `--help`.
+
+`--help` prints the help and exits with `0` without starting a run. An invalid command line
+prints the usage and the error and exits with `2`: no client is resolved or connected, and hooks
+see a `UsageError`. An unsupported annotation, `Option` on a client, or two options with the same
+flag raise `InvalidSignatureError` and exit with `1`. Every entrypoint parses its command line, so
+one without parameters rejects any argument.
+
+A test passes parameters as keyword arguments: `await sync(pg, warehouse, date=datetime.date(2026, 10, 1))`.
 
 ### Shutdown
 
@@ -274,11 +324,12 @@ only logged and the tasks are cancelled on `disconnect()`.
 
 The first matching rule wins:
 
-| Condition                                                                            | Exit code      |
-|--------------------------------------------------------------------------------------|----------------|
-| An exception: resolving or connecting the clients, the entrypoint, a background task | `1`            |
-| A termination signal was received                                                    | `128 + signum` |
-| Otherwise                                                                            | `0`            |
+| Condition                                                                                           | Exit code      |
+|-----------------------------------------------------------------------------------------------------|----------------|
+| An invalid command line (`UsageError`)                                                              | `2`            |
+| An exception: the signature, resolving or connecting the clients, the entrypoint, a background task | `1`            |
+| A termination signal was received                                                                   | `128 + signum` |
+| Otherwise                                                                                           | `0`            |
 
 SIGTERM gives `143` and SIGINT gives `130`. A job that sees a Shutdown and returns cleanly
 still exits with `128 + signum`: its work was interrupted, and a scheduler must not count it
@@ -355,7 +406,8 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 | `InitializeDependencyError` | A client's `__init__` raised                              |
 | `ConnectError`              | A client's `connect()` raised, or the container state is wrong (e.g. resolving after connect) |
 | `ConnectTimeoutError`       | A client's `connect()` exceeded `CONNECT_TIMEOUT_SECONDS` |
-| `InvalidSignatureError`     | `inject()` got a function with an argument without a type hint |
+| `InvalidSignatureError`     | `inject()` got a function with an argument without a type hint, or an entrypoint parameter has an unsupported type or a clashing flag |
+| `UsageError`                | The command line of a worker or a job does not match its parameters; recorded as `Run.error`, exit code `2` |
 
 `InitializeDependencyError` and `ConnectError` derive from `SystemExit`: an application
 whose dependencies cannot start is expected to stop. Catch them explicitly if you need

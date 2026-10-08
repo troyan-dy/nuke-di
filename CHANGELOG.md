@@ -6,6 +6,23 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-08
+
+### Added
+
+- Parameters: every annotated argument of a `@job` or `@worker` function that is not a client is filled
+  from a command-line option, e.g. `python -m app.jobs.sync --date 2026-10-01`. Supported types are
+  `str`, `int`, `float`, `Path`, `bool`, `date`, `datetime`, enums, `list[...]` of them and `... | None`
+  ([#3](https://github.com/troyan-dy/nuke-di/issues/3)). See "Parameters" in the README and
+  `docs/specs/entrypoint-parameters.md`.
+- `Option` to give a parameter a help text and a one-letter alias through `Annotated`.
+- `UsageError`: an invalid command line fails the run with exit code `2` before any client is resolved.
+
+### Changed
+
+- A worker or a job no longer ignores its command line: `--help` prints the generated help instead of
+  running, and an unknown argument fails the run with exit code `2`.
+
 ## [1.1.0] - 2026-10-08
 
 ### Changed
@@ -60,6 +77,7 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/troyan-dy/nuke-di/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/troyan-dy/nuke-di/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/troyan-dy/nuke-di/releases/tag/v1.0.0
