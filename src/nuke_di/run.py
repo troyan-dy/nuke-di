@@ -2,14 +2,14 @@ import asyncio
 import logging
 import os
 import signal
-from collections.abc import Callable, Coroutine, Sequence
+from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
 from nuke_di.clients import BackgroundTasks, Shutdown
 from nuke_di.core import Dependencies
-from nuke_di.errors import InitializeDependencyError
+from nuke_di.errors import InitializeDependencyError, UsageError
 
 logger = logging.getLogger(__name__)
 
@@ -66,18 +66,29 @@ async def run_entrypoint(
     hooks: Sequence[RunHook],
     container: Dependencies,
     settings: RunSettings,
+    params: Mapping[str, Any] | None = None,
+    error: BaseException | None = None,
 ) -> Run:
+    """
+    Run `func` with its clients and `params`; an `error` found while parsing the command line fails the Run at once.
+    """
     run = Run(name=name, kind=kind, started_at=datetime.now(UTC))
     logger.info("Starting %s %s", kind, name)
 
     for hook in hooks:
         await _call_hook(hook, "on_start", run)
 
-    await _Runner(run, container, settings).execute(func)
+    if error is not None:
+        run.error = error
+    else:
+        await _Runner(run, container, settings).execute(func, params or {})
 
     run.finished_at = datetime.now(UTC)
     run.exit_code = _exit_code(run)
-    if run.error is not None:
+    if isinstance(run.error, UsageError):
+        # argparse has already printed the reason, a traceback of the parser is noise
+        logger.error("Run %s failed: %s", name, run.error)
+    elif run.error is not None:
         logger.error("Run %s failed", name, exc_info=run.error)
     duration = (run.finished_at - run.started_at).total_seconds()
     logger.info("Run %s finished with exit code %d in %.3fs", name, run.exit_code, duration)
@@ -97,6 +108,8 @@ async def _call_hook(hook: RunHook, method: str, run: Run) -> None:
 
 
 def _exit_code(run: Run) -> int:
+    if isinstance(run.error, UsageError):
+        return 2
     if run.error is not None:
         return 1
     if run.signal is not None:
@@ -129,14 +142,14 @@ class _Runner:
         self._current: asyncio.Task[BaseException | None] | None = None
         self._woken = asyncio.Event()
 
-    async def execute(self, func: Callable[..., Coroutine[Any, Any, Any]]) -> None:
+    async def execute(self, func: Callable[..., Coroutine[Any, Any, Any]], params: Mapping[str, Any]) -> None:
         restore = self._install_signal_handlers(asyncio.get_running_loop())
         try:
-            await self._execute(func)
+            await self._execute(func, params)
         finally:
             restore()
 
-    async def _execute(self, func: Callable[..., Coroutine[Any, Any, Any]]) -> None:
+    async def _execute(self, func: Callable[..., Coroutine[Any, Any, Any]], params: Mapping[str, Any]) -> None:
         try:
             self._shutdown = self.container.resolve(Shutdown)
             tasks = self.container.resolve(BackgroundTasks)
@@ -150,7 +163,7 @@ class _Runner:
 
         connect = await self._phase(self.container.connect())
         if self._record(connect):
-            entrypoint = await self._phase(injected(), stoppable=True)
+            entrypoint = await self._phase(injected(**params), stoppable=True)
             self._record(entrypoint)
 
         # Background tasks use the clients, so they stop first

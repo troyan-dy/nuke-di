@@ -51,7 +51,7 @@ python -m app.workers.consumer
 ## Non-goals
 
 - **Scheduling.** The library never decides when a job runs. A Kubernetes CronJob, a systemd timer or crontab starts the process; retries and overlap policy are the scheduler's job too.
-- **Command-line arguments.** An entrypoint function takes only clients; configuration comes from the environment. Tracked separately in [#3](https://github.com/troyan-dy/nuke-di/issues/3).
+- **Command-line arguments.** In this spec an entrypoint function takes only clients and its configuration comes from the environment. Command-line Parameters were added later by [entrypoint-parameters.md](entrypoint-parameters.md) ([#3](https://github.com/troyan-dy/nuke-di/issues/3)).
 - **Scaffolding.** No command generates entrypoint files; the README example is the template.
 - **A generic runner CLI** (`nuke-di run module:func`). See [ADR-0002](../adr/0002-entrypoint-runs-on-decoration.md).
 - **Restarting a worker in-process.** A worker that ends ends the process; restarting is the orchestrator's job.

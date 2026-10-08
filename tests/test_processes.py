@@ -15,9 +15,9 @@ ROOT = Path(__file__).parent.parent
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="SIGTERM is POSIX only")
 
 
-def start(module: str, **env: str) -> subprocess.Popen[str]:
+def start(module: str, *args: str, **env: str) -> subprocess.Popen[str]:
     return subprocess.Popen(  # noqa: S603 - fixed interpreter and module from this test suite
-        [sys.executable, "-m", f"tests.entrypoints.{module}"],
+        [sys.executable, "-m", f"tests.entrypoints.{module}", *args],
         cwd=ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -93,3 +93,35 @@ def test_failing_background_task_fails_worker() -> None:
 
     assert code == 1
     assert "background boom" in stderr
+
+
+def test_parameters_reach_job() -> None:
+    code, stdout, _ = finish(start("parameters", "-d", "2026-10-01", "--tables", "a", "--tables", "b", "--dry-run"))
+
+    assert code == 0
+    assert stdout.splitlines() == ["connected", "2026-10-01 DIFF ['a', 'b'] True"]
+
+
+def test_help() -> None:
+    code, stdout, _ = finish(start("parameters", "--help"))
+
+    assert code == 0
+    assert stdout.startswith("usage: python -m tests.entrypoints.parameters")
+    assert "Day to sync" in stdout
+
+
+def test_invalid_parameter() -> None:
+    code, stdout, stderr = finish(start("parameters", "--day", "nope"))
+
+    assert code == 2
+    assert stdout == ""
+    assert "usage: python -m tests.entrypoints.parameters" in stderr
+    assert "error: argument -d/--day: invalid date value: 'nope'" in stderr
+
+
+def test_unknown_argument_of_job_without_parameters() -> None:
+    code, stdout, stderr = finish(start("succeeds", "--bogus"))
+
+    assert code == 2
+    assert stdout == ""
+    assert "error: unrecognized arguments: --bogus" in stderr

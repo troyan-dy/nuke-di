@@ -1,6 +1,6 @@
 class InvalidSignatureError(TypeError):
     """
-    A signature contains an argument without a type hint.
+    A signature contains an argument without a type hint, or an entrypoint Parameter that cannot be parsed.
     """
 
 
@@ -24,3 +24,13 @@ class InitializeDependencyError(SystemExit):
     """
     A dependency raised an exception during initialization.
     """
+
+
+class UsageError(Exception):
+    """
+    The command line does not match the Parameters of an entrypoint.
+    """
+
+    def __init__(self, message: str, usage: str) -> None:
+        super().__init__(message)
+        self.usage = usage
