@@ -33,8 +33,15 @@ Changelog = "https://github.com/troyan-dy/nuke-di/blob/master/CHANGELOG.md"
 [project.entry-points.pytest11]
 nuke_di = "nuke_di.pytest_plugin"
 
+[project.optional-dependencies]
+fastapi = [
+    "fastapi>=0.100",
+]
+
 [dependency-groups]
 dev = [
+  "fastapi>=0.142.4",
+  "httpx2>=2.13.1",
   "mypy>=1.13",
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
