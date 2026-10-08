@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "1.7.1"
+version = "1.8.0"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
@@ -99,7 +99,7 @@ select = ["E", "W", "F", "I", "N", "B", "A", "UP", "ASYNC", "S", "RUF"]
 ignore = ["S101"]
 
 [tool.mypy]
-files = ["src", "tests", "scripts"]
+files = ["src", "tests", "scripts", "benchmarks"]
 strict = true
 disallow_any_generics = false
 

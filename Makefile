@@ -52,6 +52,18 @@ test-faststream-min: ## Run the FastStream tests on the lowest supported FastStr
 test-litestar-min: ## Run the Litestar tests on the lowest supported Litestar
 	uv run --python 3.11 --isolated --with "litestar==2.15.0" pytest tests/test_litestar.py -p no:cacheprovider
 
+.PHONY: bench
+bench: ## Run the benchmarks, see docs/benchmarks.md
+	uv run python benchmarks/run.py
+
+.PHONY: bench-all
+bench-all: ## Run the benchmarks on every supported Python version, JSON into docs/benchmarks/
+	@mkdir -p docs/benchmarks
+	@for v in $(PY_VERSIONS); do \
+		echo "==> Python $$v"; \
+		uv run --isolated --python $$v python benchmarks/run.py --json docs/benchmarks/py$$v.json || exit 1; \
+	done
+
 .PHONY: check-version
 check-version: ## Check that the version is bumped against origin/master, as CI does for a pull request
 	git fetch --quiet --tags origin master
