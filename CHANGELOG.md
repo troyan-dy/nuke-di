@@ -6,6 +6,24 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-08
+
+### Added
+
+- Litestar integration, `nuke_di.litestar` (`pip install "nuke-di[litestar]"`, Litestar 2.15 or newer):
+  `Litestar(..., plugins=[ClientPlugin()])` lets route handlers, `@websocket` handlers, controllers and
+  their dependencies take clients by plain type hints, and connects the clients on startup. Litestar
+  provides dependencies by name, so one argument name means one client in the app. See "Litestar" in
+  the README, `docs/specs/litestar.md` and `docs/adr/0004-litestar-clients-by-name.md`
+  ([#19](https://github.com/troyan-dy/nuke-di/issues/19)).
+- FastStream integration, `nuke_di.faststream` (`pip install "nuke-di[faststream]"`, FastStream 0.6 or
+  newer, any broker): after `setup(app)`, subscribers and their `Depends(...)` take clients by plain type
+  hints; the clients connect before the brokers start and disconnect after they stop. A test starts the
+  app with `TestApp` inside the test broker. See "FastStream" in the README and
+  `docs/specs/faststream.md` ([#19](https://github.com/troyan-dy/nuke-di/issues/19)).
+- FastAPI websocket endpoints and their dependencies take clients by type hint, on the app given to
+  `setup()` and on a `ClientRouter` ([#19](https://github.com/troyan-dy/nuke-di/issues/19)).
+
 ## [1.5.2] - 2026-10-08
 
 ### Added
@@ -162,7 +180,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.5.2...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/troyan-dy/nuke-di/compare/v1.5.2...v1.6.0
 [1.5.2]: https://github.com/troyan-dy/nuke-di/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/troyan-dy/nuke-di/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/troyan-dy/nuke-di/compare/v1.4.0...v1.5.0
