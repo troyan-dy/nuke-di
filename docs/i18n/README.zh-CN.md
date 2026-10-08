@@ -27,7 +27,7 @@ FastAPI、Litestar 和 FastStream 的处理函数也以同样的方式通过类�
 - [worker 与 job](#workers-and-jobs)：[第一个 job](#your-first-job)、[参数](#parameters)、[第一个 worker](#your-first-worker)、[宽限期](#grace-period)、[后台任务](#background-tasks)、[退出码](#exit-codes)、[钩子](#hooks)、[Kubernetes](#running-in-kubernetes)
 - 框架：[FastAPI](#fastapi)、[Litestar](#litestar)、[FastStream](#faststream)
 - [测试](#testing)
-- [配置](#configuration) · [错误](#errors) · [开发](#development)
+- [配置](#configuration) · [错误](#errors) · [性能](#performance) · [开发](#development)
 
 ## <a id="installation"></a>安装
 
@@ -1925,6 +1925,56 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 
 `nuke-di` 通过标准的 `logging` 模块，以 `nuke_di` logger 输出日志，并带有供日志管道使用的
 [结构化字段](#startup-metrics-and-structured-logs)。
+
+## <a id="performance"></a>性能
+
+`nuke-di` 以测量为准，而非调优。`benchmarks/run.py` 在空操作客户端上测量库本身的开销：10、100 和 1000
+个客户端的宽、深、混合依赖树的 `resolve()`，`connect()` 与 `disconnect()` 在客户端自身协程之上的调度开销，
+`inject()`，`NotSingletonClient`，测试中的 `mock()` / `override()` 循环，一次 FastAPI 请求，导入时间和内存。它输出一张
+Markdown 表格，包含各次重复的中位数、p95 以及每个客户端的开销：
+
+```console
+$ uv run python benchmarks/run.py --only resolve --size 100
+nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 11f5919 · N = 100 · 20 repeats
+
+| Scenario        | Shape |   N |  Median |     p95 | Per client |
+|-----------------|-------|----:|--------:|--------:|-----------:|
+| resolve(), cold | wide  | 100 |  636 µs |  672 µs |    6.36 µs |
+| resolve(), warm | wide  | 100 | 99.5 ns |  126 ns |            |
+| resolve(), cold | deep  | 100 |  814 µs | 1.01 ms |    8.14 µs |
+| resolve(), warm | deep  | 100 | 96.4 ns | 97.1 ns |            |
+| resolve(), cold | mixed | 100 |  845 µs |  986 µs |    8.45 µs |
+| resolve(), warm | mixed | 100 |  101 ns |  116 ns |            |
+```
+
+`--size N` 和 `--repeat K` 设置依赖树的大小和重复次数，`--only` 选择一个场景（`resolve`、`connect`、`inject`、
+`not_singleton`、`overrides`、`fastapi`、`import`、`memory`），`--json PATH` 把数据连同 Python 版本、平台和提交写成
+JSON，便于日后比较。[docs/benchmarks.md](../benchmarks.md) 解释每个场景，并记录在 Apple M2 Pro 上 Python 3.11–3.14
+的基线：`resolve()` 每个客户端耗时 6–12 µs，因此 1000 个客户端的依赖树在 15 ms 内建成；`connect()` 对同一层的每个客户端增加
+12–18 µs，每层增加 0.1–0.2 ms；通过 `nuke-di` 获取客户端的 FastAPI 处理函数与使用普通 `Depends()` 的开销相同；
+`import nuke_di` 耗时 26–35 ms，大部分来自 `asyncio`。CI 把这套基准作为冒烟测试运行，不设阈值：GitHub runner 的噪声太大，
+不适合作为门禁。
+
+`benchmarks/compare.py` 把同样的依赖树交给 dishka、wireup、dependency-injector 和 injector，各自按自己的方式注册同一组类：
+冷启动的容器并解析根节点、再次获取根节点，以及通过各库的集成发起一次 FastAPI 请求。这些库位于 `compare` 依赖组：
+
+```console
+$ uv run python benchmarks/compare.py --size 100 --summary
+nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit e766c7b · N = 100 · 20 repeats
+nuke-di 1.8.0 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+| Lower is better                                   | nuke-di       | dishka          | wireup          | dependency-injector | injector        |
+|---------------------------------------------------|--------------:|----------------:|----------------:|--------------------:|----------------:|
+| Cold start: a container and a tree of 100 clients | **830 µs**    | 12.5 ms (15.1×) | 20.5 ms (24.7×) | 930 µs (1.1×)       | 1.33 ms (1.6×)  |
+| A cached root                                     | 101 ns (2.6×) | 263 ns (6.8×)   | 101 ns (2.6×)   | **38.8 ns**         | 1.25 µs (32.3×) |
+| A FastAPI request with a client                   | **104 µs**    | 105 µs (1.0×)   | 217 µs (2.1×)   | 216 µs (2.1×)       | —               |
+```
+
+![nuke-di against other DI libraries: lower is better](../benchmarks/compare.png)
+
+那么 `nuke-di` 是最快的吗？在构建依赖树和 FastAPI 请求上，是的：dishka 和 wireup 为创建容器时的图校验在启动时多付出
+15–25 倍，wireup 和 dependency-injector 每个请求多付出一倍。在缓存根节点上，dependency-injector 的 Cython `get()` 领先约
+70 ns，这个差距任何应用都察觉不到。完整表格和方法见 [docs/benchmarks.md](../benchmarks.md#comparison-with-other-libraries)。
 
 ## <a id="development"></a>开发
 

@@ -23,7 +23,7 @@
 - [ワーカーとジョブ](#workers-and-jobs)：[ジョブ](#your-first-job)、[パラメータ](#parameters)、[ワーカー](#your-first-worker)、[猶予期間](#grace-period)、[バックグラウンドタスク](#background-tasks)、[終了コード](#exit-codes)、[フック](#hooks)、[Kubernetes](#running-in-kubernetes)
 - フレームワーク：[FastAPI](#fastapi)、[Litestar](#litestar)、[FastStream](#faststream)
 - [テスト](#testing)
-- [設定](#configuration) · [エラー](#errors) · [開発](#development)
+- [設定](#configuration) · [エラー](#errors) · [パフォーマンス](#performance) · [開発](#development)
 
 ## <a id="installation"></a>インストール
 
@@ -1789,6 +1789,60 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 
 `nuke-di` は標準の `logging` モジュールを使い、`nuke_di` ロガーにログを出力します。ログパイプライン向けの
 [構造化フィールド](#startup-metrics-and-structured-logs)付きです。
+
+## <a id="performance"></a>パフォーマンス
+
+`nuke-di` は推測ではなく計測で判断します。`benchmarks/run.py` は何もしないクライアントの上でライブラリ自身が
+加えるコストを計ります。10、100、1000 クライアントの幅広・深い・混合ツリーの `resolve()`、クライアント自身のコルーチンに
+対する `connect()` と `disconnect()` のスケジューリングのオーバーヘッド、`inject()`、`NotSingletonClient`、テストでの
+`mock()` / `override()` サイクル、FastAPI のリクエスト 1 回、インポート時間、メモリです。結果は反復の中央値と p95、
+クライアント 1 件あたりの数値を含む Markdown の表として出力されます。
+
+```console
+$ uv run python benchmarks/run.py --only resolve --size 100
+nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 11f5919 · N = 100 · 20 repeats
+
+| Scenario        | Shape |   N |  Median |     p95 | Per client |
+|-----------------|-------|----:|--------:|--------:|-----------:|
+| resolve(), cold | wide  | 100 |  636 µs |  672 µs |    6.36 µs |
+| resolve(), warm | wide  | 100 | 99.5 ns |  126 ns |            |
+| resolve(), cold | deep  | 100 |  814 µs | 1.01 ms |    8.14 µs |
+| resolve(), warm | deep  | 100 | 96.4 ns | 97.1 ns |            |
+| resolve(), cold | mixed | 100 |  845 µs |  986 µs |    8.45 µs |
+| resolve(), warm | mixed | 100 |  101 ns |  116 ns |            |
+```
+
+`--size N` と `--repeat K` はツリーのサイズと反復回数を、`--only` はシナリオ（`resolve`、`connect`、`inject`、
+`not_singleton`、`overrides`、`fastapi`、`import`、`memory`）を指定し、`--json PATH` は後で比較できるように Python の
+バージョン、プラットフォーム、コミットと共に数値を書き出します。[docs/benchmarks.md](../benchmarks.md) は各シナリオの説明と、
+Apple M2 Pro 上の Python 3.11–3.14 のベースラインを記録しています。`resolve()` はクライアント 1 件あたり 6–12 µs なので、
+1000 クライアントのツリーは 15 ms 未満で構築されます。`connect()` は同じ層のクライアント 1 件あたり 12–18 µs、層ごとに
+0.1–0.2 ms を加えます。`nuke-di` 経由でクライアントを受け取る FastAPI ハンドラのコストは、通常の `Depends()` を使った
+ハンドラと同じです。`import nuke_di` は 26–35 ms で、大半は `asyncio` です。CI はこのスイートをしきい値なしのスモークテスト
+として実行します。GitHub のランナーはノイズが大きすぎてゲートには使えないためです。
+
+`benchmarks/compare.py` は同じツリーを dishka、wireup、dependency-injector、injector に通します。各ライブラリは同じクラス群を
+自分の流儀で登録し、ルートを解決したコールドなコンテナ、ルートの再取得、各ライブラリの統合経由の FastAPI リクエスト 1 回を計ります。
+これらのライブラリは依存グループ `compare` にあります。
+
+```console
+$ uv run python benchmarks/compare.py --size 100 --summary
+nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit e766c7b · N = 100 · 20 repeats
+nuke-di 1.8.0 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+| Lower is better                                   | nuke-di       | dishka          | wireup          | dependency-injector | injector        |
+|---------------------------------------------------|--------------:|----------------:|----------------:|--------------------:|----------------:|
+| Cold start: a container and a tree of 100 clients | **830 µs**    | 12.5 ms (15.1×) | 20.5 ms (24.7×) | 930 µs (1.1×)       | 1.33 ms (1.6×)  |
+| A cached root                                     | 101 ns (2.6×) | 263 ns (6.8×)   | 101 ns (2.6×)   | **38.8 ns**         | 1.25 µs (32.3×) |
+| A FastAPI request with a client                   | **104 µs**    | 105 µs (1.0×)   | 217 µs (2.1×)   | 216 µs (2.1×)       | —               |
+```
+
+![nuke-di against other DI libraries: lower is better](../benchmarks/compare.png)
+
+では `nuke-di` は最速なのでしょうか。ツリーの構築と FastAPI リクエストでは、はい。dishka と wireup はコンテナ作成時のグラフ検証
+のために起動時に 15–25 倍を払い、wireup と dependency-injector はリクエストごとに 2 倍を払います。キャッシュ済みのルートでは
+dependency-injector の Cython 製 `get()` が約 70 ns 速く、これはどのアプリケーションも気づかない差です。方法を含む全体の表は
+[docs/benchmarks.md](../benchmarks.md#comparison-with-other-libraries) にあります。
 
 ## <a id="development"></a>開発
 

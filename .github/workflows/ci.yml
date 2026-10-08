@@ -73,3 +73,16 @@ jobs:
           python-version: "3.11"
       - run: uv sync --locked
       - run: make test-litestar-min
+
+  benchmarks:
+    # A smoke run of the suite in benchmarks/, so it keeps working; the figures of a GitHub runner are too
+    # noisy to gate on, docs/benchmarks.md holds the baseline
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run python benchmarks/run.py --size 10 --repeat 1
+      - run: uv run python benchmarks/compare.py --size 10 --repeat 1
+      - run: uv run python benchmarks/chart.py docs/benchmarks/compare-py3.11.json compare.png
