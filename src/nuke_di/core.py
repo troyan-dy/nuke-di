@@ -2,13 +2,13 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import time
 import types
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, TypeVar, Union, cast, get_args, get_origin, get_type_hints
-from unittest.mock import create_autospec
 
 from nuke_di.errors import (
     CircularDependencyError,
@@ -18,6 +18,7 @@ from nuke_di.errors import (
     InvalidSignatureError,
 )
 from nuke_di.options import DependenciesSettings
+from nuke_di.timings import ClientTiming
 from nuke_di.types import Client, NotSingletonClient
 from nuke_di.utils import isa, sname
 
@@ -48,6 +49,10 @@ class Dependencies:
     connect_clients: list[NotSingletonClient] = field(default_factory=list)
     settings: DependenciesSettings = field(default_factory=DependenciesSettings)
     connected: bool = field(default=False, init=False)
+    # One entry per client of the last connect(), in connect order; kept after disconnect()
+    timings: list[ClientTiming] = field(default_factory=list, init=False)
+    # The entries of `timings` by `id()` of their client, until the container is flushed
+    _timings: dict[int, ClientTiming] = field(default_factory=dict, init=False)
     # Layer of every client in `connect_clients`, keyed by `id()`: dataclass clients may be unhashable
     _layers: dict[int, int] = field(default_factory=dict, init=False)
     # Replacements registered by `mock()` and `override()`, a subset of `clients`
@@ -72,6 +77,7 @@ class Dependencies:
         self.clients = OrderedDict()
         self.connect_clients = []
         self._layers = {}
+        self._timings = {}
         self._replacements = {}
         for cls, replacement in self._overrides:
             self._register_replacement(cls, replacement)
@@ -89,12 +95,18 @@ class Dependencies:
 
         self.connected = True
         limiter = self._limiter()
+        layers = self._group_by_layer(self.connect_clients)
+        self._timings = {
+            id(client): ClientTiming(sname(client), self._layer(client)) for layer in layers for client in layer
+        }
+        self.timings = list(self._timings.values())
         # Clients whose connect() finished, so a failure knows what to roll back
         connected: list[NotSingletonClient] = []
+        started = time.perf_counter()
 
         try:
-            for number, layer in enumerate(self._group_by_layer(self.connect_clients)):
-                logger.debug("Connecting layer %d: %s", number, ", ".join(map(sname, layer)))
+            for number, layer in enumerate(layers):
+                logger.debug("Connecting layer %d: %s", number, ", ".join(map(sname, layer)), extra={"layer": number})
                 # The first failure cancels the rest of the layer
                 async with asyncio.TaskGroup() as group:
                     for client in layer:
@@ -110,27 +122,68 @@ class Dependencies:
             await self._rollback(connected)
             raise
 
+        self._log_startup(len(layers), time.perf_counter() - started)
+
+    def _log_startup(self, layers: int, duration: float) -> None:
+        if not self.timings:
+            return
+
+        slowest = sorted(self.timings, key=lambda timing: timing.connect or 0, reverse=True)[:3]
+        logger.info(
+            "Connected %s in %s in %.2fs (slowest: %s)",
+            _count(len(self.timings), "client"),
+            _count(layers, "layer"),
+            duration,
+            ", ".join(f"{timing.name} {timing.connect or 0:.2f}s" for timing in slowest),
+            extra={"duration": duration},
+        )
+
+        timeout = self.settings.connect_timeout
+        for timing in self.timings:
+            if timing.connect is not None and timing.connect > timeout / 2:
+                logger.warning(
+                    "Client %s took %.2fs to connect, more than half of CONNECT_TIMEOUT_SECONDS (%gs)",
+                    timing.name,
+                    timing.connect,
+                    timeout,
+                    extra=_extra(timing, timing.connect),
+                )
+
     async def _connect_client(
         self, client: NotSingletonClient, limiter: Limiter, connected: list[NotSingletonClient]
     ) -> None:
-        name = sname(client)
+        timing = self._timings[id(client)]
+        name = timing.name
         try:
             async with limiter:
-                logger.debug("Connecting client %s", name)
-                await asyncio.wait_for(client.connect(), timeout=self.settings.connect_timeout)
+                logger.debug("Connecting client %s", name, extra=_extra(timing))
+                started = time.perf_counter()
+                try:
+                    await asyncio.wait_for(client.connect(), timeout=self.settings.connect_timeout)
+                finally:
+                    timing.connect = time.perf_counter() - started
             connected.append(client)
+            timing.connect_outcome = "ok"
+            logger.debug("Connected client %s in %.3fs", name, timing.connect, extra=_extra(timing, timing.connect))
 
         except TimeoutError as exc:
-            logger.exception("Timeout occurred connecting client %s", name)
+            timing.connect_outcome = "timed_out"
+            logger.exception("Timeout occurred connecting client %s", name, extra=_extra(timing, timing.connect))
             error: ConnectError = ConnectTimeoutError(f"Timeout occurred connecting client {name}")
             error.__cause__ = exc
             raise _ClientConnectError(error) from exc
 
         except Exception as exc:
-            logger.exception("Error occurred connecting client %s", name)
+            timing.connect_outcome = "failed"
+            logger.exception("Error occurred connecting client %s", name, extra=_extra(timing, timing.connect))
             error = ConnectError(f"Error occurred connecting client {name}")
             error.__cause__ = exc
             raise _ClientConnectError(error) from exc
+
+        except asyncio.CancelledError:
+            # Another client of the layer failed, or the whole connect was cancelled
+            timing.connect_outcome = "cancelled"
+            raise
 
     async def disconnect(self) -> None:
         if self.connected is False:
@@ -152,26 +205,43 @@ class Dependencies:
         self.flush()
 
     async def _disconnect_client(self, client: NotSingletonClient, limiter: Limiter) -> None:
-        name = sname(client)
+        timing = self._timings[id(client)]
+        name = timing.name
         try:
             async with limiter:
-                logger.debug("Disconnecting client %s", name)
-                await asyncio.wait_for(client.disconnect(), timeout=self.settings.disconnect_timeout)
+                logger.debug("Disconnecting client %s", name, extra=_extra(timing))
+                started = time.perf_counter()
+                try:
+                    await asyncio.wait_for(client.disconnect(), timeout=self.settings.disconnect_timeout)
+                finally:
+                    timing.disconnect = time.perf_counter() - started
+            timing.disconnect_outcome = "ok"
+            logger.debug(
+                "Disconnected client %s in %.3fs", name, timing.disconnect, extra=_extra(timing, timing.disconnect)
+            )
         except TimeoutError:
-            logger.exception("Timeout occurred disconnecting client %s", name)
+            timing.disconnect_outcome = "timed_out"
+            logger.exception("Timeout occurred disconnecting client %s", name, extra=_extra(timing, timing.disconnect))
         except Exception:
             # The client failed, but the rest still have to be stopped
-            logger.exception("Failed to disconnect client %s", name)
+            timing.disconnect_outcome = "failed"
+            logger.exception("Failed to disconnect client %s", name, extra=_extra(timing, timing.disconnect))
+        except asyncio.CancelledError:
+            timing.disconnect_outcome = "cancelled"
+            raise
 
     def _limiter(self) -> Limiter:
         if self.settings.connect_concurrency == 0:
             return contextlib.nullcontext()
         return asyncio.Semaphore(self.settings.connect_concurrency)
 
+    def _layer(self, client: NotSingletonClient) -> int:
+        return self._layers.get(id(client), 0)
+
     def _group_by_layer(self, clients: list[NotSingletonClient]) -> list[list[NotSingletonClient]]:
         layers: defaultdict[int, list[NotSingletonClient]] = defaultdict(list)
         for client in clients:
-            layers[self._layers.get(id(client), 0)].append(client)
+            layers[self._layer(client)].append(client)
         return [layers[number] for number in sorted(layers)]
 
     def resolve(self, cls: type[CT]) -> CT:
@@ -189,7 +259,7 @@ class Dependencies:
             raise CircularDependencyError(f"Circular dependency: {self._path(cls)}")
 
         name = sname(cls)
-        logger.debug('Resolving dependency "%s"', name)
+        logger.debug('Resolving dependency "%s"', name, extra={"client": name})
 
         self._resolving.append(cls)
         try:
@@ -200,7 +270,7 @@ class Dependencies:
         try:
             inst = cls(**init)
         except Exception as e:
-            logger.exception("Error occurred during initialize client %s", name)
+            logger.exception("Error occurred during initialize client %s", name, extra={"client": name})
             raise InitializeDependencyError(f"Error occurred during initialize client {name}") from e
 
         if isclient(cls):
@@ -292,7 +362,12 @@ class Dependencies:
         if self._is_resolved(cls):
             raise ConnectError(f"{name} is already resolved, call mock() before resolve() or inject()")
 
-        self._register_replacement(cls, create_autospec(cls) if new is None else new)
+        if new is None:
+            # unittest costs every process a few milliseconds at import, and only tests mock
+            from unittest.mock import create_autospec
+
+            new = create_autospec(cls)
+        self._register_replacement(cls, new)
         return cast(CT, self._replacements[cls])
 
     @contextlib.contextmanager
@@ -366,6 +441,20 @@ class Dependencies:
             self._injecting = outer
 
         return signature
+
+
+def _extra(timing: ClientTiming, duration: float | None = None) -> dict[str, Any]:
+    """
+    The structured fields of a log record about one client, for `logging`'s `extra=`.
+    """
+    extra: dict[str, Any] = {"client": timing.name, "layer": timing.layer}
+    if duration is not None:
+        extra["duration"] = duration
+    return extra
+
+
+def _count(number: int, noun: str) -> str:
+    return f"{number} {noun}" if number == 1 else f"{number} {noun}s"
 
 
 def _optional_client(hint: Any) -> type[NotSingletonClient] | None:

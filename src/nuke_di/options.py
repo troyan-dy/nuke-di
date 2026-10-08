@@ -23,6 +23,17 @@ def _connect_concurrency_from_env() -> int:
     return int(os.environ.get(CONNECT_CONCURRENCY_ENV, DEFAULT_CONNECT_CONCURRENCY))
 
 
+@dataclass(frozen=True)
+class Option:
+    """
+    Command-line metadata of an entrypoint Parameter, given through `Annotated[T, Option(...)]`.
+    """
+
+    help: str | None = None
+    # One letter or digit, e.g. "d" for "-d"
+    short: str | None = None
+
+
 @dataclass
 class DependenciesSettings:
     connect_timeout: float = field(default_factory=_connect_timeout_from_env)

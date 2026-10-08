@@ -24,6 +24,10 @@ _Avoid_: Instantiation, wiring
 A set of client instances with the same height in the dependency graph: clients with no dependencies form layer 0, every other client sits one layer above its highest dependency. All clients of one layer connect concurrently.
 _Avoid_: Level, tier, depth
 
+**Client timing**:
+How long one client's `connect()` and `disconnect()` took in the last connect of its container, and how each ended: ok, failed, timed out or cancelled. The container only measures; exporting timings is left to hooks.
+_Avoid_: Metric, stat, span
+
 **Replacement**:
 An object registered in the container in place of a client class, before that class is resolved; every consumer receives it instead of the client. A Replacement is never connected. Registered with `mock()` it lasts until the next flush; registered with `override()` it lasts until the end of the `with` block.
 _Avoid_: Fake, stub, double (for the concept; `mock()` is only the method name)

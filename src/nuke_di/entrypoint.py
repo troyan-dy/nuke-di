@@ -5,7 +5,6 @@ from collections.abc import Callable, Coroutine, Sequence
 from pathlib import Path
 from typing import Any, TypeVar, overload
 
-from nuke_di.cli import HelpRequested, build_parser, parse_parameters
 from nuke_di.core import DI
 from nuke_di.errors import UsageError
 from nuke_di.run import Kind, RunHook, RunSettings, run_entrypoint
@@ -61,6 +60,9 @@ def _entrypoint(kind: Kind, func: F | None, hooks: Sequence[RunHook]) -> F | Cal
 
 
 def execute(func: Callable[..., Coroutine[Any, Any, Any]], *, kind: Kind, hooks: Sequence[RunHook]) -> int:
+    # argparse costs every process a few milliseconds at import, and only a process that runs an entrypoint parses
+    from nuke_di.cli import HelpRequested, build_parser, parse_parameters
+
     settings = RunSettings()
     params: dict[str, Any] = {}
     error: BaseException | None = None

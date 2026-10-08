@@ -24,7 +24,7 @@
 
 - [Установка](#installation)
 - [Быстрый старт](#quick-start)
-- [Клиенты](#clients): [синглтоны](#client-and-notsingletonclient), [жизненный цикл](#connect-and-disconnect), [датаклассы](#dataclass-clients), [слои](#layers), [ошибки подключения](#when-a-client-fails-to-connect), [ошибки разрешения](#when-the-tree-cannot-be-built)
+- [Клиенты](#clients): [синглтоны](#client-and-notsingletonclient), [жизненный цикл](#connect-and-disconnect), [датаклассы](#dataclass-clients), [слои](#layers), [время старта](#startup-timings), [ошибки подключения](#when-a-client-fails-to-connect), [ошибки разрешения](#when-the-tree-cannot-be-built)
 - [Контейнер](#the-container)
 - [Воркеры и джобы](#workers-and-jobs): [джоба](#your-first-job), [параметры](#parameters), [воркер](#your-first-worker), [grace period](#grace-period), [фоновые задачи](#background-tasks), [коды завершения](#exit-codes), [хуки](#hooks), [Kubernetes](#running-in-kubernetes)
 - [FastAPI](#fastapi)
@@ -267,16 +267,25 @@ Connecting layer 0: Postgres, Redis
 Connecting client Postgres
 Connecting client Redis
   redis ready
+Connected client Redis in 0.101s
   postgres ready
+Connected client Postgres in 0.201s
 Connecting layer 1: Payments
 Connecting client Payments
+Connected client Payments in 0.000s
 Connecting layer 2: Checkout
 Connecting client Checkout
+Connected client Checkout in 0.000s
+Connected 4 clients in 3 layers in 0.20s (slowest: Postgres 0.20s, Redis 0.10s, Payments 0.00s)
 -- application is running --
 Disconnecting client Checkout
+Disconnected client Checkout in 0.000s
 Disconnecting client Payments
+Disconnected client Payments in 0.000s
 Disconnecting client Postgres
+Disconnected client Postgres in 0.000s
 Disconnecting client Redis
+Disconnected client Redis in 0.000s
 ```
 
 ```text
@@ -288,6 +297,85 @@ Postgres, Redis                  layer 0  <- connect together, in 0.2s rather th
 Упорядочиваются только зависимости, объявленные в `__init__`. Если клиенту нужно, чтобы другой
 клиент подключился раньше, объявите его зависимостью. Чтобы ограничить число клиентов,
 подключающихся одновременно, задайте `CONNECT_CONCURRENCY`.
+
+### <a id="startup-timings"></a>Время старта
+
+Контейнер замеряет `connect()` и `disconnect()` каждого клиента, так что медленный старт
+сам называет виновника. После успешного `connect()` он пишет сводку на уровне `INFO` и
+`WARNING` для каждого клиента, который потратил больше половины `CONNECT_TIMEOUT_SECONDS`,
+задолго до того, как этот клиент начнёт падать по таймауту:
+
+```python
+# startup.py
+import asyncio
+import logging
+
+from nuke_di import Client, Dependencies, DependenciesSettings
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+
+class Postgres(Client):
+    async def connect(self) -> None:
+        await asyncio.sleep(0.2)
+
+
+class Kafka(Client):
+    async def connect(self) -> None:
+        await asyncio.sleep(1.6)
+
+    async def disconnect(self) -> None:
+        await asyncio.sleep(0.3)
+
+
+class Orders(Client):
+    def __init__(self, pg: Postgres, kafka: Kafka) -> None:
+        self.pg, self.kafka = pg, kafka
+
+
+async def main() -> None:
+    deps = Dependencies(settings=DependenciesSettings(connect_timeout=3))
+    deps.resolve(Orders)
+    async with deps:
+        print("-- application is running --")
+
+    for t in deps.timings:
+        print(
+            f"{t.name:<8} layer {t.layer}  connect {t.connect:.2f}s {t.connect_outcome:<3}  "
+            f"disconnect {t.disconnect:.2f}s {t.disconnect_outcome}"
+        )
+
+
+asyncio.run(main())
+```
+
+```console
+$ python startup.py
+INFO Connected 3 clients in 2 layers in 1.60s (slowest: Kafka 1.60s, Postgres 0.20s, Orders 0.00s)
+WARNING Client Kafka took 1.60s to connect, more than half of CONNECT_TIMEOUT_SECONDS (3s)
+-- application is running --
+Postgres layer 0  connect 0.20s ok   disconnect 0.00s ok
+Kafka    layer 0  connect 1.60s ok   disconnect 0.30s ok
+Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
+```
+
+`deps.timings` хранит по одному `ClientTiming` на каждый клиент последнего `connect()`, в
+порядке подключения. Список переживает `disconnect()`, поэтому его можно прочитать после
+остановки контейнера, например в конце lifespan FastAPI. Воркер или джоба получают тот же
+список в [`Run.clients`](#startup-metrics-and-structured-logs).
+
+| Поле `ClientTiming`  | Значение |
+|----------------------|----------|
+| `name`               | Имя класса клиента |
+| `layer`              | [Слой](#layers) клиента |
+| `connect`            | Секунды внутри `connect()` без ожидания `CONNECT_CONCURRENCY`; `None`, если `connect()` не запускался |
+| `connect_outcome`    | `"ok"`, `"failed"`, `"timed_out"`, `"cancelled"` или `None`, если до слоя клиента дело не дошло |
+| `disconnect`, `disconnect_outcome` | То же для `disconnect()`; `None`, пока клиент не отключился |
+
+Когда клиент не может подключиться, клиенты его слоя, которые ещё подключаются, получают
+`"cancelled"`, слои выше остаются с `None`, а уже подключённые клиенты откатываются и
+получают `disconnect_outcome`. Библиотека только замеряет: экспорт таймингов в метрики
+или спаны остаётся за вашим кодом.
 
 ### <a id="when-a-client-fails-to-connect"></a>Если клиент не смог подключиться
 
@@ -430,6 +518,7 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 | `mock(cls, new=None)`| Зарегистрировать подмену для `cls` (по умолчанию — autospec-мок) до следующего `flush()`. Вызывается до разрешения `cls`. |
 | `override(cls, new=None)` | Подмена на время блока `with`, затем `flush()`; см. [Тестирование](#testing). |
 | `flush()`            | Забыть все разрешённые клиенты.                                         |
+| `timings`            | По одному `ClientTiming` на клиент последнего `connect()`; см. [Время старта](#startup-timings). |
 
 `resolve`, `inject`, `mock`, `override` и `flush` работают, только пока контейнер отключён:
 всё дерево строится до старта.
@@ -551,11 +640,12 @@ $ python -m app.jobs.sync
 INFO  nuke_di.run: Starting job app.jobs.sync.sync
 postgres: connected
 warehouse: connected
+INFO  nuke_di.core: Connected 4 clients in 1 layer in 0.00s (slowest: Warehouse 0.00s, Postgres 0.00s, Shutdown 0.00s)
 postgres: upserted 3 rows into users
 postgres: upserted 3 rows into orders
 postgres: disconnected
 warehouse: disconnected
-INFO  nuke_di.run: Run app.jobs.sync.sync finished with exit code 0 in 0.001s
+INFO  nuke_di.run: Run app.jobs.sync.sync finished with exit code 0 in 0.002s
 ```
 
 #### <a id="one-entrypoint-per-module-defined-last"></a>Одна точка входа на модуль, и она последняя
@@ -992,9 +1082,78 @@ hook: exit code 2 in 0.0s, error: UsageError("argument --limit: invalid int valu
 | `exit_code`   | Код завершения процесса, заполняется до `on_finish`                    |
 | `error`       | Исключение, из-за которого упал запуск, например `UsageError`, или `None` |
 | `signal`      | Первый полученный сигнал завершения или `None`                         |
+| `clients`     | По одному `ClientTiming` на клиент: длительности и исходы подключения и отключения; пусто, если запуск упал до подключения |
 
 Хуки — обычные объекты, а не клиенты: своими ресурсами они управляют сами. Исключение в хуке
 попадает в лог и не меняет код завершения. `--help` — не запуск, поэтому хуки его не видят.
+
+#### <a id="startup-metrics-and-structured-logs"></a>Метрики старта и структурированные логи
+
+`run.clients` — место для экспорта метрик старта: `on_finish` видит, сколько каждый клиент
+подключался и отключался. Кроме того, каждая запись лога `nuke_di` несёт структурированные
+поля, так что JSON-форматтер может фильтровать и агрегировать по клиенту, не разбирая
+текст сообщений:
+
+```python
+# app/jobs/startup.py
+import json
+import logging
+
+from nuke_di import Run, job
+
+from app.clients import Postgres, Warehouse
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        fields = {key: getattr(record, key) for key in ("run", "client", "layer", "duration") if hasattr(record, key)}
+        return json.dumps({"level": record.levelname, "message": record.getMessage(), **fields})
+
+
+handler = logging.StreamHandler()
+handler.setFormatter(JsonFormatter())
+logging.basicConfig(level=logging.INFO, handlers=[handler])
+
+
+class StartupMetrics:
+    async def on_start(self, run: Run) -> None:
+        pass
+
+    async def on_finish(self, run: Run) -> None:
+        for client in run.clients:
+            print(f"metric: {client.name} connect={client.connect:.3f}s {client.connect_outcome}")
+
+
+@job(hooks=[StartupMetrics()])
+async def startup(pg: Postgres, warehouse: Warehouse) -> None:
+    print("startup: done")
+```
+
+```console
+$ python -m app.jobs.startup
+{"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
+postgres: connected
+warehouse: connected
+{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Shutdown 0.00s, Postgres 0.00s, Warehouse 0.00s)", "duration": 0.00017699995078146458}
+startup: done
+postgres: disconnected
+warehouse: disconnected
+{"level": "INFO", "message": "Run app.jobs.startup.startup finished with exit code 0 in 0.001s", "run": "app.jobs.startup.startup", "duration": 0.001302}
+metric: Shutdown connect=0.000s ok
+metric: BackgroundTasks connect=0.000s ok
+metric: Postgres connect=0.000s ok
+metric: Warehouse connect=0.000s ok
+```
+
+| Поле       | Где есть                                                                      |
+|------------|-------------------------------------------------------------------------------|
+| `run`      | Каждая запись о воркере или джобе: имя запуска                                |
+| `client`   | Каждая запись об одном клиенте: разрешение, подключение, отключение, ошибки   |
+| `layer`    | Каждая запись о подключении или отключении клиента и `Connecting layer`       |
+| `duration` | Секунды: подключённый или отключённый клиент, сводка старта, завершённый запуск |
+
+Каждый запуск подключает и свои клиенты `Shutdown` и `BackgroundTasks`, поэтому они есть
+в `run.clients` и в сводке.
 
 ### <a id="running-in-kubernetes"></a>Запуск в Kubernetes
 
@@ -1512,7 +1671,8 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 приложение, чьи зависимости не могут стартовать, должно остановиться. Если нужно другое поведение,
 перехватывайте их явно; исходное исключение доступно в `__cause__`.
 
-`nuke-di` пишет логи через стандартный модуль `logging` в логгер `nuke_di`.
+`nuke-di` пишет логи через стандартный модуль `logging` в логгер `nuke_di`, со
+[структурированными полями](#startup-metrics-and-structured-logs) для лог-пайплайнов.
 
 ## <a id="development"></a>Разработка
 
