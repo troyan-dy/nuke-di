@@ -4,26 +4,15 @@ import enum
 import inspect
 import types
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, NoReturn, Union, get_args, get_origin, get_type_hints
 
 from nuke_di.core import isnotsingleton
 from nuke_di.errors import InvalidSignatureError, UsageError
+from nuke_di.options import Option
 from nuke_di.utils import sname
 
 Converter = Callable[[str], Any]
-
-
-@dataclass(frozen=True)
-class Option:
-    """
-    Command-line metadata of an entrypoint Parameter, given through `Annotated[T, Option(...)]`.
-    """
-
-    help: str | None = None
-    # One letter or digit, e.g. "d" for "-d"
-    short: str | None = None
 
 
 class HelpRequested(Exception):  # noqa: N818 - not an error, argparse already printed the help

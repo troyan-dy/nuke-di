@@ -134,6 +134,7 @@ class Run:
     exit_code: int | None  # set before on_finish
     error: BaseException | None  # the exception that made exit_code 1, if any
     signal: int | None  # the first termination signal received, if any
+    clients: list[ClientTiming]  # connect / disconnect timings, set before on_finish (#14)
 ```
 
 - Hooks are plain objects, not clients. They are not resolved, connected or injected, and they own their own resources.

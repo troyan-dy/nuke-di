@@ -3,6 +3,7 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from nuke_di.logs import fields
 from nuke_di.types import Client
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,6 @@ class BackgroundTasks(Client):
         if exc is None:
             return
 
-        logger.error("Background task %s failed", task.get_name(), exc_info=exc)
+        logger.error("Background task %s failed", task.get_name(), exc_info=exc, extra=fields())
         for callback in self._watchers:
             callback(exc)
