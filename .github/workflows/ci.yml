@@ -6,6 +6,17 @@ on:
   pull_request:
 
 jobs:
+  version:
+    # A pull request into master is a release once merged, so it must carry a new version
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # the base branch and the tags
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run --no-project python scripts/version.py check "origin/${{ github.base_ref }}"
+
   lint:
     runs-on: ubuntu-latest
     steps:
