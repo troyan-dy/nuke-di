@@ -83,7 +83,7 @@ def test_override_after_resolve_raises() -> None:
     dep = Dependencies()
     dep.resolve(Users)
 
-    with pytest.raises(ConnectError, match="Database is already resolved"), dep.override(Database):
+    with pytest.raises(ConnectError, match="needs a container without resolved clients"), dep.override(Database):
         pass
 
 
@@ -107,11 +107,70 @@ async def test_override_global_container() -> None:
     assert DI.clients == {}
 
 
-def test_override_keeps_mocks_registered_before_block() -> None:
+def test_override_drops_mocks_on_exit() -> None:
     dep = Dependencies()
     clock = dep.mock(Clock)
 
     with dep.override(Database):
-        dep.resolve(Users)
+        pass
 
-    assert dep.resolve(Users).clock is clock
+    assert dep.resolve(Users).clock is not clock
+
+
+async def test_override_survives_disconnect_inside_block() -> None:
+    dep = Dependencies()
+
+    with dep.override(Database, FakeDatabase()):
+        for _ in range(2):
+            users = dep.resolve(Users)
+            async with dep:
+                assert await users.db.fetch() == "fake"
+
+
+def test_override_needs_container_without_resolved_clients() -> None:
+    dep = Dependencies()
+    dep.resolve(Clock)
+
+    expected = r"override\(Database\) needs a container without resolved clients, found: Clock"
+    with pytest.raises(ConnectError, match=expected), dep.override(Database):
+        pass
+
+    assert Clock in dep.clients
+
+
+def test_nested_override_after_resolve_raises() -> None:
+    dep = Dependencies()
+
+    with dep.override(Database):
+        dep.resolve(Users)
+        with pytest.raises(ConnectError, match="found: Clock, Users"), dep.override(Clock):
+            pass
+
+
+def test_override_of_replaced_client_raises() -> None:
+    dep = Dependencies()
+    dep.mock(Database)
+
+    with pytest.raises(ConnectError, match="Database already has a replacement"), dep.override(Database):
+        pass
+
+
+async def test_override_keeps_exception_while_connected() -> None:
+    dep = Dependencies()
+
+    with pytest.raises(ValueError, match="boom"), dep.override(Database):
+        dep.resolve(Users)
+        await dep.connect()
+        raise ValueError("boom")
+
+    assert dep.connected
+    await dep.disconnect()
+    assert dep.clients == {}
+
+
+def test_override_when_connected_raises() -> None:
+    dep = Dependencies()
+    dep.connected = True
+
+    with pytest.raises(ConnectError, match="already connected"), dep.override(Database):
+        pass

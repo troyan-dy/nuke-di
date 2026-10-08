@@ -92,7 +92,7 @@ def test_mock_with_another_replacement_raises() -> None:
     dep = Dependencies()
     dep.mock(InnerDeps)
 
-    with pytest.raises(ConnectError, match="InnerDeps is already mocked"):
+    with pytest.raises(ConnectError, match="InnerDeps already has a replacement"):
         dep.mock(InnerDeps, InnerDeps())
 
 
