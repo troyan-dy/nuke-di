@@ -1,4 +1,5 @@
-from typing import Protocol
+from functools import partial
+from typing import Any, Literal, Protocol, cast
 
 import pytest
 
@@ -36,6 +37,40 @@ class UsesRepository(Client):
 class Batches(Client):
     def __init__(self, sizes: list[int]) -> None:
         self.sizes = sizes
+
+
+class Retries(Client):
+    def __init__(self, count: int) -> None:
+        self.count = count
+
+
+class Either(Client):
+    def __init__(self, source: Database | int) -> None:
+        self.source = source
+
+
+class MaybeCount(Client):
+    def __init__(self, count: int | None) -> None:
+        self.count = count
+
+
+class Anything(Client):
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+
+class Mode(Client):
+    def __init__(self, mode: Literal["fast"]) -> None:
+        self.mode = mode
+
+
+class Handler(Client):
+    feed: "Feed"
+
+
+class Feed(Client):
+    def __init__(self, handler: Handler) -> None:
+        self.handler = handler
 
 
 class Checkout(Client):
@@ -88,7 +123,7 @@ def test_cycle_is_an_invalid_signature() -> None:
 
 def test_non_client_argument_names_type_and_path() -> None:
     expected = (
-        r'^Argument "repo" of "UsesRepository.__init__" is a Repository, which is not a client '
+        r'^Argument "repo" of "UsesRepository.__init__" is Repository, which is not a client '
         r"\(resolving Checkout -> UsesRepository\)$"
     )
     with pytest.raises(InvalidSignatureError, match=expected):
@@ -128,7 +163,8 @@ def test_unresolvable_forward_reference() -> None:
 
         return Uses
 
-    with pytest.raises(InvalidSignatureError, match=r'^Cannot evaluate the type hints of "Uses.__init__": .*Local'):
+    expected = r'^Cannot evaluate the type hints of "Uses.__init__": name \'Local\' is not defined; a type hint'
+    with pytest.raises(InvalidSignatureError, match=expected):
         Dependencies().resolve(make())
 
 
@@ -159,5 +195,35 @@ def test_failed_resolution_leaves_no_stale_path() -> None:
 
 
 def test_generic_argument_is_named_in_full() -> None:
-    with pytest.raises(InvalidSignatureError, match=r'^Argument "sizes" of "Batches.__init__" is a list\[int\], which'):
+    with pytest.raises(InvalidSignatureError, match=r'^Argument "sizes" of "Batches.__init__" is list\[int\], which'):
         Dependencies().resolve(Batches)
+
+
+@pytest.mark.parametrize(
+    ("cls", "name"),
+    [
+        (Retries, "int"),
+        (Either, "Database \\| int"),
+        (MaybeCount, "int \\| None"),
+        (Anything, "Any"),
+        (Mode, r"Literal\['fast'\]"),
+    ],
+)
+def test_type_is_named_without_module(cls: type[Client], name: str) -> None:
+    with pytest.raises(InvalidSignatureError, match=rf" is {name}, which is not a client"):
+        Dependencies().resolve(cls)
+
+
+def test_inject_wraps_unresolvable_forward_reference() -> None:
+    async def handler(feed: "Missing") -> None:  # type: ignore[name-defined]  # noqa: F821
+        pass
+
+    with pytest.raises(InvalidSignatureError, match=r'^Cannot evaluate the type hints of "handler": name \'Missing\''):
+        Dependencies().inject(handler)
+
+
+def test_inject_class_is_not_part_of_a_cycle() -> None:
+    # inject() reads the class annotations, Feed depends on Handler through __init__: no cycle
+    injected = cast(partial[Handler], Dependencies().inject(Handler))
+
+    assert isinstance(injected.keywords["feed"].handler, Handler)

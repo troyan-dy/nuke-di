@@ -8,6 +8,8 @@ class InvalidSignatureError(TypeError):
 class CircularDependencyError(InvalidSignatureError):
     """
     Clients depend on each other in a cycle, so none of them can be built.
+
+    An `InvalidSignatureError` because the cycle is a mistake in the `__init__` signatures, not in the environment.
     """
 
 

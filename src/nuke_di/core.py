@@ -54,8 +54,10 @@ class Dependencies:
     _replacements: dict[type[NotSingletonClient], NotSingletonClient] = field(default_factory=dict, init=False)
     # Replacements of the open `override()` blocks, outermost first; `flush()` keeps them
     _overrides: list[tuple[type[NotSingletonClient], NotSingletonClient]] = field(default_factory=list, init=False)
-    # What is being resolved right now, outermost first: finds cycles and names the path in errors
-    _resolving: list[Callable[..., Any]] = field(default_factory=list, init=False)
+    # Clients being resolved right now, outermost first: finds cycles and names the path in errors
+    _resolving: list[type[NotSingletonClient]] = field(default_factory=list, init=False)
+    # The function `inject()` is resolving for, named first in the path but never part of a cycle
+    _injecting: Callable[..., Any] | None = field(default=None, init=False)
 
     async def __aenter__(self) -> None:
         await self.connect()
@@ -184,7 +186,7 @@ class Dependencies:
             return cast(CT, inst)
 
         if cls in self._resolving:
-            raise CircularDependencyError(f"Circular dependency: {' -> '.join(map(sname, [*self._resolving, cls]))}")
+            raise CircularDependencyError(f"Circular dependency: {self._path(cls)}")
 
         name = sname(cls)
         logger.debug('Resolving dependency "%s"', name)
@@ -213,11 +215,7 @@ class Dependencies:
         """
         The arguments of `cls.__init__` to fill with clients; fail on any other required argument.
         """
-        where = f"{sname(cls)}.__init__"
-        try:
-            hints = get_type_hints(cls.__init__)
-        except NameError as exc:
-            raise InvalidSignatureError(f'Cannot evaluate the type hints of "{where}": {exc}{self._path()}') from exc
+        hints = self._type_hints(cls.__init__, f"{sname(cls)}.__init__")
 
         clients: dict[str, type[NotSingletonClient]] = {}
         # The first parameter is `self`
@@ -228,24 +226,42 @@ class Dependencies:
             hint: Any = hints.get(param.name)
             if isnotsingleton(hint):
                 if param.kind is param.POSITIONAL_ONLY:
-                    raise self._signature_error(where, param, "is positional-only, a client is passed by keyword")
+                    raise self._signature_error(cls, param, "is positional-only, a client is passed by keyword")
                 clients[param.name] = hint
             elif param.default is not param.empty:
                 # Not ours to fill: the default stays
                 continue
             elif hint is None:
-                raise self._signature_error(where, param, "has no type hint")
+                raise self._signature_error(cls, param, "has no type hint")
             elif (client := _optional_client(hint)) is not None:
-                raise self._signature_error(where, param, f"is {sname(client)} | None, a client cannot be optional")
+                raise self._signature_error(cls, param, f"is {sname(client)} | None, a client cannot be optional")
             else:
-                raise self._signature_error(where, param, f"is a {_type_name(hint)}, which is not a client")
+                raise self._signature_error(cls, param, f"is {_type_name(hint)}, which is not a client")
         return clients
 
-    def _signature_error(self, where: str, param: inspect.Parameter, reason: str) -> InvalidSignatureError:
-        return InvalidSignatureError(f'Argument "{param.name}" of "{where}" {reason}{self._path()}')
+    def _type_hints(self, func: Callable[..., Any], name: str) -> dict[str, Any]:
+        try:
+            return get_type_hints(func)
+        except NameError as exc:
+            raise InvalidSignatureError(
+                f'Cannot evaluate the type hints of "{name}": {exc}; a type hint must name something the module '
+                f"defines or imports at runtime, not a class local to a function or imported under TYPE_CHECKING"
+                f"{self._path_suffix()}"
+            ) from exc
 
-    def _path(self) -> str:
-        return f" (resolving {' -> '.join(map(sname, self._resolving))})"
+    def _signature_error(
+        self, cls: type[NotSingletonClient], param: inspect.Parameter, reason: str
+    ) -> InvalidSignatureError:
+        return InvalidSignatureError(
+            f'Argument "{param.name}" of "{sname(cls)}.__init__" {reason}{self._path_suffix()}'
+        )
+
+    def _path(self, *more: Callable[..., Any]) -> str:
+        root = [] if self._injecting is None else [self._injecting]
+        return " -> ".join(map(sname, [*root, *self._resolving, *more]))
+
+    def _path_suffix(self) -> str:
+        return f" (resolving {self._path()})" if self._injecting is not None or self._resolving else ""
 
     def inject(self, func: Callable) -> Callable:
         """
@@ -337,16 +353,16 @@ class Dependencies:
             if param.annotation is inspect.Parameter.empty:
                 raise InvalidSignatureError(f'Argument "{param.name}" of "{sname(func)}" has no type hint')
 
-        sig: dict[str, Any] = get_type_hints(func)
+        sig: dict[str, Any] = self._type_hints(func, sname(func))
         sig.pop("return", None)
 
-        self._resolving.append(func)
+        self._injecting = func
         try:
             for key, value in sig.items():
                 if isnotsingleton(value):
                     signature[key] = self.resolve(value)
         finally:
-            self._resolving.pop()
+            self._injecting = None
 
         return signature
 
@@ -360,9 +376,18 @@ def _optional_client(hint: Any) -> type[NotSingletonClient] | None:
 
 
 def _type_name(hint: Any) -> str:
-    if inspect.isclass(hint) and get_origin(hint) is None:
+    """
+    A type hint as written in code: `int`, `list[int]`, `Database | int`, without module prefixes.
+    """
+    if hint is type(None):
+        return "None"
+    origin = get_origin(hint)
+    if origin in {Union, types.UnionType}:
+        return " | ".join(map(_type_name, get_args(hint)))
+    if origin is not None:
+        return f"{_type_name(origin)}[{', '.join(map(_type_name, get_args(hint)))}]"
+    if inspect.isclass(hint):
         return hint.__name__
-    # A generic or a union: its repr names the parts, without the `typing.` noise
     return repr(hint).replace("typing.", "")
 
 

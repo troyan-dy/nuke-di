@@ -22,7 +22,7 @@ and has no runtime dependencies.
 
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [Clients](#clients): [singletons](#client-and-notsingletonclient), [lifecycle](#connect-and-disconnect), [dataclasses](#dataclass-clients), [layers](#layers), [connect failures](#when-a-client-fails-to-connect), [wiring errors](#when-the-tree-cannot-be-built)
+- [Clients](#clients): [singletons](#client-and-notsingletonclient), [lifecycle](#connect-and-disconnect), [dataclasses](#dataclass-clients), [layers](#layers), [connect failures](#when-a-client-fails-to-connect), [resolution errors](#when-the-tree-cannot-be-built)
 - [The container](#the-container)
 - [Workers and jobs](#workers-and-jobs): [a job](#your-first-job), [parameters](#parameters), [a worker](#your-first-worker), [grace period](#grace-period), [background tasks](#background-tasks), [exit codes](#exit-codes), [hooks](#hooks), [Kubernetes](#running-in-kubernetes)
 - [Testing](#testing)
@@ -346,8 +346,8 @@ when a dependency is down. Mocked clients are not connected and do not affect th
 
 ### When the tree cannot be built
 
-Resolution checks every `__init__` before it calls it, so a wiring mistake fails at once, names
-the argument and shows the path from the client you asked for:
+Resolution checks every `__init__` before it calls it, so a client that cannot be built fails
+before anything connects, with the argument named and the path from the client you asked for:
 
 ```python
 from typing import Protocol
@@ -391,7 +391,7 @@ for root in (Checkout, Orders):
 ```
 
 ```text
-InvalidSignatureError: Argument "users" of "Profiles.__init__" is a UserRepository, which is not a client (resolving Checkout -> Profiles)
+InvalidSignatureError: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)
 CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 ```
 
@@ -401,13 +401,14 @@ argument needs a default, which is left alone. These fail with `InvalidSignature
 | `__init__` argument without a default | Message                                           |
 |---------------------------------------|---------------------------------------------------|
 | no type hint                          | `has no type hint`                                |
-| a type that is not a client           | `is a UserRepository, which is not a client`      |
+| a type that is not a client           | `is UserRepository, which is not a client`        |
 | `Client \| None`                      | `is Postgres \| None, a client cannot be optional` |
 | a client, positional-only (`/`)       | `is positional-only, a client is passed by keyword` |
 
 Clients that depend on each other in a cycle fail with `CircularDependencyError`, a subclass of
 `InvalidSignatureError`, and a type hint that cannot be evaluated, e.g. a class defined inside a
-function, with an `InvalidSignatureError` that says so. In a [worker or a job](#workers-and-jobs)
+function or imported under `TYPE_CHECKING`, with an `InvalidSignatureError` that says so. When the
+error comes from `inject()`, the path starts at the function: `(resolving handler -> Checkout -> Profiles)`. In a [worker or a job](#workers-and-jobs)
 each of these fails the run with exit code `1` before anything connects.
 
 ## The container

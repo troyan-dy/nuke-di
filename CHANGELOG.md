@@ -21,8 +21,11 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   positional-only client now raises `InvalidSignatureError` naming the argument and the resolution path,
   e.g. `(resolving Checkout -> Profiles)`. Before, `__init__` was called anyway and failed with an
   `InitializeDependencyError` wrapping `TypeError: missing 1 required positional argument`.
-- A type hint of `__init__` that cannot be evaluated raises `InvalidSignatureError` instead of a bare
-  `NameError`.
+- A type hint that cannot be evaluated, in a client's `__init__` or in a function given to `inject()`,
+  raises `InvalidSignatureError` instead of a bare `NameError`.
+- These signatures failed before too, only with another exception. Code that caught
+  `InitializeDependencyError` or `NameError` for them should catch `InvalidSignatureError`; in a worker or
+  a job the exit code stays `1`.
 
 ### Fixed
 
