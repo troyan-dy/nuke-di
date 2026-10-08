@@ -1,0 +1,11 @@
+# Third-party objects are wrapped in Client classes
+
+An `httpx.AsyncClient`, an `asyncpg` pool or an `aiokafka` producer enters the container through a `Client` subclass that stores its settings in `__init__`, creates the object in `connect()` and closes it in `disconnect()`. Issue #8 proposed provider functions instead (`@DI.provide async def http(settings: Settings) -> AsyncIterator[httpx.AsyncClient]`, the code before `yield` as connect), with ready-made connectors for popular libraries on top. Both were rejected on 2026-10-08. The container resolves a consumer, and so runs its `__init__`, before anything connects, so the object a generator yields does not exist yet when the consumer asks for it. Every way around that is the wrapper again, written as a function and carrying more rules than the class does.
+
+The principle behind the decision: keep the library's apparent simplicity and nativeness. A dependency is a class with a type-hinted `__init__` and `connect()` / `disconnect()`. A feature whose result is already reachable with that, with `mock()` / `override()` or with a README recipe is not added, however common it is in other DI libraries.
+
+## Considered Options
+
+- **Async generator providers with a proxy** handed to consumers at resolution and forwarded to the real object after connect: `isinstance` and identity break, pydantic sees the proxy in FastAPI routes, and attribute access before connect fails with an error about the proxy, not about the lifecycle.
+- **Constructor functions plus a lifecycle protocol**: a sync function creates the object at resolution, the container calls `__aenter__` / `__aexit__` when the object is an async context manager and explicit `connect=` / `disconnect=` hooks otherwise. It keeps the resolution model, but adds a second way to declare a dependency, a registration scope per container, a rule for two providers of one type and a rule for which types may be provided, all to save one class.
+- **Built-in connectors** (`nuke_di.connectors.asyncpg` and the like, one extra per library): their value is the library-specific lifecycle and a fail-fast check on connect, at the price of a CI matrix against real services and a configuration surface the library does not have. A README recipe gives the same code to copy.
