@@ -13,9 +13,11 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - The README in Russian, Simplified Chinese, Spanish, Brazilian Portuguese, Japanese and Polish
   (`docs/i18n/README.<language>.md`), with a language switcher at the top of every README. Code examples and their
   output are not translated: a test checks that every translation shows exactly the code blocks of
-  `README.md` and that its internal links resolve. The package itself is unchanged.
+  `README.md`, the same sections and links, and that the links resolve. The source package includes the translations.
 - PyPI keywords and classifiers for search: `Framework :: FastAPI`, `Framework :: Pytest` (the pytest
   plugin list picks it up), application framework, workers, background jobs, graceful shutdown.
+
+The code of the package is unchanged; its metadata and PyPI description are new.
 
 ## [1.5.1] - 2026-10-08
 
