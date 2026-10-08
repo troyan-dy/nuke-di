@@ -1376,9 +1376,11 @@ user-7
 - **lifespan。** 客户端在应用自己的 `lifespan=` 和 `on_startup=` 运行之前连接，在它的
   `on_shutdown=` 钩子之后断开，Litestar 最后才调用这些钩子。`Shutdown` 和
   `BackgroundTasks` 的行为与 [FastAPI](#fastapi) 中相同。
-- **函数仍然是函数。** 对 Litestar 而言，它的客户端参数现在标注为
-  `Annotated[UserService, Dependency()]`，这正是 Litestar 2.23 所要求的写法，用来取代仅按名称
-  匹配的依赖项。直接调用该函数仍和以前一样可行。
+- **函数仍然是函数。** 它的客户端参数现在标注为 Litestar 的显式依赖项，且不校验其值：
+  `Annotated[UserService, Dependency(), SkipValidationMarker()]`，这正是 Litestar 2.23 所要求的
+  写法，用来取代仅按名称匹配的依赖项。直接调用该函数仍和以前一样可行。
+- **插件。** 把 `ClientPlugin()` 放在所有会添加路由处理函数的插件之后：轮到它时，它看到的是应用
+  此刻已有的处理函数。
 - **使用其他容器。** `ClientPlugin(container)`。
 
 **测试。** 与 FastAPI 一样，测试在 `TestClient` 启动应用之前替换客户端：
@@ -1411,7 +1413,8 @@ $ pytest -q tests/test_litestar_api.py
 
 **不支持的情况。** WebSocket 监听器，即 `@websocket_listener` 或 `WebsocketListener` 类，不接受
 客户端：Litestar 在声明它时就读取了其签名，早于插件看到它，因此应用会抛出 `TypeError`，并建议
-改用 `@websocket` 处理函数。在应用创建之后通过 `app.register()` 注册的处理函数，插件同样看不到。
+改用 `@websocket` 处理函数。如果客户端参数使用了 Litestar 保留的名称，例如 `state` 或 `request`，
+同样会抛出 `TypeError`。在应用创建之后通过 `app.register()` 注册的处理函数，插件看不到。
 
 ## <a id="faststream"></a>FastStream
 

@@ -377,6 +377,16 @@ def test_one_name_for_two_clients_is_refused() -> None:
         make_app(Dependencies(), [get_user, users_is_billing])
 
 
+@get("/reserved")
+async def reserved(state: Database) -> None: ...
+
+
+def test_client_under_a_reserved_name_is_refused() -> None:
+    expected = r'Argument "state" of reserved is Database, but Litestar reserves the name "state": rename it'
+    with pytest.raises(TypeError, match=expected):
+        make_app(Dependencies(), [reserved])
+
+
 @websocket_listener("/listener")
 async def listener(data: str, users: UserService) -> str:
     return data

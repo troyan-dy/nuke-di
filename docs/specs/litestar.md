@@ -50,7 +50,7 @@ An `InitPlugin`. In `on_app_init`:
 3. Adds one `Provide(<getter>)` per recorded name to `app_config.dependencies`, under the app's own dependencies, which win on a clash. A name recorded with two different clients raises `TypeError` naming both places.
 4. Inserts a lifespan at position 0 of `app_config.lifespan` that resolves the recorded clients and connects the container, and appends an `on_shutdown` hook that disconnects it. Litestar calls `on_shutdown` hooks after every lifespan exits, so the app's own lifespans, `on_startup` and `on_shutdown` hooks all see connected clients. Shutdown follows a Run: `Shutdown`, `BackgroundTasks`, `disconnect()`. A failed startup behaves as in FastAPI: rolled back, flushed, raised as `RuntimeError`.
 
-A websocket listener with a client argument raises `TypeError` that names `@websocket` instead.
+A websocket listener with a client argument raises `TypeError` that names `@websocket` instead, and so does a client argument under a name Litestar reserves (`RESERVED_KWARGS`: `state`, `request`, `socket`, ...). Handlers added by a plugin that runs after `ClientPlugin` are not seen, so it goes last among the plugins.
 
 ### Getter
 

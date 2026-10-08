@@ -106,6 +106,26 @@ async def connected(container: Dependencies, bindings: list[Binding]) -> AsyncIt
             _forget(bindings)
 
 
+def wrap_lifespan(
+    original: Callable[..., Any], container: Dependencies, bindings: Callable[[], list[Binding]]
+) -> Callable[..., Any]:
+    """
+    A lifespan that runs `original` inside `container`, connected with the clients `bindings()` finds on
+    startup; refuses an app set up already.
+    """
+    if getattr(original, "__nuke_di__", False):
+        raise TypeError("setup() was already called for this app")
+
+    @asynccontextmanager
+    async def lifespan(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
+        # The app's own lifespan runs inside, so its startup and shutdown code can use the clients
+        async with connected(container, bindings()), original(*args, **kwargs) as state:
+            yield state
+
+    lifespan.__nuke_di__ = True  # type: ignore[attr-defined]
+    return lifespan
+
+
 def _forget(bindings: list[Binding]) -> None:
     for binding in bindings:
         binding.instance = None

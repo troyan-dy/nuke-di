@@ -7,7 +7,7 @@ Terms: see [CONTEXT.md](../../CONTEXT.md). This spec uses **Client**, **Containe
 
 ## Problem
 
-A consumer on FastStream has to connect its clients in `on_startup` by hand and reach them through globals or `Context()`. A subscriber that declares `users: UserService` gets FastStream reading `users` from the message instead.
+A service on FastStream has to connect its clients in `on_startup` by hand and reach them through globals or `Context()`. A subscriber that declares `users: UserService` gets FastStream reading `users` from the message instead.
 
 ## Goal
 
@@ -47,6 +47,8 @@ Module `nuke_di.faststream`, installed with the `faststream` extra (`pip install
 2. Adds a decorator to `fd_config.call_decorators` of every broker of the app, which FastStream applies to a subscriber's declared function every time it builds the subscriber, i.e. on every broker start. It rewrites the signature too, so a broker started without the app (e.g. `TestNatsBroker(broker)` without `TestApp`) fails with "not connected" instead of reading the client from the message.
 3. Raises `TypeError` when called twice for the same app.
 
+A function is rewritten once, whatever the container, and every startup resolves the same bindings from the container of the app that starts: FastStream 0.6 under a test broker builds a subscriber before the app's lifespan runs, so the signature must not change from one app to the next. Apps that share a subscriber function, e.g. an app per test on a module-level broker, therefore run one at a time. The decorator is installed once per broker and holds the container of the latest app set up on it, which only names the client in errors.
+
 Subscribers may be declared before or after `setup()`. A subscriber added after the app started is rewritten when it starts but its clients were never resolved: its getter raises "was not started with the app".
 
 ### Internals read
@@ -73,4 +75,5 @@ with DI.override(Database, replacement):
 | 4 | Why also `call_decorators` | The field FastStream keeps "to patch injection by integrations" (its own comment), applied on every build: without it a test that forgets `TestApp` gets a pydantic error about the message instead of the fix. |
 | 5 | Which subscribers | Those of the app's brokers, routers included. A subscriber of another broker starts nothing. |
 | 6 | Minimum FastStream | 0.6.0, where `broker.subscribers`, `fd_config.call_decorators` and `lifespan_context` look as in 0.7; 0.5 is a different design. CI runs the FastStream tests on it with NATS. |
+| 8 | An app per test on one module-level broker (found in review) | Bindings are made once per function and resolved by whichever app starts; one decorator per broker. A binding per container broke it: the decorator of an earlier app rebound the function to its own container on every broker start. |
 | 7 | Test broker in nuke-di's own tests | NATS (`faststream[nats]`): a pure-Python client, so CI needs no service. |

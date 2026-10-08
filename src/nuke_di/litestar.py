@@ -1,7 +1,7 @@
 """
 Litestar integration: route handlers and their dependencies take clients by type hint.
 
-See docs/specs/litestar.md and docs/adr/0004-litestar-dependencies-by-name.md.
+See docs/specs/litestar.md and docs/adr/0004-litestar-clients-by-name.md.
 """
 
 import inspect
@@ -11,6 +11,7 @@ from typing import Annotated, Any, get_type_hints
 
 from litestar import Litestar, Router
 from litestar.config.app import AppConfig
+from litestar.constants import RESERVED_KWARGS
 from litestar.di import Provide
 from litestar.handlers import BaseRouteHandler, HTTPRouteHandler, WebsocketRouteHandler
 from litestar.handlers.websocket_handlers import WebsocketListenerRouteHandler
@@ -24,7 +25,7 @@ from nuke_di.utils import sname
 
 __all__ = ("ClientPlugin",)
 
-# Litestar has no `Depends`: it matches dependencies by name, see `_Handler`
+# Litestar has no `Depends`: it matches dependencies by name, see `_Clients`
 _LITESTAR = Framework(
     not_started="{client} was not started with the app: register its handler when the app is created",
     not_connected="{client} is not connected: start the app with its lifespan, e.g. `with TestClient(app)`",
@@ -137,6 +138,11 @@ class _Clients:
             client = client_of(hints.get(name))
             if client is None:
                 continue
+            if name in RESERVED_KWARGS:
+                raise TypeError(
+                    f'Argument "{name}" of {sname(call)} is {sname(client)}, but Litestar reserves the name "{name}": '
+                    f"rename it"
+                )
             if name not in provided:
                 self._record(name, client, call)
             # Litestar would read the client from the query string otherwise, and warns about a dependency

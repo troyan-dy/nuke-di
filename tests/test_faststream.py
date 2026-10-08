@@ -321,6 +321,28 @@ async def test_asgi_app() -> None:
     assert events[1:-1] == ["Hello, user-6!"]
 
 
+async def test_app_per_container_on_one_broker() -> None:
+    # E.g. a module-level broker and an app factory per test
+    broker = NatsBroker()
+    broker.subscriber("greet")(greet)
+    first, second = Dependencies(), Dependencies()
+    first_app = make_app(first, broker)
+    second_app = make_app(second, broker)
+
+    with second.override(Database, FakeDatabase()):
+        for app in (first_app, second_app, first_app):
+            async with TestNatsBroker(broker) as test_broker, TestApp(app):
+                await test_broker.publish(1, "greet")
+
+    assert [event for event in events if event.startswith("Hello")] == [
+        "Hello, user-1!",
+        "Hello, alice!",
+        "Hello, user-1!",
+    ]
+    # One decorator per broker, however many apps were set up on it
+    assert len(broker.config.fd_config.call_decorators) == 1
+
+
 # --- misuse ----------------------------------------------------------------------------------------------
 
 

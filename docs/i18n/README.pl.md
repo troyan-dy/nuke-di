@@ -1396,9 +1396,12 @@ Zasady:
 - **Lifespan.** Klienci łączą się, zanim wykonają się własne `lifespan=` i `on_startup=` aplikacji,
   i rozłączają się po jej hookach `on_shutdown=`, które Litestar wywołuje na końcu. `Shutdown` i
   `BackgroundTasks` działają tak jak w [FastAPI](#fastapi).
-- **Funkcja pozostaje funkcją.** Jej argumenty-klienci mają teraz dla Litestar adnotację
-  `Annotated[UserService, Dependency()]`, czego Litestar 2.23 wymaga zamiast zależności dopasowanej
-  wyłącznie po nazwie. Bezpośrednie wywołanie funkcji działa tak jak wcześniej.
+- **Funkcja pozostaje funkcją.** Jej argumenty-klienci mają teraz adnotację jawnych zależności Litestar,
+  których wartość nie jest walidowana: `Annotated[UserService, Dependency(), SkipValidationMarker()]`,
+  czego Litestar 2.23 wymaga zamiast zależności dopasowanej wyłącznie po nazwie. Bezpośrednie wywołanie
+  funkcji działa tak jak wcześniej.
+- **Pluginy.** Umieść `ClientPlugin()` za każdym pluginem, który dodaje handlery tras: plugin widzi te
+  handlery, które aplikacja ma w chwili, gdy przychodzi jego kolej.
 - **Inny kontener.** `ClientPlugin(container)`.
 
 **Testowanie.** Tak jak w FastAPI, test podmienia klienta, zanim `TestClient` wystartuje aplikację:
@@ -1431,8 +1434,9 @@ $ pytest -q tests/test_litestar_api.py
 
 **Nieobsługiwane.** Listener websocket, `@websocket_listener` lub klasa `WebsocketListener`, nie
 przyjmuje klientów: Litestar odczytuje jego sygnaturę już przy deklaracji, zanim plugin ją zobaczy,
-więc aplikacja zgłasza `TypeError` i wskazuje zamiast niego handler `@websocket`. Handler zarejestrowany
-po utworzeniu aplikacji, przez `app.register()`, również nie jest widoczny.
+więc aplikacja zgłasza `TypeError` i wskazuje zamiast niego handler `@websocket`. Argument-klient
+o nazwie zarezerwowanej przez Litestar, takiej jak `state` czy `request`, również powoduje `TypeError`.
+Handler zarejestrowany po utworzeniu aplikacji, przez `app.register()`, nie jest widoczny.
 
 ## <a id="faststream"></a>FastStream
 

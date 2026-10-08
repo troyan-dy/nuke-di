@@ -1393,9 +1393,12 @@ The rules:
 - **Lifespan.** The clients connect before the app's own `lifespan=` and `on_startup=` run, and
   disconnect after its `on_shutdown=` hooks, which Litestar calls last. `Shutdown` and
   `BackgroundTasks` behave as in [FastAPI](#fastapi).
-- **The function stays a function.** Its client arguments are now annotated
-  `Annotated[UserService, Dependency()]` for Litestar, which is what Litestar 2.23 asks for instead of a
-  dependency matched by name only. Calling the function directly works as before.
+- **The function stays a function.** Its client arguments are now annotated as explicit Litestar
+  dependencies whose value is not validated, `Annotated[UserService, Dependency(), SkipValidationMarker()]`,
+  which is what Litestar 2.23 asks for instead of a dependency matched by name only. Calling the function
+  directly works as before.
+- **Plugins.** Put `ClientPlugin()` after any plugin that adds route handlers: it sees the handlers the
+  app has when its turn comes.
 - **Another container.** `ClientPlugin(container)`.
 
 **Testing.** As with FastAPI, a test replaces a client before `TestClient` starts the app:
@@ -1428,8 +1431,9 @@ $ pytest -q tests/test_litestar_api.py
 
 **Not supported.** A websocket listener, `@websocket_listener` or a `WebsocketListener` class, takes no
 clients: Litestar reads its signature when it is declared, before the plugin sees it, so the app
-raises `TypeError` and names a `@websocket` handler instead. A handler registered after the app is
-created, with `app.register()`, is not seen either.
+raises `TypeError` and names a `@websocket` handler instead. A client argument under a name Litestar
+reserves, such as `state` or `request`, raises `TypeError` too. A handler registered after the app is
+created, with `app.register()`, is not seen.
 
 ## FastStream
 

@@ -4,14 +4,13 @@ FastAPI integration: path operations and their dependencies take clients by type
 See docs/specs/fastapi.md and docs/adr/0003-fastapi-signature-rewrite.md.
 """
 
-from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from collections.abc import Callable
 from typing import Any, ClassVar
 
 from fastapi import APIRouter, Depends, FastAPI, params
 from fastapi.routing import APIRoute
 
-from nuke_di._integration import Binding, DependsFramework, bind, connected
+from nuke_di._integration import Binding, DependsFramework, bind, unique, wrap_lifespan
 from nuke_di.core import DI, Dependencies
 from nuke_di.utils import sname
 
@@ -112,9 +111,10 @@ def setup(app: FastAPI, container: Dependencies = DI) -> None:
             )
         app.router.route_class = route_cls
 
-    original = app.router.lifespan_context
-    if getattr(original, "__nuke_di__", False):
-        raise TypeError("setup() was already called for this app")
+    # The app's own lifespan runs inside, so its startup and shutdown code can use the clients
+    app.router.lifespan_context = wrap_lifespan(
+        app.router.lifespan_context, route_cls.container, lambda: _router_bindings(app.router)
+    )
 
     _track(app.router, route_cls)
     # On the router of the app rather than the app: app.include_router() calls it, and so may the user
@@ -132,15 +132,6 @@ def setup(app: FastAPI, container: Dependencies = DI) -> None:
         _add_websocket(app.router, add_websocket, route_cls, path, endpoint, args, kwargs)
 
     app.router.add_api_websocket_route = add_api_websocket_route  # type: ignore[method-assign]
-
-    @asynccontextmanager
-    async def lifespan(app: Any) -> AsyncIterator[Any]:
-        # The app's own lifespan runs inside, so its startup and shutdown code can use the clients
-        async with connected(route_cls.container, _router_bindings(app.router)), original(app) as state:
-            yield state
-
-    lifespan.__nuke_di__ = True  # type: ignore[attr-defined]
-    app.router.lifespan_context = lifespan
 
 
 class _Tracked:
@@ -197,22 +188,22 @@ def _router_bindings(router: APIRouter) -> list[Binding]:
     """
     The clients of every route an app serves through `router`, each once.
     """
-    found: dict[int, Binding] = {}
+    found: list[Binding] = []
 
     def visit(router: APIRouter) -> None:
         for route in router.routes:
-            found.update((id(binding), binding) for binding in getattr(route, "nuke_di_bindings", ()))
+            found.extend(getattr(route, "nuke_di_bindings", ()))
         tracked: _Tracked | None = getattr(router, "nuke_di_tracked", None)
         if tracked is None:
             return
-        found.update((id(binding), binding) for binding in tracked.dependencies)
+        found.extend(tracked.dependencies)
         for included, bindings in tracked.includes:
-            found.update((id(binding), binding) for binding in bindings)
+            found.extend(bindings)
             visit(included)
 
     visit(router)
-    return list(found.values())
+    return unique(found)
 
 
-def _bind(call: Callable[..., Any] | None, route_cls: type["_ContainerRoute"]) -> list[Binding]:
+def _bind(call: Callable[..., Any] | None, route_cls: type[_ContainerRoute]) -> list[Binding]:
     return bind(call, route_cls.container, _FASTAPI)
