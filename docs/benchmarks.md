@@ -28,7 +28,8 @@ noisy for one.
 
 `benchmarks/compare.py` takes the same flags and runs `nuke-di` against other libraries, see
 [Comparison with other libraries](#comparison-with-other-libraries); its scenarios are `cold`, `warm`
-and `request`, and the libraries are the `compare` dependency group:
+and `request`, and the libraries are the `compare` dependency group, which `uv sync` installs with the
+dev dependencies:
 
 ```console
 $ uv run --group compare python benchmarks/compare.py [--size N]... [--repeat K] [--only SCENARIO]... [--json PATH]

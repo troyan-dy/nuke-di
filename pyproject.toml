@@ -86,6 +86,10 @@ dev = [
   "ruff>=0.8",
 ]
 
+[tool.uv]
+# The comparison libraries of benchmarks/compare.py, which mypy checks
+default-groups = ["dev", "compare"]
+
 [build-system]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"

@@ -53,7 +53,7 @@ def test_prints_a_markdown_table_and_writes_json(tmp_path: Path) -> None:
 
 
 def test_compares_libraries(tmp_path: Path) -> None:
-    # The libraries are the `compare` dependency group, which a plain `uv sync` leaves out
+    # The libraries are the `compare` dependency group, a default group of `uv sync`
     pytest.importorskip("dishka")
     out = tmp_path / "compare.json"
 
