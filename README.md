@@ -1066,9 +1066,13 @@ The rules:
 - **Replacements are not connected.** Their `connect()` / `disconnect()` are never called, and they
   do not take part in the [layers](#layers).
 - **How long a Replacement lasts.** One from `mock()` is dropped by the next `flush()`, including the
-  one at the end of `disconnect()`. One from `override()` survives every `flush()` until its block
-  ends, so `override()` blocks nest. An exception inside the block propagates unchanged; leaving the
-  block normally while the container is still connected raises `ConnectError`.
+  one at the end of `disconnect()`: a test that connects the container more than once should use
+  `override()`, whose Replacement survives every `flush()` until its block ends. An exception inside
+  the block propagates unchanged; leaving the block normally while the container is still connected
+  raises `ConnectError`.
+- **Nesting.** Blocks for different classes nest as long as each one opens before anything is
+  resolved, e.g. `with DI.override(Database), DI.override(Clock):`; leaving the inner block keeps the
+  outer Replacement.
 
 **pytest fixtures.** Installing `nuke-di` registers a pytest plugin with two fixtures. Neither is
 autouse, so existing tests run exactly as before:
