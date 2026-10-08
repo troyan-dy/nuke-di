@@ -44,6 +44,11 @@ test-all: ## Run tests on every supported Python version
 test-fastapi-min: ## Run the FastAPI tests on the lowest supported FastAPI
 	uv run --python 3.11 --isolated --with "fastapi==0.105.0" --with "httpx<0.28" pytest tests/test_fastapi.py -p no:cacheprovider
 
+.PHONY: check-version
+check-version: ## Check that the version is bumped against origin/master, as CI does for a pull request
+	git fetch --quiet --tags origin master
+	uv run --no-project python scripts/version.py check origin/master
+
 .PHONY: check
 check: lint test ## Run everything CI runs
 

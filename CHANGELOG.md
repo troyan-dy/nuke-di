@@ -6,6 +6,16 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-10-08
+
+### Changed
+
+- Every merge into `master` is a release: the `Release` workflow publishes the version in `pyproject.toml`
+  to PyPI, tags it and creates a GitHub release with its CHANGELOG section. A pull request into `master`
+  fails CI unless it raises the version and adds its CHANGELOG section and compare link; a change that
+  reaches `master` without a new version fails the `Release` workflow. `make check-version` runs the same
+  check locally. The package itself is unchanged.
+
 ## [1.5.0] - 2026-10-08
 
 ### Added
@@ -139,7 +149,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/troyan-dy/nuke-di/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/troyan-dy/nuke-di/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/troyan-dy/nuke-di/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/troyan-dy/nuke-di/compare/v1.2.0...v1.3.0
