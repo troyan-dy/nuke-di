@@ -6,6 +6,19 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-09
+
+### Added
+
+- `Dependencies.graph()` returns a `Graph` of the resolved clients: one `Node` per client in resolution order
+  with its class, whether it is a singleton, its layer, the Replacement standing in for it and its dependencies
+  by `__init__` argument name. `Graph.to_mermaid()` renders it as a Mermaid flowchart with the layers as
+  subgraphs, which GitHub draws in a README, a pull request or an issue. `Graph` and `Node` are exported from
+  `nuke_di`; see "The graph" in the README ([#13](https://github.com/troyan-dy/nuke-di/issues/13)).
+- A recipe in "Testing" that checks the wiring of every entrypoint in CI with `Dependencies().inject()`,
+  in place of the `NUKE_DI_CHECK` mode proposed in #13: the test gives the same result without a second way
+  to start a process.
+
 ## [1.8.0] - 2026-10-08
 
 ### Added
@@ -232,7 +245,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/troyan-dy/nuke-di/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/troyan-dy/nuke-di/compare/v1.7.1...v1.8.0
 [1.7.1]: https://github.com/troyan-dy/nuke-di/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/troyan-dy/nuke-di/compare/v1.6.0...v1.7.0

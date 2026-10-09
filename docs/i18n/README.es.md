@@ -25,7 +25,7 @@ y no tiene dependencias en tiempo de ejecución.
 
 - [Instalación](#installation)
 - [Inicio rápido](#quick-start)
-- [Clientes](#clients): [singletons](#client-and-notsingletonclient), [ciclo de vida](#connect-and-disconnect), [dataclasses](#dataclass-clients), [capas](#layers), [tiempos de arranque](#startup-timings), [fallos de conexión](#when-a-client-fails-to-connect), [errores de resolución](#when-the-tree-cannot-be-built)
+- [Clientes](#clients): [singletons](#client-and-notsingletonclient), [ciclo de vida](#connect-and-disconnect), [dataclasses](#dataclass-clients), [capas](#layers), [tiempos de arranque](#startup-timings), [el grafo](#the-graph), [fallos de conexión](#when-a-client-fails-to-connect), [errores de resolución](#when-the-tree-cannot-be-built)
 - [El contenedor](#the-container)
 - [Workers y jobs](#workers-and-jobs): [un job](#your-first-job), [parámetros](#parameters), [un worker](#your-first-worker), [periodo de gracia](#grace-period), [tareas en segundo plano](#background-tasks), [códigos de salida](#exit-codes), [hooks](#hooks), [Kubernetes](#running-in-kubernetes)
 - Frameworks: [FastAPI](#fastapi), [Litestar](#litestar), [FastStream](#faststream)
@@ -379,6 +379,108 @@ quedan en `"cancelled"`, las capas superiores mantienen `None` y los clientes qu
 habían conectado se revierten, por lo que reciben un `disconnect_outcome`. La biblioteca
 solo mide: exportar los tiempos como métricas o spans queda en manos de tu código.
 
+### <a id="the-graph"></a>El grafo
+
+El grafo de dependencias solo existe dentro de un proceso en marcha: el log `DEBUG` de arriba es el
+único lugar que muestra qué clientes arrastra un entrypoint y en qué capa se conecta cada uno.
+`graph()` devuelve la misma imagen como datos, antes de `connect()` o después. Los clientes del
+ejemplo de [Capas](#layers), sin su `connect()`:
+
+```python
+# graph.py
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    pass
+
+
+class Redis(Client):
+    pass
+
+
+class Payments(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+class Checkout(Client):
+    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
+        self.pg, self.redis, self.payments = pg, redis, payments
+
+
+deps = Dependencies()
+deps.resolve(Checkout)
+nodes = {node.name: node for node in deps.graph().nodes}
+for node in nodes.values():
+    print(f"{node.name:<8} layer {node.layer}  needs {list(node.dependencies)}")
+print("shared:", nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"])
+print(deps.graph().to_mermaid())
+```
+
+```console
+$ python graph.py
+Postgres layer 0  needs []
+Redis    layer 0  needs []
+Payments layer 1  needs ['pg']
+Checkout layer 2  needs ['pg', 'redis', 'payments']
+shared: True
+graph BT
+  subgraph layer0 [layer 0]
+    Postgres
+    Redis
+  end
+  subgraph layer1 [layer 1]
+    Payments
+  end
+  subgraph layer2 [layer 2]
+    Checkout
+  end
+  Postgres --> Payments
+  Postgres --> Checkout
+  Redis --> Checkout
+  Payments --> Checkout
+```
+
+GitHub renderiza el texto Mermaid en un README, un pull request o un issue, así que un proyecto
+puede mostrar su arquitectura sin un proceso en marcha:
+
+```mermaid
+graph BT
+  subgraph layer0 [layer 0]
+    Postgres
+    Redis
+  end
+  subgraph layer1 [layer 1]
+    Payments
+  end
+  subgraph layer2 [layer 2]
+    Checkout
+  end
+  Postgres --> Payments
+  Postgres --> Checkout
+  Redis --> Checkout
+  Payments --> Checkout
+```
+
+`Graph.nodes` contiene un `Node` por cliente resuelto, en orden de resolución, así que un cliente va
+después de sus dependencias. Es una instantánea: `flush()` lo vacía, salvo los Replacement de los bloques
+`override()` abiertos, que sobreviven a cada `flush()`.
+
+| Campo de `Node` | Valor |
+|-----------------|-------|
+| `name`          | El nombre de la clase del cliente |
+| `cls`           | La clase que pidieron los consumidores |
+| `singleton`     | `True` para un `Client`, `False` para un `NotSingletonClient` |
+| `layer`         | La [capa](#layers) del cliente; `None` para un Replacement, que nunca se conecta |
+| `replacement`   | El objeto registrado con `mock()` u `override()` en lugar de `cls`; `None` para un cliente real |
+| `dependencies`  | Los clientes de los argumentos de `__init__`, por nombre de argumento |
+
+Un `NotSingletonClient` recibe un nodo por instancia, todos con el mismo nombre; `to_mermaid()` los
+numera desde el segundo (`Session`, `Session_2`). Un Replacement se dibuja fuera de las capas con un
+borde discontinuo y el nombre del objeto que lo sustituye: `Postgres: AsyncMock`. Los nodos se comparan
+por identidad, así que el `shared: True` de arriba dice que `Checkout` y `Payments` recibieron el mismo `Postgres`.
+
 ### <a id="when-a-client-fails-to-connect"></a>Cuando un cliente no logra conectarse
 
 Si un cliente no logra conectarse, se cancela el resto de su capa y las capas siguientes nunca
@@ -522,6 +624,7 @@ cuando necesites aislamiento, por ejemplo en las pruebas.
 | `override(cls, new=None)` | Un Reemplazo que dura lo que dura un bloque `with`, seguido de `flush()`; consulta [Pruebas](#testing). |
 | `flush()`            | Olvida todos los clientes resueltos.                                    |
 | `timings`            | Un `ClientTiming` por cliente del último `connect()`; ver [Tiempos de arranque](#startup-timings). |
+| `graph()`            | Un `Graph` de los clientes resueltos con sus dependencias y capas, `to_mermaid()` incluido; ver [El grafo](#the-graph). |
 
 `resolve`, `inject`, `mock`, `override` y `flush` solo funcionan mientras el contenedor está
 desconectado: todo el árbol se construye antes del arranque.
@@ -1899,6 +2002,38 @@ async def test_sync_with_container() -> None:
 
     assert pg.upsert.await_args_list == [call("users", ["row"])]
 ```
+
+**Cada entrypoint se resuelve.** Importar un módulo no ejecuta su job ni su worker, e `inject()`
+construye el árbol sin conectar nada, así que una sola prueba comprueba el cableado de cada entrypoint
+en CI: un ciclo, un argumento sin anotación de tipo, un argumento obligatorio que no es un cliente o un
+`__init__` que lanza la hacen fallar con el mismo error que imprimiría una ejecución real, y no hace
+falta ninguna base de datos:
+
+```python
+# test_wiring.py
+from collections.abc import Callable
+
+import pytest
+
+from nuke_di import Dependencies
+
+from app.jobs import sync
+from app.workers import consumer
+
+
+@pytest.mark.parametrize("entrypoint", [sync.sync, consumer.consumer])
+def test_entrypoint_resolves(entrypoint: Callable[..., object]) -> None:
+    Dependencies().inject(entrypoint)  # runs every __init__, connects nothing
+```
+
+```console
+$ pytest -q test_wiring.py
+..                                                                       [100%]
+2 passed in 0.05s
+```
+
+Conserva el contenedor para obtener [el grafo](#the-graph) de un entrypoint para su README:
+`deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`.
 
 **Un worker.** `Shutdown.set()` hace lo mismo que haría SIGTERM:
 

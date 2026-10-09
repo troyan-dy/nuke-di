@@ -8,6 +8,7 @@ from collections import OrderedDict, defaultdict
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from functools import partial
+from types import MappingProxyType
 from typing import Any, Literal, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
 from nuke_di.errors import (
@@ -17,6 +18,7 @@ from nuke_di.errors import (
     InitializeDependencyError,
     InvalidSignatureError,
 )
+from nuke_di.graph import Graph, Node
 from nuke_di.logs import fields
 from nuke_di.options import DependenciesSettings
 from nuke_di.timings import ClientTiming, Outcome
@@ -56,6 +58,11 @@ class Dependencies:
     _timings: dict[int, ClientTiming] = field(default_factory=dict, init=False)
     # Layer of every client in `connect_clients`, keyed by `id()`: dataclass clients may be unhashable
     _layers: dict[int, int] = field(default_factory=dict, init=False)
+    # For `graph()`: the class asked for and the client passed, per `__init__` argument of every client in
+    # `connect_clients`, keyed by `id()`. The class tells a Replacement apart from the clients it stands in for.
+    _dependencies: dict[int, dict[str, tuple[type[NotSingletonClient], NotSingletonClient]]] = field(
+        default_factory=dict, init=False
+    )
     # Replacements registered by `mock()` and `override()`, a subset of `clients`
     _replacements: dict[type[NotSingletonClient], NotSingletonClient] = field(default_factory=dict, init=False)
     # Replacements of the open `override()` blocks, outermost first; `flush()` keeps them
@@ -78,6 +85,7 @@ class Dependencies:
         self.clients = OrderedDict()
         self.connect_clients = []
         self._layers = {}
+        self._dependencies = {}
         self._timings = {}
         self._replacements = {}
         for cls, replacement in self._overrides:
@@ -246,7 +254,8 @@ class Dependencies:
 
         self._resolving.append(cls)
         try:
-            init = {key: self.resolve(dep) for key, dep in self._client_arguments(cls).items()}
+            arguments = self._client_arguments(cls)
+            init = {key: self.resolve(dep) for key, dep in arguments.items()}
         finally:
             self._resolving.pop()
 
@@ -261,8 +270,37 @@ class Dependencies:
 
         # One layer above the highest dependency; mocks are not connected, so they do not count
         self._layers[id(inst)] = 1 + max((self._layers.get(id(d), -1) for d in init.values()), default=-1)
+        self._dependencies[id(inst)] = {key: (arguments[key], dep) for key, dep in init.items()}
         self.connect_clients.append(inst)
         return inst
+
+    def graph(self) -> Graph:
+        """
+        A snapshot of the resolved clients with their dependencies and Layers.
+
+        `flush()` empties it, apart from the Replacements of the open `override()` blocks, which it keeps.
+        """
+        # A Replacement is one object for every class it stands in for, and may be a resolved client too,
+        # so its nodes are keyed by class and the resolved clients by `id()`
+        replaced = {
+            cls: Node(cls=cls, singleton=isclient(cls), layer=None, replacement=replacement)
+            for cls, replacement in self._replacements.items()
+        }
+        resolved: dict[int, Node] = {}
+        # Resolution order: a client's dependencies have a node before the client does
+        for client in self.connect_clients:
+            dependencies = {
+                key: replaced[cls] if self._replacements.get(cls) is dep else resolved[id(dep)]
+                for key, (cls, dep) in self._dependencies.get(id(client), {}).items()
+            }
+            resolved[id(client)] = Node(
+                cls=type(client),
+                singleton=isclient(type(client)),
+                layer=self._layer(client),
+                replacement=None,
+                dependencies=MappingProxyType(dependencies),
+            )
+        return Graph((*replaced.values(), *resolved.values()))
 
     def _client_arguments(self, cls: type[NotSingletonClient]) -> dict[str, type[NotSingletonClient]]:
         """

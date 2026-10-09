@@ -25,7 +25,7 @@ i nie ma żadnych zależności w czasie działania.
 
 - [Instalacja](#installation)
 - [Szybki start](#quick-start)
-- [Klienci](#clients): [singletony](#client-and-notsingletonclient), [cykl życia](#connect-and-disconnect), [klienci jako dataclass](#dataclass-clients), [warstwy](#layers), [czasy startu](#startup-timings), [błędy połączenia](#when-a-client-fails-to-connect), [błędy rozwiązywania](#when-the-tree-cannot-be-built)
+- [Klienci](#clients): [singletony](#client-and-notsingletonclient), [cykl życia](#connect-and-disconnect), [klienci jako dataclass](#dataclass-clients), [warstwy](#layers), [czasy startu](#startup-timings), [graf](#the-graph), [błędy połączenia](#when-a-client-fails-to-connect), [błędy rozwiązywania](#when-the-tree-cannot-be-built)
 - [Kontener](#the-container)
 - [Workery i joby](#workers-and-jobs): [job](#your-first-job), [parametry](#parameters), [worker](#your-first-worker), [okres karencji](#grace-period), [zadania w tle](#background-tasks), [kody wyjścia](#exit-codes), [hooki](#hooks), [Kubernetes](#running-in-kubernetes)
 - Frameworki: [FastAPI](#fastapi), [Litestar](#litestar), [FastStream](#faststream)
@@ -379,6 +379,108 @@ Gdy klient nie może się połączyć, klienci jego warstwy, którzy wciąż si�
 dostają `disconnect_outcome`. Biblioteka tylko mierzy: eksport czasów jako metryk lub spanów
 należy do twojego kodu.
 
+### <a id="the-graph"></a>Graf
+
+Graf zależności istnieje tylko wewnątrz działającego procesu: log `DEBUG` powyżej to jedyne miejsce,
+które pokazuje, jakich klientów ściąga punkt wejścia i w której warstwie każdy z nich się łączy.
+`graph()` zwraca ten sam obraz jako dane, przed `connect()` albo po nim. Klienci z przykładu o
+[warstwach](#layers), bez swojego `connect()`:
+
+```python
+# graph.py
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    pass
+
+
+class Redis(Client):
+    pass
+
+
+class Payments(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+class Checkout(Client):
+    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
+        self.pg, self.redis, self.payments = pg, redis, payments
+
+
+deps = Dependencies()
+deps.resolve(Checkout)
+nodes = {node.name: node for node in deps.graph().nodes}
+for node in nodes.values():
+    print(f"{node.name:<8} layer {node.layer}  needs {list(node.dependencies)}")
+print("shared:", nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"])
+print(deps.graph().to_mermaid())
+```
+
+```console
+$ python graph.py
+Postgres layer 0  needs []
+Redis    layer 0  needs []
+Payments layer 1  needs ['pg']
+Checkout layer 2  needs ['pg', 'redis', 'payments']
+shared: True
+graph BT
+  subgraph layer0 [layer 0]
+    Postgres
+    Redis
+  end
+  subgraph layer1 [layer 1]
+    Payments
+  end
+  subgraph layer2 [layer 2]
+    Checkout
+  end
+  Postgres --> Payments
+  Postgres --> Checkout
+  Redis --> Checkout
+  Payments --> Checkout
+```
+
+GitHub renderuje tekst Mermaid w README, pull requeście lub issue, więc projekt może pokazać swoją
+architekturę bez działającego procesu:
+
+```mermaid
+graph BT
+  subgraph layer0 [layer 0]
+    Postgres
+    Redis
+  end
+  subgraph layer1 [layer 1]
+    Payments
+  end
+  subgraph layer2 [layer 2]
+    Checkout
+  end
+  Postgres --> Payments
+  Postgres --> Checkout
+  Redis --> Checkout
+  Payments --> Checkout
+```
+
+`Graph.nodes` trzyma po jednym `Node` na rozwiązanego klienta, w kolejności rozwiązywania, więc klient
+jest po swoich zależnościach. To zrzut: `flush()` go opróżnia, poza Replacement otwartych bloków
+`override()`, które przetrwają każdy `flush()`.
+
+| Pole `Node`    | Wartość |
+|----------------|---------|
+| `name`         | Nazwa klasy klienta |
+| `cls`          | Klasa, o którą prosili konsumenci |
+| `singleton`    | `True` dla `Client`, `False` dla `NotSingletonClient` |
+| `layer`        | [Warstwa](#layers) klienta; `None` dla Replacement, który nigdy się nie łączy |
+| `replacement`  | Obiekt zarejestrowany przez `mock()` lub `override()` w miejsce `cls`; `None` dla prawdziwego klienta |
+| `dependencies` | Klienci argumentów `__init__`, według nazwy argumentu |
+
+`NotSingletonClient` dostaje po węźle na instancję, wszystkie o tej samej nazwie; `to_mermaid()` numeruje je
+od drugiego (`Session`, `Session_2`). Replacement jest rysowany poza warstwami, z przerywaną ramką i nazwą
+obiektu na jego miejscu: `Postgres: AsyncMock`. Węzły porównują się przez tożsamość, więc
+`shared: True` powyżej mówi, że `Checkout` i `Payments` dostali ten sam `Postgres`.
+
 ### <a id="when-a-client-fails-to-connect"></a>Gdy klient nie może się połączyć
 
 Jeśli klientowi nie uda się połączyć, reszta jego warstwy zostaje anulowana, a kolejne warstwy w ogóle
@@ -521,6 +623,7 @@ gdy potrzebujesz izolacji, np. w testach.
 | `override(cls, new=None)` | Zamiennik na czas bloku `with`, a potem `flush()`; zob. [Testowanie](#testing). |
 | `flush()`            | Zapomina wszystkich rozwiązanych klientów.                              |
 | `timings`            | Po jednym `ClientTiming` na klienta ostatniego `connect()`; zob. [Czasy startu](#startup-timings). |
+| `graph()`            | `Graph` rozwiązanych klientów z ich zależnościami i warstwami, wraz z `to_mermaid()`; zob. [Graf](#the-graph). |
 
 `resolve`, `inject`, `mock`, `override` i `flush` działają tylko wtedy, gdy kontener jest rozłączony:
 całe drzewo buduje się przed startem.
@@ -1897,6 +2000,38 @@ async def test_sync_with_container() -> None:
 
     assert pg.upsert.await_args_list == [call("users", ["row"])]
 ```
+
+**Każdy punkt wejścia się rozwiązuje.** Import modułu nie uruchamia jego joba ani workera, a `inject()`
+buduje drzewo, niczego nie łącząc, więc jeden test sprawdza okablowanie wszystkich punktów wejścia w CI:
+cykl, argument bez adnotacji typu, wymagany argument, który nie jest klientem, albo `__init__`, który
+rzuca wyjątek, wywalają go z tym samym błędem, jaki wypisałoby prawdziwe uruchomienie, i baza danych nie
+jest potrzebna:
+
+```python
+# test_wiring.py
+from collections.abc import Callable
+
+import pytest
+
+from nuke_di import Dependencies
+
+from app.jobs import sync
+from app.workers import consumer
+
+
+@pytest.mark.parametrize("entrypoint", [sync.sync, consumer.consumer])
+def test_entrypoint_resolves(entrypoint: Callable[..., object]) -> None:
+    Dependencies().inject(entrypoint)  # runs every __init__, connects nothing
+```
+
+```console
+$ pytest -q test_wiring.py
+..                                                                       [100%]
+2 passed in 0.05s
+```
+
+Zachowaj kontener, aby dostać [graf](#the-graph) punktu wejścia do jego README:
+`deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`.
 
 **Worker.** `Shutdown.set()` robi to samo, co zrobiłby SIGTERM:
 

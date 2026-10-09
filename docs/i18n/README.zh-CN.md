@@ -22,7 +22,7 @@ FastAPI、Litestar 和 FastStream 的处理函数也以同样的方式通过类�
 
 - [安装](#installation)
 - [快速开始](#quick-start)
-- [客户端](#clients)：[单例](#client-and-notsingletonclient)、[生命周期](#connect-and-disconnect)、[dataclass](#dataclass-clients)、[层](#layers)、[启动耗时](#startup-timings)、[连接失败](#when-a-client-fails-to-connect)、[解析错误](#when-the-tree-cannot-be-built)
+- [客户端](#clients)：[单例](#client-and-notsingletonclient)、[生命周期](#connect-and-disconnect)、[dataclass](#dataclass-clients)、[层](#layers)、[启动耗时](#startup-timings)、[依赖图](#the-graph)、[连接失败](#when-a-client-fails-to-connect)、[解析错误](#when-the-tree-cannot-be-built)
 - [容器](#the-container)
 - [worker 与 job](#workers-and-jobs)：[第一个 job](#your-first-job)、[参数](#parameters)、[第一个 worker](#your-first-worker)、[宽限期](#grace-period)、[后台任务](#background-tasks)、[退出码](#exit-codes)、[钩子](#hooks)、[Kubernetes](#running-in-kubernetes)
 - 框架：[FastAPI](#fastapi)、[Litestar](#litestar)、[FastStream](#faststream)
@@ -368,6 +368,104 @@ worker 或 job 会在 [`Run.clients`](#startup-metrics-and-structured-logs) 中�
 已经连接的客户端会被回滚，因此会得到 `disconnect_outcome`。库只负责测量：把耗时导出为
 指标或 span 由你的代码完成。
 
+### <a id="the-graph"></a>依赖图
+
+依赖图只存在于运行中的进程里：上面的 `DEBUG` 日志是唯一能看到一个入口点拉入哪些客户端、
+每个客户端在哪一层连接的地方。`graph()` 把同一幅图作为数据返回，在 `connect()` 之前或之后都可以。
+下面是[层](#layers)一节示例中的客户端，去掉了它们的 `connect()`：
+
+```python
+# graph.py
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    pass
+
+
+class Redis(Client):
+    pass
+
+
+class Payments(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+class Checkout(Client):
+    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
+        self.pg, self.redis, self.payments = pg, redis, payments
+
+
+deps = Dependencies()
+deps.resolve(Checkout)
+nodes = {node.name: node for node in deps.graph().nodes}
+for node in nodes.values():
+    print(f"{node.name:<8} layer {node.layer}  needs {list(node.dependencies)}")
+print("shared:", nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"])
+print(deps.graph().to_mermaid())
+```
+
+```console
+$ python graph.py
+Postgres layer 0  needs []
+Redis    layer 0  needs []
+Payments layer 1  needs ['pg']
+Checkout layer 2  needs ['pg', 'redis', 'payments']
+shared: True
+graph BT
+  subgraph layer0 [layer 0]
+    Postgres
+    Redis
+  end
+  subgraph layer1 [layer 1]
+    Payments
+  end
+  subgraph layer2 [layer 2]
+    Checkout
+  end
+  Postgres --> Payments
+  Postgres --> Checkout
+  Redis --> Checkout
+  Payments --> Checkout
+```
+
+GitHub 会在 README、pull request 或 issue 中渲染 Mermaid 文本，所以项目无需运行进程就能展示自己的架构：
+
+```mermaid
+graph BT
+  subgraph layer0 [layer 0]
+    Postgres
+    Redis
+  end
+  subgraph layer1 [layer 1]
+    Payments
+  end
+  subgraph layer2 [layer 2]
+    Checkout
+  end
+  Postgres --> Payments
+  Postgres --> Checkout
+  Redis --> Checkout
+  Payments --> Checkout
+```
+
+`Graph.nodes` 为每个已解析的客户端保存一个 `Node`，按解析顺序排列，因此客户端排在它的依赖之后。
+它是一个快照：`flush()` 会清空它，但仍然打开的 `override()` 块的 Replacement 会留下，它们经得起任何一次 `flush()`。
+
+| `Node` 字段    | 值 |
+|----------------|----|
+| `name`         | 客户端的类名 |
+| `cls`          | 使用方请求的类 |
+| `singleton`    | `Client` 为 `True`，`NotSingletonClient` 为 `False` |
+| `layer`        | 客户端的[层](#layers)；Replacement 为 `None`，它永远不会连接 |
+| `replacement`  | 通过 `mock()` 或 `override()` 注册、代替 `cls` 的对象；真实客户端为 `None` |
+| `dependencies` | `__init__` 各参数对应的客户端，按参数名索引 |
+
+`NotSingletonClient` 的每个实例各占一个节点，名字相同；`to_mermaid()` 从第二个开始编号
+（`Session`、`Session_2`）。Replacement 画在层之外，带虚线边框，并标出代替它的对象名：`Postgres: AsyncMock`。
+节点按标识比较，因此上面的 `shared: True` 说明 `Checkout` 和 `Payments` 拿到的是同一个 `Postgres`。
+
 ### <a id="when-a-client-fails-to-connect"></a>客户端连接失败时
 
 如果某个客户端连接失败，同一层的其余客户端会被取消，后续各层也不会启动。已经连接的客户端会按层逆序断开连接，
@@ -507,6 +605,7 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 | `override(cls, new=None)` | 仅在 `with` 块内有效的替换对象，块结束后执行 `flush()`；参见[测试](#testing)。 |
 | `flush()`            | 丢弃所有已解析的客户端。                                                |
 | `timings`            | 最近一次 `connect()` 的每个客户端一个 `ClientTiming`；见[启动耗时](#startup-timings)。 |
+| `graph()`            | 已解析客户端的 `Graph`，含依赖和层，带 `to_mermaid()`；见[依赖图](#the-graph)。 |
 
 `resolve`、`inject`、`mock`、`override` 和 `flush` 只能在容器未连接时使用：
 整棵树在启动之前就已构建完成。
@@ -1868,6 +1967,36 @@ async def test_sync_with_container() -> None:
 
     assert pg.upsert.await_args_list == [call("users", ["row"])]
 ```
+
+**每个入口点都能解析。** 导入模块不会运行其中的 job 或 worker，而 `inject()` 构建依赖树时不连接任何东西，
+所以一个测试就能在 CI 中检查所有入口点的接线：循环依赖、没有类型注解的参数、不是客户端的必填参数或抛出异常的
+`__init__` 都会让它失败，错误与真实运行打印的一样，并且不需要数据库：
+
+```python
+# test_wiring.py
+from collections.abc import Callable
+
+import pytest
+
+from nuke_di import Dependencies
+
+from app.jobs import sync
+from app.workers import consumer
+
+
+@pytest.mark.parametrize("entrypoint", [sync.sync, consumer.consumer])
+def test_entrypoint_resolves(entrypoint: Callable[..., object]) -> None:
+    Dependencies().inject(entrypoint)  # runs every __init__, connects nothing
+```
+
+```console
+$ pytest -q test_wiring.py
+..                                                                       [100%]
+2 passed in 0.05s
+```
+
+保留容器，就能得到该入口点的[依赖图](#the-graph)，放进它的 README：
+`deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`。
 
 **测试 worker。** `Shutdown.set()` 的作用与 SIGTERM 相同：
 
