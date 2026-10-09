@@ -110,9 +110,8 @@ async def test_connect_records_every_client() -> None:
 
     async with dep:
         timings = by_name(dep.timings)
-        assert [timing.name for timing in dep.timings] == ["Postgres", "Redis", "Payments"]
-        assert timings["Postgres"].layer == 0
-        assert timings["Payments"].layer == 1
+        # Resolution order: a client after its dependencies
+        assert [timing.name for timing in dep.timings] == ["Postgres", "Payments", "Redis"]
         assert timings["Postgres"].connect_outcome == "ok"
         assert timings["Postgres"].connect is not None
         assert timings["Postgres"].connect >= 0.04
@@ -253,7 +252,7 @@ async def test_startup_summary(caplog: pytest.LogCaptureFixture) -> None:
 
     [summary] = [record for record in caplog.records if record.getMessage().startswith("Connected 3 clients")]
     assert summary.levelno == logging.INFO
-    assert summary.getMessage().startswith("Connected 3 clients in 2 layers in 0.")
+    assert summary.getMessage().startswith("Connected 3 clients in 0.")
     assert "(slowest: Postgres 0.0" in summary.getMessage()
     assert summary.duration >= 0.04  # type: ignore[attr-defined]
 
@@ -266,7 +265,7 @@ async def test_startup_summary_singular(caplog: pytest.LogCaptureFixture) -> Non
     async with dep:
         pass
 
-    assert "Connected 1 client in 1 layer in " in caplog.text
+    assert "Connected 1 client in 0." in caplog.text
 
 
 async def test_empty_container_logs_no_summary(caplog: pytest.LogCaptureFixture) -> None:
@@ -315,16 +314,13 @@ async def test_records_carry_structured_fields(caplog: pytest.LogCaptureFixture)
     connected = [record for record in caplog.records if record.getMessage().startswith("Connected client Payments")]
     [record] = connected
     assert record.client == "Payments"  # type: ignore[attr-defined]
-    assert record.layer == 1  # type: ignore[attr-defined]
+    assert not hasattr(record, "layer")
     assert record.duration >= 0  # type: ignore[attr-defined]
 
     for record in caplog.records:
         named = re.search(r"client (\w+)", record.getMessage())
         if named is not None:
             assert record.client == named[1], record.getMessage()  # type: ignore[attr-defined]
-        layer = re.search(r"layer (\d+)", record.getMessage())
-        if layer is not None:
-            assert record.layer == int(layer[1]), record.getMessage()  # type: ignore[attr-defined]
 
 
 async def test_failure_records_carry_client(caplog: pytest.LogCaptureFixture) -> None:
@@ -336,7 +332,6 @@ async def test_failure_records_carry_client(caplog: pytest.LogCaptureFixture) ->
 
     [error] = [record for record in caplog.records if record.levelno == logging.ERROR]
     assert error.client == "Broken"  # type: ignore[attr-defined]
-    assert error.layer == 0  # type: ignore[attr-defined]
 
 
 async def start(func: Any, container: Dependencies, hooks: list[Any] | None = None) -> Run:
