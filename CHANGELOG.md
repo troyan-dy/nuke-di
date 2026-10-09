@@ -11,10 +11,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Clients connect by their own dependencies instead of layer by layer
-  ([#28](https://github.com/troyan-dy/nuke-di/issues/28), ADR-0006): a client starts as soon as the clients it
+  ([#28](https://github.com/troyan-dy/nuke-di/issues/28), ADR-0007): a client starts as soon as the clients it
   declares in `__init__` have connected, concurrently with every other client that is ready, and disconnects as
   soon as the clients that depend on it have, whatever their `disconnect()` ended in. A slow client holds back
-  only the clients that need it: the README example of six clients (Postgres 0.3 s; Consumer 0.3 s, which needs
+  only the clients that need it: the example of six clients in the Clients guide (Postgres 0.3 s; Consumer 0.3 s, which needs
   only the 0.05 s Kafka) starts in 0.35 s instead of 0.60 s, and one hung `disconnect()` no longer stalls the
   clients beside it. Only declared dependencies are ordered, as before: a client that relied on an unrelated
   client of the layer below being connected first has to declare it now.
@@ -39,7 +39,49 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - Layers: `ClientTiming.layer`, `Node.layer`, the `layer` field of log records, the `Connecting layer N` debug
   record and the layer subgraphs of `Graph.to_mermaid()`, which now draws the nodes and the arrows alone. Removing
   public fields in a minor release departs from semantic versioning on purpose: the fields described a schedule
-  that no longer exists (ADR-0006).
+  that no longer exists (ADR-0007).
+
+## [1.11.5] - 2026-10-09
+
+### Documentation
+
+- ADR-0006: a client lives as long as its container. Per-request or per-message clients are not added
+  (#65 rejected): a transaction or anything else that lives for one request is opened in the handler
+  through a method of a client. `NotSingletonClient` is a workaround slated for removal in a future major
+  version; new code does not build on it. The decision is noted in CONTEXT.md, AGENTS.md, the FastAPI
+  spec and the Clients guide page with its translations.
+
+## [1.11.4] - 2026-10-09
+
+### Added
+
+- `examples/`: 21 runnable scenarios, each a package with a short README, the real output of its run and
+  tests. One-off scripts and `@job`s with parameters, workers that consume a SQLite task queue and NATS
+  (nats-py in a queue group), a periodic worker, background tasks, FastAPI, Litestar, FastStream on NATS
+  and Starlette as a framework without an integration, settings from the environment, `NotSingletonClient`,
+  dataclass clients, the graph, startup failures, hooks with metrics and JSON logs, a cookbook of tests and
+  a service with an API, an outbox worker, a cleanup job and its Kubernetes manifests. They run from
+  `examples/` (`uv run python -m hello.main`); `make examples` runs their tests, and the README "Documentation" section and its
+  translations link to the index.
+- `tests/test_examples.py` runs the tests of every example and its programs, workers stopped by a signal
+  included, so an example that drifts from the library fails CI. The CI test job starts a NATS service for
+  the NATS examples, which are skipped where no server listens on localhost:4222. mypy and pyright check
+  `examples/` too.
+
+## [1.11.3] - 2026-10-09
+
+### Changed
+
+- The README is a landing page now: the pitch, the Quick start, the principles, the comparison with other DI
+  libraries, a job with command-line arguments and a FastAPI app, each with its real output. The full
+  documentation moved, unchanged, into a guide of one page per topic in `docs/guide/` (clients, the container,
+  workers and jobs, FastAPI, Litestar, FastStream, testing, configuration, errors, development), linked from the
+  README "Documentation" section and translated into the same six languages in `docs/i18n/<language>/`. The
+  example run of `benchmarks/run.py` moved into `docs/benchmarks.md`. The README links to the guide by
+  absolute URLs, so they also work on PyPI. `tests/test_readme_translations.py` checks the guide pages and their
+  translations as it checks the README, that a link to a section of another page lands on a heading, and that
+  a translation links to the pages of its own language. The error for a client used as a pydantic type links
+  to the FastAPI guide page.
 
 ## [1.11.2] - 2026-10-09
 
@@ -461,7 +503,10 @@ First public release, extracted from the `nuke.di` package of the nuke framework
 - Clients no longer get a per-class `_logger` attribute.
 
 [Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.12.0...HEAD
-[1.12.0]: https://github.com/troyan-dy/nuke-di/compare/v1.11.2...v1.12.0
+[1.12.0]: https://github.com/troyan-dy/nuke-di/compare/v1.11.5...v1.12.0
+[1.11.5]: https://github.com/troyan-dy/nuke-di/compare/v1.11.4...v1.11.5
+[1.11.4]: https://github.com/troyan-dy/nuke-di/compare/v1.11.3...v1.11.4
+[1.11.3]: https://github.com/troyan-dy/nuke-di/compare/v1.11.2...v1.11.3
 [1.11.2]: https://github.com/troyan-dy/nuke-di/compare/v1.11.1...v1.11.2
 [1.11.1]: https://github.com/troyan-dy/nuke-di/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/troyan-dy/nuke-di/compare/v1.10.2...v1.11.0

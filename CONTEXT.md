@@ -5,11 +5,11 @@ Async dependency injection: builds a tree of clients from type hints and drives 
 ## Language
 
 **Client**:
-A dependency with an async connect / disconnect lifecycle; a singleton within its container.
-_Avoid_: Service, component, provider
+A dependency with an async connect / disconnect lifecycle; a singleton within its container. It lives as long as its container: there is no per-request or per-message client (ADR-0006).
+_Avoid_: Service, component, provider, scoped client
 
 **NotSingletonClient**:
-A client that gets a fresh instance for every consumer that declares it.
+A client that gets a fresh instance for every consumer that declares it. A workaround slated for removal in a future major version; new code does not build on it (ADR-0006).
 _Avoid_: Transient, factory
 
 **Container**:

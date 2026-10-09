@@ -154,7 +154,7 @@ async def test_failed_connect_records_outcomes() -> None:
     timings = by_name(dep.timings)
     assert timings["Broken"].connect_outcome == "failed"
     assert timings["Slow"].connect_outcome == "cancelled"
-    # Never started: its layer was not reached
+    # Never started: its dependency failed first
     assert timings["Consumer"].connect is None
     assert timings["Consumer"].connect_outcome is None
     # Connected, then rolled back

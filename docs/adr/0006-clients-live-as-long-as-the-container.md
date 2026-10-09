@@ -1,0 +1,11 @@
+# Clients live as long as the container: no per-request scope
+
+A client is created when its container resolves it, connected once and disconnected when the container disconnects. Issue #65 proposed a third base class, `ScopedClient`, created, connected and disconnected by FastAPI, Litestar or FastStream for every request or message (`class Session(ScopedClient)` opening a transaction in `connect()`). It was rejected on 2026-10-09: a client is never created per request or per message, now or later. A client is a dependency of the process: a pool, a producer, a connection to another service. A transaction, the caller's headers or a unit of work belong to one request and are that request's data, not a dependency, so they live in the handler: a client offers a method that opens them (`async with self._db.transaction() as tx:`) and the handler passes what it opened as an argument. A per-request lifecycle would split the model in two (a client could no longer take a scoped one, and every integration would need its own scoping rules), for a result that a client method already gives.
+
+`NotSingletonClient` is a workaround of the same kind: the only thing it changes is how many instances a class gets, which a `Client` with a method that hands out a fresh object covers as well. It stays supported for now, but it is slated for removal in a future major version; new features, integrations and examples do not build on it. How existing code migrates is decided together with the removal.
+
+## Considered Options
+
+- **`ScopedClient` driven by the frameworks' own dependency scoping** (#65): the same two methods, run per request through a generated `Depends` / `Provide` getter, with `DI.scoped()` for a worker loop. Needs a rule that a `Client` may not depend on a `ScopedClient`, one scoping rule per integration, a spec and changes in every place that treats `NotSingletonClient` as "any injectable".
+- **dishka-style scope enums** and **contextvar-driven middleware**: more concepts than the per-request lifecycle saves, and contextvars break for handlers run in threadpools.
+- **Reusing `NotSingletonClient` for per-request instances**: would silently change the meaning of existing code.

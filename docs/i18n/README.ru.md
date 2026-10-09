@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/nuke-di)](https://pypi.org/project/nuke-di/)
 [![Python](https://img.shields.io/pypi/pyversions/nuke-di)](https://pypi.org/project/nuke-di/)
 [![CI](https://github.com/troyan-dy/nuke-di/actions/workflows/ci.yml/badge.svg)](https://github.com/troyan-dy/nuke-di/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](#development)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](ru/development.md)
 [![License](https://img.shields.io/pypi/l/nuke-di)](../../LICENSE)
 
 [English](https://github.com/troyan-dy/nuke-di/blob/master/README.md) · **Русский** · [简体中文](https://github.com/troyan-dy/nuke-di/blob/master/docs/i18n/README.zh-CN.md) · [Español](https://github.com/troyan-dy/nuke-di/blob/master/docs/i18n/README.es.md) · [Português (Brasil)](https://github.com/troyan-dy/nuke-di/blob/master/docs/i18n/README.pt-BR.md) · [日本語](https://github.com/troyan-dy/nuke-di/blob/master/docs/i18n/README.ja.md) · [Polski](https://github.com/troyan-dy/nuke-di/blob/master/docs/i18n/README.pl.md)
@@ -12,25 +12,18 @@
 
 Зависимости объявляются обычными аннотациями типов. `nuke-di` строит дерево зависимостей,
 создаёт каждый клиент один раз и управляет его асинхронным жизненным циклом: `connect()` при старте
-и `disconnect()` при остановке. Каждый клиент стартует, как только подключились его собственные
-зависимости, конкурентно со всеми остальными готовыми клиентами.
+и `disconnect()` при остановке. Независимые клиенты стартуют конкурентно, слой за слоем,
+начиная с самых глубоких зависимостей.
 
-Вдобавок один декоратор превращает асинхронную функцию в процесс: в **джобу**, которая выполняется
-один раз, или в **воркер**, который работает, пока его не остановят, — с параметрами командной строки,
-корректным завершением по SIGTERM и осмысленными кодами завершения. Обработчики FastAPI, Litestar
-и FastStream получают клиенты по аннотации типа точно так же.
+Вдобавок один декоратор превращает асинхронную функцию в процесс с параметрами командной строки,
+а обработчики FastAPI, Litestar и FastStream получают клиенты по аннотации типа точно так же.
 
 Библиотека выделена из DI-подсистемы продакшен-фреймворка для микросервисов на Python
 и не имеет зависимостей во время выполнения.
 
-- [Установка](#installation)
-- [Быстрый старт](#quick-start)
-- [Клиенты](#clients): [синглтоны](#client-and-notsingletonclient), [жизненный цикл](#connect-and-disconnect), [датаклассы](#dataclass-clients), [порядок подключения](#connect-order), [время старта](#startup-timings), [граф](#the-graph), [ошибки подключения](#when-a-client-fails-to-connect), [ошибки разрешения](#when-the-tree-cannot-be-built)
-- [Контейнер](#the-container)
-- [Воркеры и джобы](#workers-and-jobs): [джоба](#your-first-job), [параметры](#parameters), [воркер](#your-first-worker), [grace period](#grace-period), [фоновые задачи](#background-tasks), [коды завершения](#exit-codes), [хуки](#hooks), [Kubernetes](#running-in-kubernetes)
-- Фреймворки: [FastAPI](#fastapi), [Litestar](#litestar), [FastStream](#faststream)
-- [Тестирование](#testing)
-- [Настройка](#configuration) · [Ошибки](#errors) · [Производительность](#performance) · [Разработка](#development)
+- [Установка](#installation) · [Быстрый старт](#quick-start) · [Принципы](#principles) · [Производительность](#performance)
+- Примеры: [джоба с параметрами командной строки](#a-job-with-command-line-arguments) · [FastAPI](#fastapi)
+- [Документация](#documentation)
 
 ## <a id="installation"></a>Установка
 
@@ -96,608 +89,72 @@ database: disconnected
 3. `injected(42)` вызвал `handler(42, users=<UserService>)`.
 4. При выходе из блока `async with` был вызван `disconnect()` в обратном порядке.
 
-## <a id="clients"></a>Клиенты
+## <a id="principles"></a>Принципы
 
-### <a id="client-and-notsingletonclient"></a>Client и NotSingletonClient
+- **Зависимость — это класс.** Подкласс `Client` с аннотированным `__init__` и асинхронными
+  `connect()` / `disconnect()` — это вся модель: ни провайдеров, ни модулей, ни регистрации, ни
+  скоупов, которые нужно настраивать. Сторонний объект становится зависимостью, если обернуть его в такой класс.
+- **Аннотации типов и есть связывание.** Клиент запрашивает свои зависимости в `__init__`, функция —
+  в своей сигнатуре. Больше нигде они не названы, поэтому переименование или добавление зависимости —
+  обычный рефакторинг.
+- **Конкурентный старт, упорядоченная остановка.** Клиенты подключаются слой за слоем, начиная с самых
+  глубоких зависимостей, а клиенты одного слоя подключаются конкурентно. Отключаются они в обратном
+  порядке, и упавший `disconnect()` не мешает остальным.
+- **Падать сразу.** Дерево, которое не удаётся построить, падает до того, как что-либо подключится, — с
+  именем аргумента и путём к нему. Клиент, который не смог подключиться, останавливает приложение, как
+  только уже подключённые клиенты отключены. Повторных попыток нет: перезапуск — забота оркестратора.
+- **Тесты подменяют, а не перестраивают связи.** `mock()` и `override()` ставят подделку на место
+  клиента на время одного теста; тестируемый код не меняется.
+- **Никаких зависимостей во время выполнения.** Ядро использует только стандартную библиотеку;
+  интеграции с фреймворками ставятся как extras.
 
-Каждая зависимость — подкласс одного из двух базовых классов:
+## <a id="performance"></a>Производительность
 
-| Базовый класс        | Экземпляры                                                     |
-|----------------------|----------------------------------------------------------------|
-| `Client`             | Синглтон: один экземпляр на контейнер                          |
-| `NotSingletonClient` | Новый экземпляр для каждого потребителя, который его объявляет |
-
-```python
-from nuke_di import Client, Dependencies, NotSingletonClient
-
-
-class Settings(Client):
-    pass
-
-
-class HttpSession(NotSingletonClient):
-    pass
-
-
-class Orders(Client):
-    def __init__(self, settings: Settings, http: HttpSession) -> None:
-        self.settings = settings
-        self.http = http
-
-
-class Payments(Client):
-    def __init__(self, settings: Settings, http: HttpSession) -> None:
-        self.settings = settings
-        self.http = http
-
-
-deps = Dependencies()
-orders = deps.resolve(Orders)
-payments = deps.resolve(Payments)
-
-print(orders.settings is payments.settings)  # one Settings for the whole container
-print(orders.http is payments.http)  # every consumer gets its own HttpSession
-print(deps.resolve(Orders) is orders)  # resolve() is idempotent for a Client
-```
-
-```text
-True
-False
-True
-```
-
-Клиент объявляет свои зависимости как аннотированные аргументы `__init__`. Внедряются только
-аргументы, аннотированные типом клиента, и разрешение идёт рекурсивно.
-
-### <a id="connect-and-disconnect"></a>connect() и disconnect()
-
-Переопределите асинхронные методы `connect()` / `disconnect()`, чтобы открывать и освобождать
-ресурсы, например пулы соединений. `__init__` только сохраняет зависимости; всё, что выполняет
-I/O, место в `connect()`:
-
-```python
-class Redis(Client):
-    def __init__(self) -> None:
-        self._pool: Pool | None = None
-
-    async def connect(self) -> None:
-        self._pool = await create_pool()
-
-    async def disconnect(self) -> None:
-        if self._pool is not None:
-            await self._pool.close()
-            self._pool = None
-```
-
-Время каждого `connect()` ограничено `CONNECT_TIMEOUT_SECONDS` (по умолчанию `30`), а каждого
-`disconnect()` — `DISCONNECT_TIMEOUT_SECONDS` (по умолчанию `10`). Упавший или зависший
-`disconnect()` попадает в лог, а остальные клиенты всё равно отключаются.
-
-### <a id="dataclass-clients"></a>Клиенты-датаклассы
-
-`client_dataclass` делает класс одновременно `Client` и датаклассом, так что его поля
-становятся внедряемыми зависимостями. Наследуйте и от `Client`: декоратор типизирован как
-тождественный, и именно базовый класс сообщает mypy и pyright, что `Checkout` — клиент; без него
-класс является клиентом только во время выполнения:
-
-```python
-from nuke_di import Client, Dependencies, client_dataclass
-
-
-class Postgres(Client):
-    pass
-
-
-class Payments(Client):
-    pass
-
-
-@client_dataclass(frozen=True)
-class Checkout(Client):
-    pg: Postgres
-    payments: Payments
-
-
-checkout = Dependencies().resolve(Checkout)
-print(checkout)
-print(isinstance(checkout, Client))
-```
-
-```text
-Checkout(pg=<__main__.Postgres object at 0x...>, payments=<__main__.Payments object at 0x...>)
-True
-```
-
-Он принимает те же именованные аргументы, что и `dataclasses.dataclass`.
-
-### <a id="connect-order"></a>Порядок подключения
-
-Клиент подключается, как только подключились его собственные зависимости, конкурентно со всеми
-остальными готовыми клиентами, поэтому медленный клиент задерживает только тех, кому он нужен.
-`disconnect()` идёт в обратную сторону: клиент отключается, как только отключились зависящие от него
-клиенты.
-
-```python
-# connect_order.py
-import asyncio
-import logging
-import time
-
-from nuke_di import Client, Dependencies
-
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-started = time.perf_counter()
-
-
-async def connecting(name: str, seconds: float) -> None:
-    await asyncio.sleep(seconds)  # a real client opens its connection here
-    print(f"{time.perf_counter() - started:.2f}s  {name} connected")
-
-
-class Postgres(Client):
-    async def connect(self) -> None:
-        await connecting("Postgres", 0.3)
-
-
-class Kafka(Client):
-    async def connect(self) -> None:
-        await connecting("Kafka", 0.05)
-
-
-class Redis(Client):
-    async def connect(self) -> None:
-        await connecting("Redis", 0.05)
-
-
-class Repository(Client):
-    def __init__(self, pg: Postgres) -> None:
-        self.pg = pg
-
-
-class Consumer(Client):
-    def __init__(self, kafka: Kafka) -> None:
-        self.kafka = kafka
-
-    async def connect(self) -> None:
-        await connecting("Consumer", 0.3)
-
-
-class Http(Client):
-    def __init__(self, redis: Redis) -> None:
-        self.redis = redis
-
-    async def connect(self) -> None:
-        await connecting("Http", 0.2)
-
-
-class App(Client):
-    def __init__(self, repository: Repository, consumer: Consumer, http: Http) -> None:
-        self.repository, self.consumer, self.http = repository, consumer, http
-
-
-async def main() -> None:
-    deps = Dependencies()
-    deps.resolve(App)
-    async with deps:
-        print("-- application is running --")
-
-
-asyncio.run(main())
-```
+`benchmarks/compare.py` прогоняет одни и те же деревья клиентов через dishka, wireup, dependency-injector
+и injector, регистрируя одни и те же классы так, как принято в каждой библиотеке: холодный контейнер с
+разрешённым корнем на классах, новых для процесса, повторное получение корня и один запрос FastAPI через
+интеграцию каждой библиотеки:
 
 ```console
-$ python connect_order.py
-0.05s  Kafka connected
-0.05s  Redis connected
-0.25s  Http connected
-0.30s  Postgres connected
-0.35s  Consumer connected
-INFO Connected 7 clients in 0.35s (slowest: Postgres 0.30s, Consumer 0.30s, Http 0.20s)
--- application is running --
+$ uv run python benchmarks/compare.py --size 100 --summary
+nuke-di 1.11.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 6c2ae10 · N = 100 · 20 repeats
+nuke-di 1.11.1 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+| Lower is better                                          | nuke-di        | dishka          | wireup          | dependency-injector | injector        |
+|----------------------------------------------------------|---------------:|----------------:|----------------:|--------------------:|----------------:|
+| Cold start: a container and a tree of 100 clients        | **541 µs**     | 12.9 ms (23.8×) | 20.0 ms (37.0×) | 1.05 ms (1.9×)      | 1.34 ms (2.5×)  |
+| Cold start: the same 100 clients with string annotations | 1.27 ms (1.2×) | 13.7 ms (12.6×) | 21.4 ms (19.6×) | **1.09 ms**         | 1.47 ms (1.3×)  |
+| A cached root                                            | 94.1 ns (2.5×) | 261 ns (7.1×)   | 92.6 ns (2.5×)  | **37.0 ns**         | 1.18 µs (31.9×) |
+| A FastAPI request with a client                          | **103 µs**     | 107 µs (1.0×)   | 206 µs (2.0×)   | 221 µs (2.2×)       | —               |
 ```
 
-`Consumer` нужен только `Kafka`, поэтому он стартует на 0.05s, пока `Postgres` ещё подключается,
-и старт длится столько, сколько самая длинная цепочка зависимостей, `Kafka` → `Consumer`. В 1.11 и
-раньше клиенты подключались слоями, и каждый ждал самого медленного клиента слоя ниже, — здесь это заняло
-0.60s:
+![nuke-di against other DI libraries: lower is better](../benchmarks/compare.png)
 
-![Шесть клиентов из примера: по слоям — за 0.60s, по собственным зависимостям — за 0.35s](../../docs/connect-order.svg)
+Так быстрее ли `nuke-di` всех? При построении дерева с настоящими аннотациями типов и на запросе
+FastAPI — да: dependency-injector и injector строят дерево в 2–2,5 раза дольше, dishka и wireup — в
+24–37 раз дольше из-за валидации графа при создании контейнера, а wireup и dependency-injector тратят
+вдвое больше на каждый запрос. Со строковыми аннотациями dependency-injector, который аннотаций не читает,
+опережает `nuke-di` на пятую часть. На закэшированном корне `nuke-di` идёт вровень с wireup, а `get()`
+dependency-injector на Cython выигрывает примерно 50 ns: разницу, которую ни одно приложение не заметит.
 
-С включённым `DEBUG` логгер `nuke_di` называет каждый клиент, когда тот начинает и заканчивает
-подключение, вместе с числом уже подключённых: `Connecting client Consumer (2/7 connected)`, и так
-же для `disconnect()`.
+Сам по себе `resolve()` стоит 4–7 µs на клиента, так что дерево из 1000 клиентов строится меньше чем
+за 6 ms, а `connect()` добавляет 9–15 µs на клиента в слое. [docs/benchmarks.md](../benchmarks.md)
+описывает каждый сценарий, хранит базовые замеры на Python 3.11–3.14 и содержит полное сравнение
+с методикой.
 
-Упорядочиваются только зависимости, объявленные в `__init__`. Если клиенту нужно, чтобы другой
-клиент подключился раньше, объявите его зависимостью. Чтобы ограничить число клиентов,
-подключающихся одновременно, задайте `CONNECT_CONCURRENCY`; клиент, который ждёт свои зависимости,
-слот не занимает.
+## <a id="a-job-with-command-line-arguments"></a>Джоба с параметрами командной строки
 
-### <a id="startup-timings"></a>Время старта
-
-Контейнер замеряет `connect()` и `disconnect()` каждого клиента, так что медленный старт
-сам называет виновника. После успешного `connect()` он пишет сводку на уровне `INFO` и
-`WARNING` для каждого клиента, который потратил больше половины `CONNECT_TIMEOUT_SECONDS`,
-задолго до того, как этот клиент начнёт падать по таймауту:
+Один декоратор превращает асинхронную функцию в основную программу процесса. Клиенты внедряются,
+а каждый другой аннотированный аргумент становится опцией командной строки — типизированной
+и проверяемой:
 
 ```python
-# startup.py
-import asyncio
-import logging
-
-from nuke_di import Client, Dependencies, DependenciesSettings
-
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-
-
-class Postgres(Client):
-    async def connect(self) -> None:
-        await asyncio.sleep(0.2)
-
-
-class Kafka(Client):
-    async def connect(self) -> None:
-        await asyncio.sleep(1.6)
-
-    async def disconnect(self) -> None:
-        await asyncio.sleep(0.3)
-
-
-class Orders(Client):
-    def __init__(self, pg: Postgres, kafka: Kafka) -> None:
-        self.pg, self.kafka = pg, kafka
-
-
-async def main() -> None:
-    deps = Dependencies(settings=DependenciesSettings(connect_timeout=3))
-    deps.resolve(Orders)
-    async with deps:
-        print("-- application is running --")
-
-    for t in deps.timings:
-        print(
-            f"{t.name:<8} connect {t.connect:.2f}s {t.connect_outcome:<3}  "
-            f"disconnect {t.disconnect:.2f}s {t.disconnect_outcome}"
-        )
-
-
-asyncio.run(main())
-```
-
-```console
-$ python startup.py
-INFO Connected 3 clients in 1.60s (slowest: Kafka 1.60s, Postgres 0.20s, Orders 0.00s)
-WARNING Client Kafka took 1.60s to connect, more than half of CONNECT_TIMEOUT_SECONDS (3s)
--- application is running --
-Postgres connect 0.20s ok   disconnect 0.00s ok
-Kafka    connect 1.60s ok   disconnect 0.30s ok
-Orders   connect 0.00s ok   disconnect 0.00s ok
-```
-
-`deps.timings` хранит по одному `ClientTiming` на каждый клиент последнего `connect()`, в
-порядке разрешения, так что клиент идёт после своих зависимостей. Список переживает `disconnect()`, поэтому его можно прочитать после
-остановки контейнера. В приложении FastAPI lifespan, переданный в `FastAPI()`, работает внутри
-подключённого контейнера и видит тайминги подключения. Воркер или джоба получают тот же
-список в [`Run.clients`](#startup-metrics-and-structured-logs).
-
-| Поле `ClientTiming`  | Значение |
-|----------------------|----------|
-| `name`               | Имя класса клиента |
-| `connect`            | Секунды внутри `connect()` без ожидания `CONNECT_CONCURRENCY`; `None`, если `connect()` не запускался |
-| `connect_outcome`    | `"ok"`, `"failed"`, `"timed_out"`, `"cancelled"` или `None`, если `connect()` не начинался |
-| `disconnect`, `disconnect_outcome` | То же для `disconnect()`; `None`, пока клиент не отключился |
-
-Когда клиент не может подключиться, клиенты, которые ещё подключаются, получают `"cancelled"`,
-клиенты, которые ещё ждут свои зависимости, остаются с `None`, а уже подключённые клиенты
-откатываются и получают `disconnect_outcome`. Библиотека только замеряет: экспорт таймингов в метрики
-или спаны остаётся за вашим кодом.
-
-### <a id="the-graph"></a>Граф
-
-Граф зависимостей существует только внутри работающего процесса: лог `DEBUG` — единственное
-место, где видно, каких клиентов тянет entrypoint и чего ждёт каждый из них. `graph()` возвращает
-ту же картину данными, до `connect()` или после него:
-
-```python
-# graph.py
-from nuke_di import Client, Dependencies
-
-
-class Postgres(Client):
-    pass
-
-
-class Redis(Client):
-    pass
-
-
-class Payments(Client):
-    def __init__(self, pg: Postgres) -> None:
-        self.pg = pg
-
-
-class Checkout(Client):
-    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
-        self.pg, self.redis, self.payments = pg, redis, payments
-
-
-deps = Dependencies()
-deps.resolve(Checkout)
-nodes = {node.name: node for node in deps.graph().nodes}
-for node in nodes.values():
-    print(f"{node.name:<8} needs {list(node.dependencies)}")
-print("shared:", nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"])
-print(deps.graph().to_mermaid())
-```
-
-```console
-$ python graph.py
-Postgres needs []
-Redis    needs []
-Payments needs ['pg']
-Checkout needs ['pg', 'redis', 'payments']
-shared: True
-graph BT
-  Postgres
-  Redis
-  Payments
-  Checkout
-  Postgres --> Payments
-  Postgres --> Checkout
-  Redis --> Checkout
-  Payments --> Checkout
-```
-
-GitHub рисует текст Mermaid в README, pull request или issue, так что проект может показать
-свою архитектуру без запущенного процесса:
-
-```mermaid
-graph BT
-  Postgres
-  Redis
-  Payments
-  Checkout
-  Postgres --> Payments
-  Postgres --> Checkout
-  Redis --> Checkout
-  Payments --> Checkout
-```
-
-`Graph.nodes` хранит по одному `Node` на разрешённый клиент в порядке разрешения, поэтому клиент
-идёт после своих зависимостей. Это снимок: `flush()` опустошает его, кроме Replacement-ов открытых
-блоков `override()`, которые переживают любой `flush()`.
-
-| Поле `Node`    | Значение |
-|----------------|----------|
-| `name`         | Имя класса клиента |
-| `cls`          | Класс, который запросили потребители |
-| `singleton`    | `True` для `Client`, `False` для `NotSingletonClient` |
-| `replacement`  | Объект, зарегистрированный через `mock()` или `override()` вместо `cls`; `None` для настоящего клиента |
-| `dependencies` | Клиенты аргументов `__init__` по имени аргумента |
-
-`NotSingletonClient` получает по узлу на экземпляр, все с одним именем; `to_mermaid()` нумерует их
-со второго (`Session`, `Session_2`). Replacement рисуется с пунктирной рамкой и именем
-объекта на его месте: `Postgres: AsyncMock`. Узлы сравниваются по идентичности, поэтому
-`shared: True` выше говорит, что `Checkout` и `Payments` получили один и тот же `Postgres`.
-
-### <a id="when-a-client-fails-to-connect"></a>Если клиент не смог подключиться
-
-Если клиент не смог подключиться, все клиенты, которые ещё подключаются, отменяются, а клиенты,
-которые его ждут, так и не стартуют. Уже подключённые клиенты отключаются, каждый после зависящих
-от него клиентов, и контейнер остаётся отключённым и пустым:
-
-```python
-import asyncio
-
-from nuke_di import Client, ConnectError, Dependencies
-
-
-class Postgres(Client):
-    async def connect(self) -> None:
-        print("postgres: connected")
-
-    async def disconnect(self) -> None:
-        print("postgres: disconnected")
-
-
-class Kafka(Client):
-    async def connect(self) -> None:
-        raise OSError("broker kafka-1:9092 is unreachable")
-
-
-class Orders(Client):
-    def __init__(self, pg: Postgres, kafka: Kafka) -> None:
-        self.pg, self.kafka = pg, kafka
-
-
-async def main() -> None:
-    deps = Dependencies()
-    deps.resolve(Orders)
-    try:
-        await deps.connect()
-    except ConnectError as exc:
-        print(f"{exc} <- {exc.__cause__!r}")
-    print("connected:", deps.connected)
-
-
-asyncio.run(main())
-```
-
-```text
-postgres: connected
-Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
-Traceback (most recent call last):
-  ...
-OSError: broker kafka-1:9092 is unreachable
-postgres: disconnected
-Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable <- OSError('broker kafka-1:9092 is unreachable')
-connected: False
-```
-
-Та же очистка происходит, если отменён сам `connect()`. `ConnectError` наследуется от
-`SystemExit`, поэтому приложение, которое его не перехватывает, останавливается — обычно именно это
-и нужно, когда зависимость недоступна. Замоканные клиенты не подключаются, и их никто не ждёт.
-
-### <a id="when-the-tree-cannot-be-built"></a>Если дерево не удаётся построить
-
-Разрешение проверяет каждый `__init__` до его вызова, поэтому клиент, который невозможно построить,
-падает ещё до того, как что-либо подключится, — с именем аргумента и путём от запрошенного клиента:
-
-```python
-from typing import Protocol
-
-from nuke_di import Client, Dependencies, InvalidSignatureError
-
-
-class Postgres(Client):
-    pass
-
-
-class UserRepository(Protocol):
-    async def get(self, user_id: int) -> str: ...
-
-
-class Profiles(Client):
-    def __init__(self, pg: Postgres, users: UserRepository) -> None:
-        self.pg, self.users = pg, users
-
-
-class Checkout(Client):
-    def __init__(self, profiles: Profiles) -> None:
-        self.profiles = profiles
-
-
-class Orders(Client):
-    def __init__(self, payments: "Payments") -> None:
-        self.payments = payments
-
-
-class Payments(Client):
-    def __init__(self, orders: Orders) -> None:
-        self.orders = orders
-
-
-for root in (Checkout, Orders):
-    try:
-        Dependencies().resolve(root)
-    except InvalidSignatureError as exc:
-        print(f"{type(exc).__name__}: {exc}")
-
-try:
-    Dependencies().resolve(UserRepository)  # a type checker refuses this line, and so does the container
-except InvalidSignatureError as exc:
-    print(f"{type(exc).__name__}: {exc}")
-```
-
-```text
-InvalidSignatureError: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)
-CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
-InvalidSignatureError: UserRepository is not a client: subclass Client or NotSingletonClient
-```
-
-Аргумент `__init__` заполняется клиентом, если его аннотация типа — клиент. Любому другому
-аргументу нужно значение по умолчанию, и его не трогают. С `InvalidSignatureError` падают:
-
-| Аргумент `__init__` без значения по умолчанию | Сообщение                                         |
-|-----------------------------------------------|---------------------------------------------------|
-| без аннотации типа                            | `has no type hint`                                |
-| тип, который не является клиентом             | `is UserRepository, which is not a client`        |
-| `Client \| None`                              | `is Postgres \| None, a client cannot be optional` |
-| клиент, только позиционный (`/`)              | `is positional-only, a client is passed by keyword` |
-
-Класс, который вообще не является клиентом, запрошенный через `resolve()`, падает с `UserRepository is not a client: subclass Client or NotSingletonClient` до того, как что-либо будет построено.
-
-Клиенты, циклически зависящие друг от друга, падают с `CircularDependencyError` — подклассом
-`InvalidSignatureError`, а аннотация типа, которую не удаётся вычислить (например, класс, определённый
-внутри функции или импортированный под `TYPE_CHECKING`), — с `InvalidSignatureError`, где об этом
-прямо сказано. Если ошибка пришла из `inject()`, путь начинается с функции:
-`(resolving handler -> Checkout -> Profiles)`. В [воркере или джобе](#workers-and-jobs)
-любая из этих ошибок завершает запуск с кодом `1` ещё до подключения.
-
-## <a id="the-container"></a>Контейнер
-
-`Dependencies` — это контейнер. `DI` — готовый глобальный экземпляр; создавайте собственный,
-когда нужна изоляция, например в тестах.
-
-| Метод                | Описание                                                                |
-|----------------------|-------------------------------------------------------------------------|
-| `resolve(cls)`       | Построить `cls` и его дерево зависимостей. Идемпотентен для `Client`.   |
-| `inject(func)`       | Вернуть `functools.partial(func, ...)` с привязанными аргументами-клиентами. У каждого аргумента `func`, кроме `*args` / `**kwargs`, должна быть аннотация типа. |
-| `connect()`          | Вызвать `connect()` у каждого разрешённого клиента после его зависимостей. |
-| `disconnect()`       | Вызвать `disconnect()` у каждого клиента после его потребителей, затем очистить контейнер через `flush()`. |
-| `async with`         | `connect()` при входе, `disconnect()` при выходе.                       |
-| `mock(cls, new=None)`| Зарегистрировать подмену для `cls` (по умолчанию — autospec-мок) до следующего `flush()`. Вызывается до разрешения `cls`. |
-| `override(cls, new=None)` | Подмена на время блока `with`, затем `flush()`; см. [Тестирование](#testing). |
-| `flush()`            | Забыть все разрешённые клиенты.                                         |
-| `timings`            | По одному `ClientTiming` на клиент последнего `connect()`; см. [Время старта](#startup-timings). |
-| `graph()`            | `Graph` разрешённых клиентов с их зависимостями, включая `to_mermaid()`; см. [Граф](#the-graph). |
-
-Результат `inject()` сохраняет тип возвращаемого значения функции, а его оставшиеся аргументы
-не типизированы: тайпчекер не умеет вычитать аргументы-клиенты из сигнатуры.
-
-`resolve`, `inject`, `mock`, `override` и `flush` работают, только пока контейнер отключён:
-всё дерево строится до старта.
-
-```python
-async def main() -> None:
-    deps = Dependencies()
-    injected = deps.inject(handler)  # build the tree
-    async with deps:  # connect
-        await injected(42)
-        deps.resolve(Cache)  # ConnectError: resolve(Cache): the container is already connected; ...
-```
-
-Контейнер безопасно использовать из нескольких потоков: один замок на контейнер сериализует `resolve`,
-`inject`, `mock`, `override` и `flush`, поэтому синглтон, запрошенный двумя потоками одновременно, создаётся
-один раз. `connect()` и `disconnect()` принадлежат одному циклу событий.
-
-```python
-import threading
-
-from nuke_di import Client, Dependencies
-
-
-class Postgres(Client):
-    instances = 0
-
-    def __init__(self) -> None:
-        type(self).instances += 1
-
-
-class Orders(Client):
-    def __init__(self, pg: Postgres) -> None:
-        self.pg = pg
-
-
-deps = Dependencies()
-threads = [threading.Thread(target=deps.resolve, args=(Orders,)) for _ in range(8)]
-for thread in threads:
-    thread.start()
-for thread in threads:
-    thread.join()
-print("instances:", Postgres.instances, "clients:", len(deps.connect_clients))
-```
-
-```text
-instances: 1 clients: 2
-```
-
-## <a id="workers-and-jobs"></a>Воркеры и джобы
-
-Асинхронная функция становится основной программой процесса с помощью одного декоратора:
-
-| Декоратор | Сколько работает                                              |
-|-----------|---------------------------------------------------------------|
-| `@job`    | Один раз: процесс завершается, когда функция возвращает управление |
-| `@worker` | Пока процесс не получит SIGTERM или SIGINT                    |
-
-Примеры в этом разделе используют общий модуль клиентов:
-
-```python
-# app/clients.py
+# sync.py
 import datetime
-import itertools
+import enum
+from typing import Annotated
 
-from nuke_di import Client
+from nuke_di import Client, Option, job
 
 
 class Postgres(Client):
@@ -712,127 +169,8 @@ class Postgres(Client):
 
 
 class Warehouse(Client):
-    async def connect(self) -> None:
-        print("warehouse: connected")
-
-    async def disconnect(self) -> None:
-        print("warehouse: disconnected")
-
     async def changes(self, table: str, day: datetime.date) -> list[str]:
         return [f"{table}:{day}:{n}" for n in range(3)]
-
-
-class Queue(Client):
-    def __init__(self) -> None:
-        self._ids = itertools.count(1)
-
-    async def connect(self) -> None:
-        print("queue: connected")
-
-    async def disconnect(self) -> None:
-        print("queue: disconnected")
-
-    async def get(self) -> str:
-        return f"message-{next(self._ids)}"
-```
-
-### <a id="your-first-job"></a>Первая джоба
-
-```python
-# app/jobs/sync.py
-import datetime
-
-from nuke_di import job
-
-from app.clients import Postgres, Warehouse
-
-
-@job
-async def sync(pg: Postgres, warehouse: Warehouse) -> None:
-    day = datetime.date.today() - datetime.timedelta(days=1)
-    for table in ["users", "orders"]:
-        await pg.upsert(table, await warehouse.changes(table, day))
-```
-
-```console
-$ python -m app.jobs.sync
-postgres: connected
-warehouse: connected
-postgres: upserted 3 rows into users
-postgres: upserted 3 rows into orders
-postgres: disconnected
-warehouse: disconnected
-$ echo $?
-0
-```
-
-Это вся программа: ни `main()`, ни `asyncio.run()`, ни `if __name__ == "__main__"`.
-Процесс разрешает клиенты из глобального контейнера `DI`, подключает их, выполняет
-функцию, отключает клиенты и завершается с [кодом завершения](#exit-codes). Расписание — не забота
-библиотеки: когда запускать джобу, решает Kubernetes CronJob, таймер systemd или crontab.
-
-`nuke-di` пишет в лог каждый запуск через логгер `nuke_di`. Чтобы увидеть эти записи, настройте
-логирование выше декоратора:
-
-```python
-import logging
-
-logging.basicConfig(level=logging.INFO, format="%(levelname)-5s %(name)s: %(message)s")
-
-
-@job
-async def sync(pg: Postgres, warehouse: Warehouse) -> None: ...
-```
-
-```console
-$ python -m app.jobs.sync
-INFO  nuke_di.run: Starting job app.jobs.sync.sync
-postgres: connected
-warehouse: connected
-INFO  nuke_di.core: Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)
-postgres: upserted 3 rows into users
-postgres: upserted 3 rows into orders
-postgres: disconnected
-warehouse: disconnected
-INFO  nuke_di.run: Run app.jobs.sync.sync finished with exit code 0 in 0.002s
-```
-
-#### <a id="one-entrypoint-per-module-defined-last"></a>Одна точка входа на модуль, и она последняя
-
-Когда модуль запущен как `__main__`, декоратор сразу выполняет функцию, и на этом процесс
-завершается:
-
-```python
-# app/jobs/sync.py
-DI.mock(Warehouse, FakeWarehouse())  # runs: code above the decorator is fine
-
-
-@job
-async def sync(pg: Postgres, warehouse: Warehouse) -> None: ...
-
-
-print("never printed")  # never runs under `python -m app.jobs.sync`
-```
-
-**Держите одну точку входа на модуль и определяйте её последней.** При обычном импорте, например
-из теста, декоратор возвращает функцию без изменений, и ничего не запускается. Декорируемая функция
-должна быть объявлена через `async def`, иначе при импорте возникнет `TypeError`.
-
-### <a id="parameters"></a>Параметры
-
-Каждый аннотированный аргумент, который не является клиентом, становится опцией командной строки.
-Вот та же джоба, которая теперь умеет копировать любой день, выбранные таблицы и делать пробный прогон
-(dry run):
-
-```python
-# app/jobs/sync.py
-import datetime
-import enum
-from typing import Annotated
-
-from nuke_di import Option, job
-
-from app.clients import Postgres, Warehouse
 
 
 class Mode(enum.Enum):
@@ -861,36 +199,31 @@ async def sync(
             await pg.upsert(table, rows)
 ```
 
-`pg` и `warehouse` — клиенты, они внедряются; `day`, `tables`, `mode` и `dry_run` берутся
-из командной строки:
+Ни `main()`, ни `asyncio.run()`, ни `argparse`: декоратор разрешает и подключает клиенты, разбирает
+командную строку, выполняет функцию и завершает процесс с осмысленным кодом:
 
 ```console
-$ python -m app.jobs.sync --day 2026-10-01
+$ python sync.py --day 2026-10-01
 postgres: connected
-warehouse: connected
 sync: INCREMENTAL copy of 2026-10-01
 postgres: upserted 3 rows into users
 postgres: upserted 3 rows into orders
 postgres: disconnected
-warehouse: disconnected
 
-$ python -m app.jobs.sync -d 2026-10-01 -t users --mode FULL --dry-run
+$ python sync.py -d 2026-10-01 -t users --mode FULL --dry-run
 postgres: connected
-warehouse: connected
 sync: FULL copy of 2026-10-01
 sync: would upsert 3 rows into users
 postgres: disconnected
-warehouse: disconnected
 ```
 
-`--help` генерируется из сигнатуры и docstring. Он ничего не подключает
-(Python 3.13+ выводит `-d, --day DAY` вместо `-d DAY, --day DAY`):
+`--help` генерируется из сигнатуры и docstring (Python 3.13+ выводит `-d, --day DAY` вместо
+`-d DAY, --day DAY`):
 
 ```console
-$ python -m app.jobs.sync --help
-usage: python -m app.jobs.sync [-h] -d DAY [-t TABLES]
-                               [--mode {INCREMENTAL,FULL}]
-                               [--dry-run | --no-dry-run]
+$ python sync.py --help
+usage: sync.py [-h] -d DAY [-t TABLES] [--mode {INCREMENTAL,FULL}]
+               [--dry-run | --no-dry-run]
 
 Copy one day of changes from the warehouse into Postgres.
 
@@ -905,492 +238,31 @@ options:
                         Read the changes, write nothing (default: False)
 ```
 
-Неверная командная строка отклоняется **до того, как будет разрешён или подключён хоть один клиент**,
-с кодом завершения `2`:
+Неверная командная строка отклоняется до того, как подключится хоть один клиент, с кодом
+завершения `2`:
 
 ```console
-$ python -m app.jobs.sync
-usage: python -m app.jobs.sync [-h] -d DAY [-t TABLES]
-                               [--mode {INCREMENTAL,FULL}]
-                               [--dry-run | --no-dry-run]
-python -m app.jobs.sync: error: the following arguments are required: -d/--day
-Run app.jobs.sync.sync failed: the following arguments are required: -d/--day
+$ python sync.py -d 2026-10-01 --mode full
+usage: sync.py [-h] -d DAY [-t TABLES] [--mode {INCREMENTAL,FULL}]
+               [--dry-run | --no-dry-run]
+sync.py: error: argument --mode: invalid choice: 'full' (choose from INCREMENTAL, FULL)
+Run sync.sync failed: argument --mode: invalid choice: 'full' (choose from INCREMENTAL, FULL)
 $ echo $?
 2
-
-$ python -m app.jobs.sync --day yesterday
-...
-python -m app.jobs.sync: error: argument -d/--day: invalid date value: 'yesterday'
-
-$ python -m app.jobs.sync -d 2026-10-01 --mode full
-...
-python -m app.jobs.sync: error: argument --mode: invalid choice: 'full' (choose from INCREMENTAL, FULL)
-
-$ python -m app.jobs.sync -d 2026-10-01 --dry
-...
-python -m app.jobs.sync: error: unrecognized arguments: --dry
 ```
 
-Первые две строки каждой ошибки выводит `argparse`; строка `Run ... failed` — это запись уровня
-`ERROR` логгера `nuke_di`, поэтому она подчиняется вашей настройке логирования.
-Сокращения не принимаются: `--dry` не считается `--dry-run`.
-
-#### <a id="supported-types"></a>Поддерживаемые типы
-
-| Аннотация                                     | Командная строка                | Пример                          |
-|-----------------------------------------------|---------------------------------|---------------------------------|
-| `str`, `int`, `float`, `pathlib.Path`         | `--name VALUE`                  | `--limit 10`                    |
-| `bool`                                        | `--name` / `--no-name`          | `--dry-run`                     |
-| `datetime.date`, `datetime.datetime`          | ISO 8601                        | `--since 2026-10-01T12:00:00`   |
-| `Enum`                                        | **имя** члена, как в коде       | `--mode FULL`                   |
-| `list[T]` любого из типов выше, кроме `bool`  | повторяющаяся опция             | `--table users --table orders`  |
-| `T \| None`                                   | как `T`                         | `--limit 10`                    |
-
-Правила:
-
-- **Имя.** Опция называется по аргументу, `_` заменяется на `-`:
-  `dry_run` становится `--dry-run`. Позиционных аргументов нет, поэтому новый параметр никогда
-  не ломает существующую командную строку.
-- **Обязательная или нет.** Аргумент без значения по умолчанию — обязательная опция. Аргумент
-  со значением по умолчанию необязателен, и если опцию не указали, используется значение по умолчанию
-  самой функции.
-- **`Option`.** `Annotated[T, Option(help=..., short=...)]` добавляет текст справки и однобуквенный
-  псевдоним вроде `-d`. Оба необязательны.
-- **Без параметров.** Точка входа без параметров всё равно разбирает командную строку: она
-  отвечает на `--help` и отклоняет любой аргумент с кодом завершения `2`.
-
-Такие сигнатуры — ошибка в коде, а не в командной строке. Они завершают запуск с
-`InvalidSignatureError` и кодом завершения `1`:
-
-```python
-async def sync(day: dict[str, int]) -> None: ...  # unsupported type
-async def sync(pg: Annotated[Postgres, Option(help="...")]) -> None: ...  # Option on a client
-async def sync(help: bool = False) -> None: ...  # clashes with --help
-async def sync(day: int, /) -> None: ...  # positional-only
-```
-
-#### <a id="parameters-in-tests"></a>Параметры в тестах
-
-Декорированная функция остаётся обычной корутиной, поэтому тест передаёт параметры как именованные
-аргументы:
-
-```python
-async def test_sync_copies_requested_tables() -> None:
-    pg, warehouse = AsyncMock(), AsyncMock()
-    warehouse.changes.return_value = ["row"]
-
-    await sync(pg, warehouse, day=datetime.date(2026, 10, 1), tables=["users"])
-
-    warehouse.changes.assert_awaited_once_with("users", datetime.date(2026, 10, 1))
-    pg.upsert.assert_awaited_once_with("users", ["row"])
-```
-
-### <a id="your-first-worker"></a>Первый воркер
-
-Воркер работает, пока процесс не попросят остановиться. Он зависит от клиента `Shutdown`, который
-взводится при первом SIGTERM или SIGINT, и доделывает текущую порцию работы:
-
-```python
-# app/workers/consumer.py
-import asyncio
-
-from nuke_di import Shutdown, worker
-
-from app.clients import Queue
-
-
-@worker
-async def consumer(queue: Queue, shutdown: Shutdown) -> None:
-    while not shutdown.is_set():
-        message = await queue.get()
-        print(f"consumer: processing {message}")
-        await asyncio.sleep(1)  # the actual work
-        print(f"consumer: done {message}")
-    print("consumer: stopped")
-```
-
-Ctrl+C посреди третьего сообщения: сообщение обрабатывается до конца, цикл завершается,
-клиенты отключаются.
-
-```console
-$ python -m app.workers.consumer
-queue: connected
-consumer: processing message-1
-consumer: done message-1
-consumer: processing message-2
-consumer: done message-2
-consumer: processing message-3
-^C
-consumer: done message-3
-consumer: stopped
-queue: disconnected
-$ echo $?
-130
-```
-
-У `Shutdown` три метода:
-
-| Метод            | Описание                                                                  |
-|------------------|---------------------------------------------------------------------------|
-| `is_set()`       | Началась ли остановка; проверяйте между порциями работы                   |
-| `await wait()`   | Ждать, пока не начнётся остановка                                         |
-| `set()`          | Начать остановку вручную, например в тесте                                |
-
-Вне воркера или джобы его никто не взводит, поэтому цикл, зависящий от `Shutdown`, без изменений
-работает и внутри веб-приложения. Воркер, который сам вернул управление или выбросил исключение,
-тоже завершает процесс: перезапускать его — забота оркестратора.
-
-В Windows обрабатывается только SIGINT (Ctrl+C); у SIGTERM остаётся поведение по умолчанию.
-
-### <a id="grace-period"></a>Grace period
-
-Воркер, который игнорирует `Shutdown`, отменяется через `SHUTDOWN_GRACE_SECONDS` (по умолчанию `10`):
-
-```python
-# app/workers/stubborn.py
-@worker
-async def stubborn(queue: Queue) -> None:
-    while True:  # never looks at Shutdown
-        message = await queue.get()
-        print(f"stubborn: processing {message}")
-        await asyncio.sleep(5)
-```
-
-```console
-$ SHUTDOWN_GRACE_SECONDS=2 python -m app.workers.stubborn &
-queue: connected
-stubborn: processing message-1
-$ kill -TERM %1
-Run app.workers.stubborn.stubborn did not stop within 2.0s after Shutdown, cancelling it
-queue: disconnected
-$ wait %1; echo $?
-143
-```
-
-Второй сигнал отменяет точку входа сразу, не дожидаясь конца grace period, — например,
-двойной Ctrl+C:
-
-```console
-$ python -m app.workers.stubborn
-queue: connected
-stubborn: processing message-1
-^C^C
-Second SIGINT, cancelling run app.workers.stubborn.stubborn
-queue: disconnected
-```
-
-Сигнал, пришедший, пока клиенты ещё подключаются, прерывает старт, и уже подключённые
-клиенты отключаются.
-
-В худшем случае процесс останавливается за
-`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × длина самой длинной цепочки зависимостей`. Со
-значениями по умолчанию цепочка из двух клиентов занимает весь стандартный для Kubernetes `terminationGracePeriodSeconds` в 30 секунд,
-поэтому для более глубоких деревьев уменьшите таймауты или увеличьте grace period.
-
-### <a id="background-tasks"></a>Фоновые задачи
-
-`BackgroundTasks` — клиент, который присматривает за корутинами, работающими рядом с точкой входа.
-В отличие от голого `asyncio.create_task()`, упавшая задача никогда не теряется: она попадает в лог
-с трейсбеком и роняет весь процесс.
-
-```python
-# app/workers/indexer.py
-import asyncio
-
-from nuke_di import BackgroundTasks, Shutdown, worker
-
-from app.clients import Queue
-
-
-async def refresh_index() -> None:
-    for attempt in range(1, 10):
-        print(f"refresh: run {attempt}")
-        await asyncio.sleep(0.5)
-        if attempt == 2:
-            raise ConnectionError("search cluster is unreachable")
-
-
-@worker
-async def indexer(queue: Queue, tasks: BackgroundTasks, shutdown: Shutdown) -> None:
-    tasks.spawn(refresh_index(), name="refresh-index")
-    print("indexer: waiting for Shutdown")
-    await shutdown.wait()
-```
-
-```console
-$ python -m app.workers.indexer
-queue: connected
-indexer: waiting for Shutdown
-refresh: run 1
-refresh: run 2
-Background task refresh-index failed
-Traceback (most recent call last):
-  ...
-ConnectionError: search cluster is unreachable
-queue: disconnected
-Run app.workers.indexer.indexer failed
-Traceback (most recent call last):
-  ...
-ConnectionError: search cluster is unreachable
-$ echo $?
-1
-```
-
-Воркер был отменён без grace period: упавший фоновый цикл не должен оставлять живой процесс,
-который ничего не делает. Когда процесс останавливается по любой причине, задачи отменяются и
-дожидаются завершения **до** того, как отключится хоть один клиент, поэтому они никогда не работают
-с закрытыми клиентами.
-
-| Метод                      | Описание                                                        |
-|----------------------------|-----------------------------------------------------------------|
-| `spawn(coro, name=None)`   | Запустить `coro` как задачу и хранить ссылку на неё, пока она не завершится |
-| `watch(callback)`          | Вызывать `callback(exc)` для каждой упавшей задачи              |
-| `await stop()`             | Отменить все задачи и дождаться каждой; его вызывает `disconnect()` |
-
-Вне воркера или джобы, например под обычным `async with DI`, ошибки только пишутся в лог,
-а задачи отменяются в `disconnect()`.
-
-### <a id="exit-codes"></a>Коды завершения
-
-Срабатывает первое подходящее правило:
-
-| Условие                                                                                             | Код завершения |
-|-----------------------------------------------------------------------------------------------------|----------------|
-| Неверная командная строка (`UsageError`)                                                            | `2`            |
-| Исключение: в сигнатуре, при разрешении или подключении клиентов, в точке входа, в фоновой задаче   | `1`            |
-| Получен сигнал завершения                                                                           | `128 + signum` |
-| Во всех остальных случаях                                                                           | `0`            |
-
-SIGTERM даёт `143`, SIGINT — `130`. Джоба, которая заметила остановку и штатно вернула управление,
-всё равно завершается с `128 + signum`: её работа была прервана, и планировщик не должен считать её
-выполненной.
-
-Коды предназначены для того, кто запускает процесс:
-
-```bash
-python -m app.jobs.sync --day 2026-10-01
-case $? in
-  0)       echo "synced" ;;
-  2)       echo "fix the command line, retrying will not help" ;;
-  130|143) echo "interrupted, safe to run again" ;;
-  *)       echo "failed, see the log" ;;
-esac
-```
-
-### <a id="hooks"></a>Хуки
-
-Хуки наблюдают за каждым запуском, например чтобы отправлять метрики или открывать span трассировки:
-
-```python
-# app/jobs/report.py
-from nuke_di import Run, job
-
-from app.clients import Postgres
-
-
-class Timer:
-    async def on_start(self, run: Run) -> None:
-        print(f"hook: {run.kind} {run.name} started")
-
-    async def on_finish(self, run: Run) -> None:
-        seconds = (run.finished_at - run.started_at).total_seconds()
-        print(f"hook: exit code {run.exit_code} in {seconds:.1f}s, error: {run.error!r}")
-
-
-@job(hooks=[Timer()])
-async def report(pg: Postgres, limit: int = 10) -> None:
-    print(f"report: top {limit} customers")
-```
-
-```console
-$ python -m app.jobs.report --limit 3
-hook: job app.jobs.report.report started
-postgres: connected
-report: top 3 customers
-postgres: disconnected
-hook: exit code 0 in 0.0s, error: None
-
-$ python -m app.jobs.report --limit three
-usage: python -m app.jobs.report [-h] [--limit LIMIT]
-python -m app.jobs.report: error: argument --limit: invalid int value: 'three'
-hook: job app.jobs.report.report started
-Run app.jobs.report.report failed: argument --limit: invalid int value: 'three'
-hook: exit code 2 in 0.0s, error: UsageError("argument --limit: invalid int value: 'three'")
-```
-
-`on_start` вызывается в порядке списка до разрешения клиентов; `on_finish` — в обратном
-порядке после их отключения, поэтому он видит итоговое состояние `Run`, включая ошибки
-подключения:
-
-| Поле `Run`    | Значение                                                               |
-|---------------|------------------------------------------------------------------------|
-| `name`        | Модуль и функция, например `app.jobs.report.report`                    |
-| `kind`        | `"job"` или `"worker"`                                                 |
-| `started_at`  | `datetime` в UTC                                                       |
-| `finished_at` | `datetime` в UTC, заполняется до `on_finish`                           |
-| `exit_code`   | Код завершения процесса, заполняется до `on_finish`                    |
-| `error`       | Исключение, из-за которого упал запуск, например `UsageError`, или `None` |
-| `signal`      | Первый полученный сигнал завершения или `None`                         |
-| `clients`     | По одному `ClientTiming` на клиент: длительности и исходы подключения и отключения; пусто, если запуск упал до подключения |
-
-Хуки — обычные объекты, а не клиенты: своими ресурсами они управляют сами. Исключение в хуке
-попадает в лог и не меняет код завершения. `--help` — не запуск, поэтому хуки его не видят.
-
-#### <a id="startup-metrics-and-structured-logs"></a>Метрики старта и структурированные логи
-
-`run.clients` — место для экспорта метрик старта: `on_finish` видит, сколько каждый клиент
-подключался и отключался. Кроме того, каждая запись лога `nuke_di` несёт структурированные
-поля, так что JSON-форматтер может фильтровать и агрегировать по клиенту, не разбирая
-текст сообщений:
-
-```python
-# app/jobs/startup.py
-import json
-import logging
-
-from nuke_di import Run, job
-
-from app.clients import Postgres, Warehouse
-
-
-class JsonFormatter(logging.Formatter):
-    def format(self, record: logging.LogRecord) -> str:
-        fields = {key: getattr(record, key) for key in ("run", "client", "duration") if hasattr(record, key)}
-        return json.dumps({"level": record.levelname, "message": record.getMessage(), **fields})
-
-
-handler = logging.StreamHandler()
-handler.setFormatter(JsonFormatter())
-logging.basicConfig(level=logging.INFO, handlers=[handler])
-
-
-class StartupMetrics:
-    async def on_start(self, run: Run) -> None:
-        pass
-
-    async def on_finish(self, run: Run) -> None:
-        for client in run.clients:
-            print(f"metric: {client.name} connect={client.connect:.3f}s {client.connect_outcome}")
-
-
-@job(hooks=[StartupMetrics()])
-async def startup(pg: Postgres, warehouse: Warehouse) -> None:
-    print("startup: done")
-```
-
-```console
-$ python -m app.jobs.startup
-{"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
-postgres: connected
-warehouse: connected
-{"level": "INFO", "message": "Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00022179202642291784}
-startup: done
-postgres: disconnected
-warehouse: disconnected
-{"level": "INFO", "message": "Run app.jobs.startup.startup finished with exit code 0 in 0.001s", "run": "app.jobs.startup.startup", "duration": 0.001171}
-metric: Shutdown connect=0.000s ok
-metric: BackgroundTasks connect=0.000s ok
-metric: Postgres connect=0.000s ok
-metric: Warehouse connect=0.000s ok
-```
-
-| Поле       | Где есть                                                                      |
-|------------|-------------------------------------------------------------------------------|
-| `run`      | Каждая запись внутри воркера или джобы, включая записи контейнера: имя запуска |
-| `client`   | Каждая запись об одном клиенте: разрешение, подключение, отключение, ошибки   |
-| `duration` | Секунды: подключённый или отключённый клиент, сводка старта, завершённый запуск |
-
-Каждый запуск подключает и свои клиенты `Shutdown` и `BackgroundTasks`, поэтому они есть
-в `run.clients` и в сводке.
-
-### <a id="running-in-kubernetes"></a>Запуск в Kubernetes
-
-Джоба ложится на CronJob, а воркер — на Deployment. Дайте воркеру достаточно
-`terminationGracePeriodSeconds`, чтобы уложиться в [бюджет на остановку](#grace-period):
-
-```yaml
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: report
-spec:
-  schedule: "0 6 * * *"
-  concurrencyPolicy: Forbid
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          restartPolicy: Never
-          containers:
-            - name: report
-              image: registry.example.com/app:1.0
-              command: ["python", "-m", "app.jobs.report"]
-              args: ["--limit", "20"]
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: consumer
-spec:
-  replicas: 2
-  selector:
-    matchLabels: {app: consumer}
-  template:
-    metadata:
-      labels: {app: consumer}
-    spec:
-      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × longest chain
-      containers:
-        - name: consumer
-          image: registry.example.com/app:1.0
-          command: ["python", "-m", "app.workers.consumer"]
-          env:
-            - {name: SHUTDOWN_GRACE_SECONDS, value: "15"}
-```
-
-Разовая догрузка данных за прошлые дни (backfill) — тот же образ с другими параметрами:
-
-```bash
-kubectl run sync-backfill --rm -it --restart=Never --image=registry.example.com/app:1.0 \
-  --command -- python -m app.jobs.sync --day 2026-09-30 --mode FULL
-```
+`@worker` делает то же самое для процесса, который работает до SIGTERM, с корректным завершением.
+Оба описаны в разделе [Воркеры и джобы](ru/workers-and-jobs.md).
 
 ## <a id="fastapi"></a>FastAPI
 
-Операция пути (path operation) в FastAPI получает клиент так же, как джоба, — по аннотации типа.
-В обработчиках больше ничего писать не нужно: ни `Depends`, ни `inject()`.
+Операция пути (path operation) получает клиент по аннотации типа, без `Depends` и без `inject()`
+в каждом обработчике. В `app/clients.py` лежат классы `Database` и `UserService` из
+[Быстрого старта](#quick-start), без его `main()`:
 
 ```bash
 pip install "nuke-di[fastapi]"
 ```
-
-Нужен FastAPI 0.105 или новее. Примеры используют общий модуль клиентов:
-
-```python
-# app/clients.py
-from nuke_di import Client
-
-
-class Database(Client):
-    async def connect(self) -> None:
-        print("database: connected")
-
-    async def disconnect(self) -> None:
-        print("database: disconnected")
-
-    async def fetch_user(self, user_id: int) -> str:
-        return f"user-{user_id}"
-
-
-class UserService(Client):
-    def __init__(self, db: Database) -> None:
-        self._db = db
-
-    async def greet(self, user_id: int) -> str:
-        return f"Hello, {await self._db.fetch_user(user_id)}!"
-```
-
-API:
 
 ```python
 # app/api.py
@@ -1399,7 +271,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Header
 
 from app.clients import Database, UserService
-from nuke_di.fastapi import ClientRouter, setup
+from nuke_di.fastapi import setup
 
 app = FastAPI()
 setup(app)  # before the routes: clients connect on startup, disconnect on shutdown
@@ -1414,32 +286,26 @@ async def current_user(x_user_id: Annotated[int, Header()], db: Database) -> str
     return await db.fetch_user(x_user_id)
 
 
-account = ClientRouter(prefix="/me")
-
-
-@account.get("")
+@app.get("/me")
 async def me(user: Annotated[str, Depends(current_user)]) -> str:
     return user
-
-
-app.include_router(account)
 ```
 
 ```console
 $ uvicorn app.api:app
-INFO:     Started server process [80948]
+INFO:     Started server process [55625]
 INFO:     Waiting for application startup.
 database: connected
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:54682 - "GET /users/42 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54684 - "GET /me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51602 - "GET /users/42 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51604 - "GET /me HTTP/1.1" 200 OK
 ^C
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 database: disconnected
 INFO:     Application shutdown complete.
-INFO:     Finished server process [80948]
+INFO:     Finished server process [55625]
 ```
 
 ```console
@@ -1449,44 +315,9 @@ $ curl localhost:8000/me -H "X-User-Id: 7"
 "user-7"
 ```
 
-Что произошло:
-
-1. `setup(app)` сделал так, что каждый маршрут, объявленный на `app` после этого вызова, заполняет
-   свои аргументы-клиенты из глобального `DI`, и обернул lifespan приложения.
-2. `@app.get` увидел `users: UserService` и только запомнил это; при импорте ничего не построено.
-3. При старте lifespan разрешил клиенты маршрутов, которые обслуживает приложение, — его собственных
-   и маршрутов включённых в него роутеров — и подключил их, каждый после своих зависимостей. При
-   остановке он их отключил.
-4. Запрос к `/users/42` получил подключённый `UserService`. `/me` прошёл через зависимость
-   `current_user`, которая получает `db: Database` тем же способом.
-
-Правила:
-
-- **Где заполняются клиенты.** В аргументах операций пути, WebSocket-эндпоинтов и всех зависимостей,
-  которые они используют, на любой глубине: функций и классов, используемых как `Depends(Auth)` или `Annotated[Auth, Depends()]`,
-  включая `dependencies=` маршрута, его роутера, `include_router()` и приложения. Аргумент
-  считается клиентом, если его аннотация типа — клиент, в том числе внутри `Annotated[UserService, ...]`
-  без `Depends`. Все остальные аргументы достаются FastAPI: path, query, header, body, `Depends`.
-- **Роутеры.** Создавайте их через `ClientRouter(...)`, который принимает те же аргументы, что и `APIRouter`,
-  и включайте в приложение или в другой `ClientRouter`. `APIRouter(route_class=ClientRoute)`
-  подходит для роутера, который не включает другие роутеры. Для другого контейнера используйте
-  `setup(app, container)` и `ClientRouter(container=container)`; включение роутера другого
-  контейнера сразу выбрасывает `TypeError`.
-- **Вызывайте `setup(app)` до маршрутов.** Маршрут с клиентом, объявленный раньше, сразу падает
-  с `TypeError`, описанным [ниже](#not-supported).
-- **Только то, что обслуживает приложение.** Роутер, который приложение не включает, например
-  импортированный только тестом, ничего не подключает при старте приложения.
-- **Экземпляры.** Как и с `inject()`, `Client` — это один экземпляр на контейнер, а
-  `NotSingletonClient` — один экземпляр на каждый объявляющий его аргумент, а не на каждый запрос.
-- **Lifespan.** Собственный `lifespan=` приложения выполняется внутри: его код старта видит подключённые
-  клиенты, а код остановки выполняется до их отключения. При остановке взводится `Shutdown` и
-  останавливаются `BackgroundTasks`, если приложение их использует, — до отключения клиентов, как в
-  воркере. `BackgroundTasks` из самого FastAPI — другой класс и клиентом не является.
-- **Функция остаётся функцией.** Теперь её сигнатура показывает FastAPI `Annotated[UserService, Depends(...)]`,
-  но прямой вызов с клиентом, например в юнит-тесте, работает как раньше.
-
-**Тестирование.** Импорт приложения ничего не строит, поэтому тест подменяет клиент до того, как
-`TestClient` запустит приложение, — через [`override()`](#testing) или фикстуру `global_di`:
+Клиенты подключаются при старте и отключаются при остановке, а зависимость вроде `current_user`
+получает клиенты тем же способом. Импорт приложения ничего не строит, поэтому тест подменяет клиент
+до того, как `TestClient` запустит приложение:
 
 ```python
 # tests/test_api.py
@@ -1511,742 +342,30 @@ def test_get_user() -> None:
 ```console
 $ pytest -q tests/test_api.py
 .                                                                        [100%]
-1 passed in 0.16s
-```
-
-`app.dependency_overrides` продолжает работать, в том числе для функции-зависимости, которая принимает клиенты.
-
-**WebSocket.** WebSocket-эндпоинт получает клиенты точно так же — и на `app`, и на `ClientRouter`:
-
-```python
-# app/chat.py
-from fastapi import FastAPI, WebSocket
-
-from app.clients import UserService
-from nuke_di.fastapi import setup
-
-app = FastAPI()
-setup(app)
-
-
-@app.websocket("/greet")
-async def greet(websocket: WebSocket, users: UserService) -> None:
-    await websocket.accept()
-    async for user_id in websocket.iter_text():
-        await websocket.send_text(await users.greet(int(user_id)))
-```
-
-```python
-# tests/test_chat.py
-from fastapi.testclient import TestClient
-
-from app.chat import app
-
-
-def test_greet() -> None:
-    with TestClient(app) as client, client.websocket_connect("/greet") as ws:
-        ws.send_text("42")
-        assert ws.receive_text() == "Hello, user-42!"
-```
-
-```console
-$ pytest -q tests/test_chat.py
-.                                                                        [100%]
-1 passed in 0.16s
-```
-
-**Клиент, который не смог подключиться**, срывает старт. Lifespan выбрасывает обычный `RuntimeError`,
-причиной которого указан `ConnectError`, поскольку `SystemExit` вырвался бы за пределы event loop
-сервера, а сервер сообщает об ошибке и завершается:
-
-```python
-# app/broken.py
-from fastapi import FastAPI
-
-from nuke_di import Client
-from nuke_di.fastapi import setup
-
-
-class Kafka(Client):
-    async def connect(self) -> None:
-        raise OSError("broker kafka-1:9092 is unreachable")
-
-
-app = FastAPI()
-setup(app)
-
-
-@app.post("/events")
-async def publish(kafka: Kafka) -> None: ...
-```
-
-```console
-$ uvicorn app.broken:app
-INFO:     Started server process [81379]
-INFO:     Waiting for application startup.
-Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
-Traceback (most recent call last):
-  ...
-OSError: broker kafka-1:9092 is unreachable
-ERROR:    Traceback (most recent call last):
-  ...
-nuke_di.errors.ConnectError: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  ...
-RuntimeError: nuke-di clients failed to start: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
-
-ERROR:    Application startup failed. Exiting.
-$ echo $?
-3
-```
-
-### <a id="not-supported"></a>Что не поддерживается
-
-В этих местах клиенты не принимаются. Каждое из них при объявлении маршрута выбрасывает `TypeError` с объяснением:
-
-| Где                                                     | Что делать вместо этого                       |
-|---------------------------------------------------------|-----------------------------------------------|
-| Роутер, созданный без `ClientRouter` / `ClientRoute`    | Создать его через `ClientRouter(...)`         |
-| WebSocket-эндпоинт на `APIRouter(route_class=ClientRoute)` | Создать роутер через `ClientRouter(...)`    |
-| Необязательный клиент, `Database \| None`               | Обычный `Database`                            |
-| Связанный метод или вызываемый объект в роли эндпоинта или зависимости | Функция или класс              |
-
-В отличие от этих случаев, маршрут роутера, включённого в обычный `APIRouter` вместо `ClientRouter`,
-обнаруживают только старые версии FastAPI. На FastAPI 0.14x он объявляется, и приложение стартует, но
-его запросы падают с `RuntimeError: UserService was not started with the app: include the router of its route into
-the app or into a ClientRouter, not into a plain APIRouter`.
-
-Запрос, пришедший без lifespan, например через `TestClient(app)` без `with`, получает
-`RuntimeError`: `UserService is not connected: start the app with its lifespan`.
-
-## <a id="litestar"></a>Litestar
-
-Обработчик маршрута в Litestar тоже получает клиент по аннотации типа — через плагин:
-
-```bash
-pip install "nuke-di[litestar]"
-```
-
-Нужен Litestar 2.15 или новее. С клиентами из примеров для [FastAPI](#fastapi):
-
-```python
-# app/litestar_api.py
-from typing import Annotated
-
-from litestar import Litestar, get
-from litestar.di import NamedDependency, Provide
-from litestar.params import FromPath, HeaderParameter
-
-from app.clients import Database, UserService
-from nuke_di.litestar import ClientPlugin
-
-
-@get("/users/{user_id:int}")
-async def get_user(user_id: FromPath[int], users: UserService) -> str:
-    return await users.greet(user_id)
-
-
-async def current_user(x_user_id: Annotated[int, HeaderParameter(name="X-User-Id")], db: Database) -> str:
-    return await db.fetch_user(x_user_id)
-
-
-@get("/me", dependencies={"user": Provide(current_user)})
-async def me(user: NamedDependency[str]) -> str:
-    return user
-
-
-app = Litestar([get_user, me], plugins=[ClientPlugin()])
-```
-
-```console
-$ uvicorn app.litestar_api:app
-INFO:     Started server process [6801]
-INFO:     Waiting for application startup.
-database: connected
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:51940 - "GET /users/42 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51942 - "GET /me HTTP/1.1" 200 OK
-^C
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-database: disconnected
-INFO:     Application shutdown complete.
-INFO:     Finished server process [6801]
-```
-
-```console
-$ curl localhost:8000/users/42
-Hello, user-42!
-$ curl localhost:8000/me -H "X-User-Id: 7"
-user-7
-```
-
-`ClientPlugin()` нашёл `users: UserService` в `get_user` и `db: Database` в зависимости
-`current_user`, передал оба клиента в Litestar как зависимости и подключил их при старте.
-
-Правила:
-
-- **Где заполняются клиенты.** В аргументах HTTP-обработчиков и обработчиков `@websocket`, с которыми
-  создаётся приложение, включая обработчики роутеров и контроллеров на любой глубине, а также всех
-  зависимостей, объявленных на приложении, роутере, контроллере или обработчике: функций и классов.
-- **По имени.** Litestar передаёт зависимости по имени аргумента, поэтому nuke-di регистрирует каждый
-  аргумент-клиент под его именем на уровне приложения. Одно имя — один клиент во всём приложении:
-  `users: UserService` в одном обработчике и `users: Billing` в другом выбрасывают `TypeError` при создании
-  приложения. Зависимость с тем же именем, объявленная приложением, роутером, контроллером или
-  обработчиком, имеет приоритет над клиентом.
-- **Экземпляры.** `Client` — это один экземпляр на контейнер, а `NotSingletonClient` — один экземпляр
-  на имя аргумента.
-- **Lifespan.** Клиенты подключаются до собственных `lifespan=` и `on_startup=` приложения и отключаются
-  после его хуков `on_shutdown=`, которые Litestar вызывает последними. `Shutdown` и `BackgroundTasks`
-  ведут себя так же, как в [FastAPI](#fastapi).
-- **Функция остаётся функцией.** Теперь её аргументы-клиенты аннотированы как явные зависимости
-  Litestar, значение которых не валидируется, — `Annotated[UserService, Dependency(), SkipValidationMarker()]`:
-  именно этого Litestar 2.23 требует вместо зависимости, сопоставленной только по имени. Прямой вызов
-  функции работает как раньше.
-- **Плагины.** Ставьте `ClientPlugin()` после всех плагинов, которые добавляют обработчики маршрутов:
-  он видит те обработчики, которые есть у приложения к моменту, когда до него доходит очередь.
-- **Другой контейнер.** `ClientPlugin(container)`.
-
-**Тестирование.** Как и с FastAPI, тест подменяет клиент до того, как `TestClient` запустит приложение:
-
-```python
-# tests/test_litestar_api.py
-from litestar.testing import TestClient
-
-from app.clients import Database
-from app.litestar_api import app
-from nuke_di import DI
-
-
-class FakeDatabase(Database):
-    async def fetch_user(self, user_id: int) -> str:
-        return "alice"
-
-
-def test_get_user() -> None:
-    with DI.override(Database, FakeDatabase()), TestClient(app) as client:
-        assert client.get("/users/1").text == "Hello, alice!"
-        assert client.get("/me", headers={"X-User-Id": "7"}).text == "alice"
-```
-
-```console
-$ pytest -q tests/test_litestar_api.py
-.                                                                        [100%]
 1 passed in 0.23s
 ```
 
-**Что не поддерживается.** WebSocket-слушатель, `@websocket_listener` или класс `WebsocketListener`,
-клиенты не принимает: Litestar читает его сигнатуру в момент объявления, ещё до того, как её увидит
-плагин, поэтому приложение выбрасывает `TypeError` и предлагает вместо него обработчик `@websocket`.
-Аргумент-клиент с именем, которое Litestar резервирует за собой, например `state` или `request`, тоже
-приводит к `TypeError`. Обработчик, зарегистрированный после создания приложения через `app.register()`,
-не виден.
-
-## <a id="faststream"></a>FastStream
-
-Подписчик FastStream получает клиент по аннотации типа рядом с сообщением:
-
-```bash
-pip install "nuke-di[faststream]"
-```
-
-Нужен FastStream 0.6 или новее, с любым брокером. С клиентами из примеров для [FastAPI](#fastapi):
-
-```python
-# app/worker.py
-from faststream import FastStream
-from faststream.nats import NatsBroker
-
-from app.clients import UserService
-from nuke_di.faststream import setup
-
-broker = NatsBroker("nats://localhost:4222")
-app = FastStream(broker)
-setup(app)  # clients connect before the broker starts, disconnect after it stops
-
-
-@broker.subscriber("greetings")
-async def greet(user_id: int, users: UserService) -> None:
-    print(await users.greet(user_id))
-```
-
-```console
-$ faststream run app.worker:app
-database: connected
-2026-10-08 15:12:52,281 INFO     - FastStream app starting...
-2026-10-08 15:12:52,287 INFO     - greetings |            - `Greet` waiting for messages
-2026-10-08 15:12:52,287 INFO     - FastStream app started successfully! To exit, press CTRL+C
-2026-10-08 15:12:55,078 INFO     - greetings | a747e4d0-2 - Received
-Hello, user-42!
-2026-10-08 15:12:55,079 INFO     - greetings | a747e4d0-2 - Processed
-^C
-2026-10-08 15:12:56,222 INFO     - FastStream app shutting down...
-2026-10-08 15:12:56,223 INFO     - FastStream app shut down gracefully.
-database: disconnected
-```
-
-Сообщение было опубликовано так:
-
-```python
-# publish.py
-import asyncio
-
-from faststream.nats import NatsBroker
-
-
-async def main() -> None:
-    async with NatsBroker("nats://localhost:4222") as broker:
-        await broker.publish(42, "greetings")
-
-
-asyncio.run(main())
-```
-
-Правила:
-
-- **Где заполняются клиенты.** В аргументах подписчиков брокеров приложения, в том числе подписчиков
-  включённых роутеров, и всех `Depends(...)`, которые они используют, на любой глубине: функций и классов,
-  включая `dependencies=` подписчика, его роутера и брокера. Все остальные аргументы достаются
-  FastStream: сообщение, его поля, `Context()`.
-- **Какие клиенты стартуют.** При старте — клиенты всех подписчиков, которых обслуживают брокеры
-  приложения, включая роутеры. Подписчиков можно объявлять как до, так и после `setup(app)`.
-- **Lifespan.** Клиенты подключаются до собственных хуков `lifespan=` и `on_startup=` приложения и до
-  старта брокеров; отключаются после остановки брокеров и после хуков `after_shutdown=`.
-  `Shutdown` и `BackgroundTasks` ведут себя так же, как в [FastAPI](#fastapi). `setup()` работает и с
-  `AsgiFastStream`.
-- **Экземпляры.** Как и с `inject()`, `Client` — это один экземпляр на контейнер, а
-  `NotSingletonClient` — один экземпляр на каждый объявляющий его аргумент, а не на каждое сообщение.
-- **Функция остаётся функцией.** Её сигнатура показывает FastStream `Annotated[UserService, Depends(...)]`,
-  как в [FastAPI](#fastapi).
-- **Одно приложение за раз.** Функция-подписчик и её зависимости переписываются один раз, каким бы ни был
-  контейнер, поэтому приложения, которые их разделяют, например по приложению на тест с брокером на
-  уровне модуля, запускаются по очереди: приложение, которое стартует, пока работает другое с той же
-  функцией, не запускается. Функция-зависимость, которая принимает клиенты, обслуживает обработчики либо
-  FastAPI, либо FastStream, но не те и другие сразу.
-
-**Тестирование.** Тестовый брокер FastStream не запускает хуки приложения, поэтому запускайте
-приложение внутри него через `TestApp`:
-
-```python
-# tests/test_worker.py
-import pytest
-from faststream import TestApp
-from faststream.nats import TestNatsBroker
-
-from app.clients import Database
-from app.worker import app, broker
-from nuke_di import DI
-
-
-class FakeDatabase(Database):
-    async def fetch_user(self, user_id: int) -> str:
-        return "alice"
-
-
-async def test_greet(capsys: pytest.CaptureFixture[str]) -> None:
-    with DI.override(Database, FakeDatabase()):
-        async with TestNatsBroker(broker) as test_broker, TestApp(app):
-            await test_broker.publish(1, "greetings")
-
-    assert "Hello, alice!" in capsys.readouterr().out
-```
-
-```console
-$ pytest -q tests/test_worker.py
-.                                                                        [100%]
-1 passed in 0.14s
-```
-
-Сообщение, обработанное без lifespan приложения, например через `TestNatsBroker(broker)` без `TestApp`,
-выбрасывает `RuntimeError: UserService is not connected: start the app with its lifespan`. Подписчик,
-добавленный после старта приложения, выбрасывает `RuntimeError: UserService was not started with the app`.
-
-## <a id="testing"></a>Тестирование
-
-**Клиент через контейнер.** Зарегистрируйте моки до разрешения дерева; тогда каждый потребитель
-получит мок:
-
-```python
-from unittest.mock import call
-
-from nuke_di import Dependencies
-
-
-async def test_greet() -> None:
-    deps = Dependencies()
-    db = deps.mock(Database)
-    db.fetch_user.return_value = "alice"
-
-    users = deps.resolve(UserService)
-    async with deps:
-        assert await users.greet(1) == "Hello, alice!"
-
-    assert db.fetch_user.await_args_list == [call(1)]
-```
-
-**Клиент на один блок, через `override()`.** `override(cls, new=None)` регистрирует подмену,
-как `mock()`, но она действует до конца блока `with`, даже на протяжении нескольких циклов `async with`,
-а при выходе контейнер очищается, так что ничего из разрешённого с подменой не утекает в следующий тест.
-Работает и с глобальным `DI`:
-
-```python
-# test_greet.py, with Database, UserService and handler from the Quick start
-from nuke_di import DI
-
-
-class FakeDatabase(Database):
-    async def fetch_user(self, user_id: int) -> str:
-        return "alice"
-
-
-async def test_greet_with_fake() -> None:
-    with DI.override(Database, FakeDatabase()):
-        injected = DI.inject(handler)
-        async with DI:
-            print(await injected(1))
-
-    print("after the block:", DI.clients)
-
-
-async def test_greet_with_autospec() -> None:
-    with DI.override(Database) as db:  # an autospec mock by default
-        db.fetch_user.return_value = "bob"
-        injected = DI.inject(handler)
-        async with DI:
-            print(await injected(2))
-
-    db.fetch_user.assert_awaited_once_with(2)
-```
-
-Асинхронные тесты в этом разделе используют [pytest-asyncio](https://pypi.org/project/pytest-asyncio/) с
-`asyncio_mode = auto` в `pytest.ini`; без него pytest не запускает тесты, объявленные через `async def`.
-
-```console
-$ pytest -q -s test_greet.py
-Hello, alice!
-after the block: OrderedDict()
-.Hello, bob!
-.
-2 passed in 0.01s
-```
-
-`database: connected` не выводится ни разу: подмена не подключается.
-
-Правила:
-
-- **Подменяйте до разрешения.** Подмена, зарегистрированная после разрешения `cls`, дошла бы
-  только до потребителей, разрешённых позже, а ранние сохранили бы настоящий клиент, поэтому `mock()`
-  вместо этого выбрасывает исключение:
-
-  ```python
-  DI.inject(handler)  # resolves UserService -> Database
-  DI.mock(Database)  # ConnectError: Database is already resolved, call mock() before resolve() or inject()
-  ```
-
-- **`override()` начинает с контейнера без разрешённых клиентов.** Иначе очистка при выходе
-  молча выбросила бы то, что было разрешено до блока, поэтому он выбрасывает
-  `ConnectError: override(Database) needs a container without resolved clients, found: Database, UserService`.
-  Сначала вызовите `DI.flush()` или используйте фикстуру `global_di`, описанную ниже.
-- **Одна подмена на класс.** Повторный вызов `mock(cls)` возвращает уже зарегистрированную подмену;
-  `mock(cls, other)` и `override(cls)` выбрасывают `ConnectError: Database already has a
-  replacement`.
-- **Подмены не подключаются.** Их `connect()` / `disconnect()` никогда не вызываются, и они
-  не участвуют в [порядке подключения](#connect-order).
-- **Сколько живёт подмена.** Подмену из `mock()` сбрасывает следующий `flush()`, включая тот, что
-  выполняется в конце `disconnect()`: тесту, который подключает контейнер больше одного раза, стоит
-  использовать `override()` — его подмена переживает любой `flush()` до конца своего блока. Исключение
-  внутри блока пробрасывается без изменений; обычный выход из блока, пока контейнер ещё подключён,
-  выбрасывает `ConnectError`.
-- **Вложенность.** Блоки для разных классов можно вкладывать друг в друга, если каждый открывается
-  до того, как что-либо разрешено, например `with DI.override(Database), DI.override(Clock):`; выход
-  из внутреннего блока сохраняет подмену внешнего.
-
-**Фикстуры pytest.** Установка `nuke-di` регистрирует плагин pytest с двумя фикстурами. Ни одна из
-них не autouse, поэтому существующие тесты работают ровно как раньше:
-
-| Фикстура    | Что даёт                                               |
-|-------------|--------------------------------------------------------|
-| `di`        | Новый `Dependencies` на один тест                      |
-| `global_di` | Глобальный `DI`, очищенный до и после теста            |
-
-Тест, который оставил контейнер подключённым, получает ошибку на этапе teardown, а контейнер всё равно
-очищается, так что следующий тест начинается с чистого листа:
-
-```python
-# test_users.py, with Database, UserService and handler from the Quick start
-from nuke_di import Dependencies
-
-
-async def test_greet(di: Dependencies) -> None:
-    di.mock(Database).fetch_user.return_value = "alice"
-    users = di.resolve(UserService)
-    async with di:
-        assert await users.greet(1) == "Hello, alice!"
-
-
-async def test_handler(global_di: Dependencies) -> None:  # e.g. code that calls DI.inject()
-    global_di.mock(Database).fetch_user.return_value = "bob"
-    injected = global_di.inject(handler)
-    async with global_di:
-        assert await injected(2) == "Hello, bob!"
-
-
-async def test_forgets_to_disconnect(di: Dependencies) -> None:
-    di.resolve(UserService)
-    await di.connect()
-```
-
-```console
-$ pytest -q test_users.py
-...E                                                                     [100%]
-==================================== ERRORS ====================================
-_______________ ERROR at teardown of test_forgets_to_disconnect ________________
-the test left the container of the "di" fixture connected; its clients were not disconnected, use `async with` or call disconnect()
------------------------------ Captured stdout call -----------------------------
-database: connected
-=========================== short test summary info ============================
-ERROR test_users.py::test_forgets_to_disconnect - Failed: the test left the c...
-3 passed, 1 error in 0.01s
-```
-
-Фикстуры не могут сами отключить забытый контейнер: к моменту teardown event loop теста может быть
-уже закрыт. `global_di` защищает только те тесты, которые её запрашивают: тест, использующий глобальный
-`DI` без неё, по-прежнему может оставить клиенты следующему. Проект, в котором определена собственная
-фикстура `di`, сохраняет её, так как фикстура из `conftest.py` важнее фикстуры плагина;
-`pytest -p no:nuke_di` отключает плагин.
-
-**Джоба напрямую.** Импорт модуля не запускает джобу, поэтому вызовите функцию с
-моками и параметрами:
-
-```python
-async def test_sync_copies_requested_tables() -> None:
-    pg, warehouse = AsyncMock(), AsyncMock()
-    warehouse.changes.return_value = ["row"]
-
-    await sync(pg, warehouse, day=datetime.date(2026, 10, 1), tables=["users"])
-
-    pg.upsert.assert_awaited_once_with("users", ["row"])
-```
-
-**Джоба через контейнер**, с клиентами, связанными так же, как в продакшене:
-
-```python
-async def test_sync_with_container() -> None:
-    deps = Dependencies()
-    pg = deps.mock(Postgres)  # mocks first: resolve() and inject() reuse them
-    warehouse = deps.mock(Warehouse)
-    warehouse.changes.return_value = ["row"]
-    injected = deps.inject(sync)
-
-    async with deps:
-        await injected(day=datetime.date(2026, 10, 1), tables=["users"])
-
-    assert pg.upsert.await_args_list == [call("users", ["row"])]
-```
-
-**Каждый entrypoint разрешается.** Импорт модуля не запускает его джобу или воркер, а `inject()`
-строит дерево, ничего не подключая, поэтому один тест проверяет проводку всех entrypoint-ов в CI:
-цикл, аргумент без аннотации, обязательный аргумент не-клиент или `__init__`, который бросает
-исключение, валят его с той же ошибкой, что напечатал бы реальный запуск, и база данных не нужна:
-
-```python
-# test_wiring.py
-from collections.abc import Callable
-
-import pytest
-
-from nuke_di import Dependencies
-
-from app.jobs import sync
-from app.workers import consumer
-
-
-@pytest.mark.parametrize("entrypoint", [sync.sync, consumer.consumer])
-def test_entrypoint_resolves(entrypoint: Callable[..., object]) -> None:
-    Dependencies().inject(entrypoint)  # runs every __init__, connects nothing
-```
-
-```console
-$ pytest -q test_wiring.py
-..                                                                       [100%]
-2 passed in 0.05s
-```
-
-Сохраните контейнер, чтобы получить [граф](#the-graph) entrypoint-а для его README:
-`deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`.
-
-**Воркер.** `Shutdown.set()` делает то же, что сделал бы SIGTERM:
-
-```python
-async def test_consumer_stops_on_shutdown() -> None:
-    queue, shutdown = AsyncMock(), Shutdown()
-
-    async def last_message() -> str:
-        shutdown.set()  # what SIGTERM would do
-        return "message-1"
-
-    queue.get.side_effect = last_message
-
-    await consumer(queue, shutdown)
-
-    queue.get.assert_awaited_once()
-```
-
-## <a id="configuration"></a>Настройка
-
-| Переменная окружения         | По умолчанию | Описание                                      |
-|------------------------------|--------------|-----------------------------------------------|
-| `CONNECT_TIMEOUT_SECONDS`    | `30`         | Таймаут `connect()` одного клиента, в секундах |
-| `CONNECT_CONCURRENCY`        | `0`          | Сколько клиентов могут одновременно подключаться или отключаться в пределах контейнера; `0` — без ограничений |
-| `DISCONNECT_TIMEOUT_SECONDS` | `10`         | Таймаут `disconnect()` одного клиента, в секундах |
-| `SHUTDOWN_GRACE_SECONDS`     | `10`         | Сколько воркер или джоба могут работать после SIGTERM / SIGINT, прежде чем их отменят, в секундах; читается при старте процесса |
-
-```bash
-CONNECT_TIMEOUT_SECONDS=5 SHUTDOWN_GRACE_SECONDS=20 python -m app.workers.consumer
-```
-
-Настройки контейнера читаются при создании экземпляра `Dependencies`. Их можно передать
-и явно:
-
-```python
-from nuke_di import Dependencies, DependenciesSettings
-
-deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_timeout=5, connect_concurrency=4))
-```
-
-## <a id="errors"></a>Ошибки
-
-| Исключение                  | Когда выбрасывается                                       |
-|-----------------------------|-----------------------------------------------------------|
-| `InitializeDependencyError` | `__init__` клиента выбросил исключение                    |
-| `ConnectError`              | `connect()` клиента выбросил исключение или контейнер в неподходящем состоянии (например, разрешение после подключения, мок уже разрешённого клиента, `override()` контейнера с разрешёнными клиентами) |
-| `ConnectTimeoutError`       | `connect()` клиента не уложился в `CONNECT_TIMEOUT_SECONDS` |
-| `InvalidSignatureError`     | В `__init__` клиента есть обязательный аргумент, который не является клиентом, в `inject()` передана функция с аргументом без аннотации типа, в `resolve()` передан класс, который не является клиентом, или у параметра точки входа неподдерживаемый тип либо конфликтующий флаг; см. [Если дерево не удаётся построить](#when-the-tree-cannot-be-built) |
-| `CircularDependencyError`   | Клиенты циклически зависят друг от друга; подкласс `InvalidSignatureError` |
-| `UsageError`                | Командная строка воркера или джобы не соответствует её параметрам; записывается в `Run.error`, код завершения `2` |
-
-`InitializeDependencyError` и `ConnectError` наследуются от `SystemExit`: предполагается, что
-приложение, чьи зависимости не могут стартовать, должно остановиться. Если нужно другое поведение,
-перехватывайте их явно; исходное исключение доступно в `__cause__`.
-
-`nuke-di` пишет логи через стандартный модуль `logging` в логгер `nuke_di`, со
-[структурированными полями](#startup-metrics-and-structured-logs) для лог-пайплайнов.
-
-## <a id="performance"></a>Производительность
-
-`nuke-di` измеряют, а не тюнят. `benchmarks/run.py` замеряет, что добавляет сама библиотека на
-клиентах-пустышках: `resolve()` широких, глубоких и смешанных деревьев из 10, 100 и 1000 клиентов,
-планирование `connect()` и `disconnect()` сверх собственных корутин клиентов, `inject()`,
-`NotSingletonClient`, цикл `mock()` / `override()` в тесте, один запрос FastAPI, время импорта и
-память. Он печатает Markdown-таблицу с медианой и p95 по повторам и цифрой на одного клиента:
-
-```console
-$ uv run python benchmarks/run.py --only resolve --size 100
-nuke-di 1.12.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 3baafcc · N = 100 · 20 repeats
-
-| Scenario                                         | Shape          |   N |  Median |     p95 | Per client |
-|--------------------------------------------------|----------------|----:|--------:|--------:|-----------:|
-| resolve(), cold                                  | wide           | 100 |  393 µs |  945 µs |    3.93 µs |
-| resolve(), second container, classes seen before | wide           | 100 |  109 µs |  441 µs |    1.09 µs |
-| resolve(), warm                                  | wide           | 100 | 93.7 ns |  112 ns |            |
-| resolve(), cold                                  | deep           | 100 |  374 µs |  414 µs |    3.74 µs |
-| resolve(), second container, classes seen before | deep           | 100 | 91.6 µs | 96.5 µs |     916 ns |
-| resolve(), warm                                  | deep           | 100 | 92.4 ns | 93.6 ns |            |
-| resolve(), cold                                  | mixed          | 100 |  451 µs |  474 µs |    4.51 µs |
-| resolve(), second container, classes seen before | mixed          | 100 | 94.8 µs |  105 µs |     948 ns |
-| resolve(), warm                                  | mixed          | 100 | 89.1 ns | 92.2 ns |            |
-| resolve(), cold                                  | wide, strings  | 100 |  662 µs |  695 µs |    6.62 µs |
-| resolve(), second container, classes seen before | wide, strings  | 100 | 94.1 µs |  123 µs |     941 ns |
-| resolve(), cold                                  | deep, strings  | 100 |  709 µs |  900 µs |    7.09 µs |
-| resolve(), second container, classes seen before | deep, strings  | 100 | 95.0 µs |  107 µs |     950 ns |
-| resolve(), cold                                  | mixed, strings | 100 | 1.10 ms | 1.71 ms |    11.0 µs |
-| resolve(), second container, classes seen before | mixed, strings | 100 |  101 µs |  109 µs |    1.01 µs |
-```
-
-`--size N` и `--repeat K` задают размер дерева и число повторов, `--only` выбирает сценарий
-(`resolve`, `connect`, `inject`, `not_singleton`, `overrides`, `fastapi`, `import`, `memory`), а
-`--json PATH` записывает цифры вместе с версией Python, платформой и коммитом для последующего
-сравнения. [docs/benchmarks.md](../benchmarks.md) описывает каждый сценарий и хранит базовые замеры
-на Python 3.11–3.14, снятые на Apple M2 Pro с `nuke-di` 1.12.0: `resolve()` стоит 3,5–6,3 µs на клиента,
-так что дерево из 1000 клиентов строится меньше чем за 5,5 ms; второй контейнер процесса, а его платит
-каждый тест после первого, разрешает те же классы по закэшированной цифре, 0,75–1,4 µs на клиента, и со
-строковыми аннотациями тоже; `connect()` добавляет 13–18 µs на клиента, а цепочка из 1000 клиентов подключается и отключается за 28–36 ms;
-обработчик FastAPI, получающий клиента через `nuke-di`, стоит столько же, сколько обработчик с обычным
-`Depends()`; `import nuke_di` занимает 28–39 ms, в основном из-за `asyncio`. CI
-прогоняет набор как smoke-тест, без порога: раннер GitHub слишком шумный, чтобы на нём что-то
-блокировать.
-
-`benchmarks/compare.py` прогоняет те же деревья через dishka, wireup, dependency-injector и injector,
-регистрируя одни и те же классы так, как принято в каждой библиотеке: холодный контейнер с
-разрешённым корнем на классах, новых для процесса, повторное получение корня и один запрос FastAPI через
-интеграцию каждой библиотеки. Библиотеки лежат в группе зависимостей `compare`:
-
-```console
-$ uv run python benchmarks/compare.py --size 100 --summary
-nuke-di 1.11.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 6c2ae10 · N = 100 · 20 repeats
-nuke-di 1.11.1 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
-
-| Lower is better                                          | nuke-di        | dishka          | wireup          | dependency-injector | injector        |
-|----------------------------------------------------------|---------------:|----------------:|----------------:|--------------------:|----------------:|
-| Cold start: a container and a tree of 100 clients        | **541 µs**     | 12.9 ms (23.8×) | 20.0 ms (37.0×) | 1.05 ms (1.9×)      | 1.34 ms (2.5×)  |
-| Cold start: the same 100 clients with string annotations | 1.27 ms (1.2×) | 13.7 ms (12.6×) | 21.4 ms (19.6×) | **1.09 ms**         | 1.47 ms (1.3×)  |
-| A cached root                                            | 94.1 ns (2.5×) | 261 ns (7.1×)   | 92.6 ns (2.5×)  | **37.0 ns**         | 1.18 µs (31.9×) |
-| A FastAPI request with a client                          | **103 µs**     | 107 µs (1.0×)   | 206 µs (2.0×)   | 221 µs (2.2×)       | —               |
-```
-
-![nuke-di against other DI libraries: lower is better](../benchmarks/compare.png)
-
-Так быстрее ли `nuke-di` всех? При построении дерева с настоящими аннотациями типов и на запросе
-FastAPI — да: dependency-injector и injector строят дерево в 2–2,5 раза дольше, dishka и wireup — в
-24–37 раз дольше из-за валидации графа при создании контейнера, а wireup и dependency-injector тратят
-вдвое больше на каждый запрос. Со строковыми аннотациями dependency-injector, который аннотаций не читает,
-опережает `nuke-di` на пятую часть. На закэшированном корне `nuke-di` идёт вровень с wireup, а `get()`
-dependency-injector на Cython выигрывает примерно 50 ns: разницу, которую ни одно приложение не заметит.
-Полная таблица с методикой — в [docs/benchmarks.md](../benchmarks.md#comparison-with-other-libraries).
-
-## <a id="development"></a>Разработка
-
-```bash
-make install   # uv sync --locked
-make check     # ruff, mypy, pyright and tests, as in CI
-make cov       # tests with a coverage report (terminal + htmlcov/)
-make test-all  # tests on Python 3.11-3.14
-```
-
-Покрытие строк и ветвлений — 100%, и CI падает, если оно опускается ниже
-(`fail_under = 100` в `pyproject.toml`).
-
-### <a id="releases"></a>Релизы
-
-Каждый мерж в `master` — это релиз. Workflow `Release` публикует версию из
-`pyproject.toml` в PyPI, ставит тег `vX.Y.Z` и создаёт релиз на GitHub из её раздела в
-`CHANGELOG.md`. Поэтому pull request несёт собственную версию: поднимите её командой `uv version --bump
-patch|minor|major` и превратите `## [Unreleased]` в `## [X.Y.Z] - YYYY-MM-DD` со ссылкой на сравнение
-внизу файла. CI проверяет это в каждом pull request, а локально — `make check-version`:
-
-```console
-$ make check-version
-git fetch --quiet --tags origin master
-uv run --no-project python scripts/version.py check origin/master
-error: version 1.5.0 is not above 1.5.0 on master: bump it, e.g. `uv version --bump minor`
-error: v1.5.0 is released already
-make: *** [check-version] Error 1
-
-$ uv version --bump patch
-...
-nuke-di 1.5.0 => 1.5.1
-$ make check-version
-git fetch --quiet --tags origin master
-uv run --no-project python scripts/version.py check origin/master
-1.5.1
-```
-
-Изменение, попавшее в `master` без новой версии, например запушенное напрямую, роняет workflow
-`Release` ещё до сборки и публикации.
+Роутеры, WebSocket и собственный lifespan приложения описаны в разделе [FastAPI](ru/fastapi.md);
+[Litestar](ru/litestar.md) и [FastStream](ru/faststream.md) работают так же.
+
+## <a id="documentation"></a>Документация
+
+- [Клиенты](ru/clients.md): `Client` и `NotSingletonClient`, жизненный цикл, клиенты-датаклассы,
+  слои, время старта, граф зависимостей, ошибки подключения и разрешения
+- [Контейнер](ru/container.md): `Dependencies` и глобальный `DI`, `resolve()`, `inject()`,
+  `mock()`, `override()`
+- [Воркеры и джобы](ru/workers-and-jobs.md): `@job` и `@worker`, параметры командной строки,
+  `Shutdown`, grace period, фоновые задачи, коды завершения, хуки, Kubernetes
+- Фреймворки: [FastAPI](ru/fastapi.md), [Litestar](ru/litestar.md),
+  [FastStream](ru/faststream.md)
+- [Тестирование](ru/testing.md): `mock()`, `override()`, фикстуры pytest, проверка связывания
+- [Настройка](ru/configuration.md): таймауты, конкурентность и grace period
+- [Ошибки](ru/errors.md): все исключения и когда они выбрасываются
+- [Примеры](../../examples/README.md): 21 готовый к запуску сценарий, от разового скрипта и воркера очереди
+  до FastAPI, Litestar, FastStream, Starlette и целого сервиса, каждый с выводом и тестами
+- [Бенчмарки](../benchmarks.md): каждый сценарий, базовые замеры на Python 3.11–3.14 и сравнение
+  с другими библиотеками
+- [Разработка](ru/development.md): проверки, покрытие и релизы
 
 ## <a id="license"></a>Лицензия
 

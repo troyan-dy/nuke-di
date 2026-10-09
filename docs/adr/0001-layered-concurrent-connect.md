@@ -4,4 +4,4 @@ The container used to connect clients one by one in resolution order, which slow
 
 This drops the implicit guarantee that everything resolved earlier is already connected: only dependencies declared in `__init__` are ordered. We chose this on purpose instead of an opt-in flag or a sequential fallback mode, because a client that relies on the connect order of an unrelated client has a hidden dependency that should be declared, not preserved.
 
-Superseded in part by [ADR-0006](0006-connect-by-own-dependencies.md): clients now connect by their own dependencies, without layers; the principle above stands.
+Superseded in part by [ADR-0007](0007-connect-by-own-dependencies.md): clients now connect by their own dependencies, without layers; the principle above stands.
