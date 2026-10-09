@@ -348,6 +348,8 @@ $ pytest -q tests/test_api.py
   到 FastAPI、Litestar、FastStream、Starlette 和完整的服务，每个都附带输出和测试
 - [基准测试](../benchmarks.md)：每个场景、Python 3.11–3.14 上的基线，以及与其他库的
   对比
+- [编程智能体](zh-CN/agents.md)：Agent Skill、`AGENTS.md` 片段、
+  [`llms.txt`](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms.txt)、Context7、JSON 格式的依赖图
 - [开发](zh-CN/development.md)：检查、覆盖率和发布
 
 ## <a id="license"></a>许可证

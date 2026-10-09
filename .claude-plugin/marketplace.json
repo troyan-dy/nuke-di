@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "nuke-di",
+  "description": "The nuke-di skill: how to write, test and check code that uses nuke-di",
+  "owner": {
+    "name": "Dmitriy Troyan",
+    "url": "https://github.com/troyan-dy"
+  },
+  "plugins": [
+    {
+      "name": "nuke-di",
+      "source": "./",
+      "description": "Writes nuke-di code in its own shape: clients, jobs, workers, FastAPI / Litestar / FastStream, tests, and none of the rejected designs",
+      "category": "development",
+      "tags": ["python", "dependency-injection", "asyncio"]
+    }
+  ]
+}

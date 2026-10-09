@@ -363,6 +363,8 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
   to FastAPI, Litestar, FastStream, Starlette and a whole service, each with its output and tests
 - [Benchmarks](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md): every scenario, the baseline on Python 3.11–3.14 and the comparison
   with other libraries
+- [Coding agents](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/agents.md): the Agent Skill, a block for `AGENTS.md`,
+  [`llms.txt`](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms.txt), Context7, the graph as JSON
 - [Development](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/development.md): the checks, coverage and releases
 
 ## License

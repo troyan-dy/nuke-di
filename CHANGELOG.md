@@ -6,6 +6,25 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.12.2] - 2026-10-09
+
+### Documentation
+
+- Coding agents get the model of `nuke-di` instead of guessing it from other DI libraries (#106). A new guide
+  page, `docs/guide/agents.md`, in every language:
+  - An Agent Skill, `skills/nuke-di/SKILL.md`: the model, the recipes for the common tasks, a table of what not
+    to write (provider functions, interface binding, per-request clients, retries in `connect()`) with the ADR of
+    each, and how to check the result. The repository is a Claude Code plugin marketplace
+    (`/plugin marketplace add troyan-dy/nuke-di`, then `/plugin install nuke-di@nuke-di`); Codex, Cursor,
+    Copilot and Gemini CLI read the same file from `.agents/skills/`.
+  - A block to paste into a project's `AGENTS.md` or `CLAUDE.md`, for agents without skills.
+  - `llms.txt` and `llms-full.txt` at the root, generated from the English README and guide by
+    `scripts/llms.py`; `tests/test_llms.py` fails when they drift from the pages.
+  - `context7.json`, so the Context7 MCP server indexes the README, the guide and the examples.
+  - The graph as JSON: a recipe over `Graph.nodes`, not a new export.
+- `benchmarks/agents/`: coding tasks that an agent solves in a fresh project, with and without the skill, graded
+  by pytest, hidden tests, mypy with the plugin and a search for the rejected designs. EVAL_SUMMARY
+
 ## [1.12.1] - 2026-10-09
 
 ### Documentation
@@ -502,7 +521,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.12.2...HEAD
+[1.12.2]: https://github.com/troyan-dy/nuke-di/compare/v1.12.1...v1.12.2
 [1.12.1]: https://github.com/troyan-dy/nuke-di/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/troyan-dy/nuke-di/compare/v1.11.5...v1.12.0
 [1.11.5]: https://github.com/troyan-dy/nuke-di/compare/v1.11.4...v1.11.5

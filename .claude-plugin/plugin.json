@@ -1,0 +1,12 @@
+{
+  "name": "nuke-di",
+  "description": "Writes nuke-di code in its own shape: clients, jobs, workers, FastAPI / Litestar / FastStream, tests, and none of the rejected designs",
+  "author": {
+    "name": "Dmitriy Troyan",
+    "url": "https://github.com/troyan-dy"
+  },
+  "homepage": "https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/agents.md",
+  "repository": "https://github.com/troyan-dy/nuke-di",
+  "license": "MIT",
+  "keywords": ["python", "dependency-injection", "asyncio", "nuke-di"]
+}

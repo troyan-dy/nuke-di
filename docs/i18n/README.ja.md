@@ -329,6 +329,8 @@ $ pytest -q tests/test_api.py
 - [サンプル](../../examples/README.md): すぐに動かせる 21 のシナリオ。単発のスクリプトやキューの worker から
   FastAPI、Litestar、FastStream、Starlette、サービス全体まで、それぞれ出力とテスト付き
 - [ベンチマーク](../benchmarks.md)：すべてのシナリオ、Python 3.11–3.14 のベースライン、他のライブラリとの比較
+- [コーディングエージェント](ja/agents.md)：Agent Skill、`AGENTS.md` 用のブロック、
+  [`llms.txt`](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms.txt)、Context7、JSON としての依存グラフ
 - [開発](ja/development.md)：チェック、カバレッジ、リリース
 
 ## <a id="license"></a>ライセンス

@@ -365,6 +365,8 @@ Los routers, los websockets y el lifespan propio de la app se describen en [Fast
   hasta FastAPI, Litestar, FastStream, Starlette y un servicio completo, cada uno con su salida y sus pruebas
 - [Benchmarks](../benchmarks.md): cada escenario, la línea base en Python 3.11–3.14 y la comparación
   con otras bibliotecas
+- [Agentes de programación](es/agents.md): la Agent Skill, un bloque para `AGENTS.md`,
+  [`llms.txt`](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms.txt), Context7, el grafo como JSON
 - [Desarrollo](es/development.md): las comprobaciones, la cobertura y la publicación de versiones
 
 ## <a id="license"></a>Licencia
