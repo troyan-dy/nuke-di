@@ -87,7 +87,7 @@ class Interrupted(Recorded):
             raise
 
 
-async def test_failure_disconnects_connected_layers() -> None:
+async def test_failure_disconnects_connected_clients() -> None:
     dep = Dependencies()
     dep.resolve(Top)
     dep.resolve(Redis)
@@ -100,7 +100,7 @@ async def test_failure_disconnects_connected_layers() -> None:
 
 async def test_failure_disconnects_connected_siblings() -> None:
     dep = Dependencies()
-    # Both are in layer 1; Sibling connects before Broken fails
+    # Both wait for Postgres only; Sibling connects before Broken fails
     dep.resolve(Sibling)
     dep.resolve(Broken)
 
@@ -133,7 +133,7 @@ async def test_failure_resets_container() -> None:
     assert dep.clients == {}
 
 
-async def test_cancellation_disconnects_connected_layers() -> None:
+async def test_cancellation_disconnects_connected_clients() -> None:
     dep = Dependencies()
     dep.resolve(Hanging)
     dep.resolve(Redis)
@@ -150,7 +150,7 @@ async def test_cancellation_disconnects_connected_layers() -> None:
     assert dep.connect_clients == []
 
 
-async def test_cancelled_disconnect_waits_for_the_layer_and_flushes() -> None:
+async def test_cancelled_disconnect_waits_for_the_clients_disconnecting_and_flushes() -> None:
     dep = Dependencies()
     dep.resolve(Interrupted)
     dep.resolve(Sibling)
@@ -163,7 +163,8 @@ async def test_cancelled_disconnect_waits_for_the_layer_and_flushes() -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    # The clients of the layer finished their cancellation before disconnect() gave up; the layer below was not reached
+    # The clients disconnecting finished their cancellation before disconnect() gave up; Postgres, waiting for them,
+    # was not reached
     assert recorder.disconnected == ["Sibling", "Interrupted: cancelled"]
     assert dep.connected is False
     assert dep.connect_clients == []
@@ -201,7 +202,7 @@ async def test_client_cancelling_itself_does_not_stop_disconnect() -> None:
     dep.resolve(Sibling)
     await dep.connect()
 
-    # Returns normally: the rest of the layer and the layer below are still disconnected
+    # Returns normally: Sibling and Postgres, which waits for it, are still disconnected
     await dep.disconnect()
 
     assert recorder.disconnected == ["Sibling", "Postgres"]

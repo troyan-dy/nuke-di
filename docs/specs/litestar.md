@@ -27,7 +27,7 @@ async def get_user(user_id: int, users: UserService) -> str:
 app = Litestar([get_user], plugins=[ClientPlugin()])
 ```
 
-The clients connect, layer by layer, when the app starts and disconnect when it stops.
+The clients connect, each after its own dependencies, when the app starts and disconnect when it stops.
 
 ## Non-goals
 

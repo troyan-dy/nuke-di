@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Annotated, Any, TypeVar
 
@@ -16,7 +16,8 @@ from litestar.testing import TestClient
 from litestar.types import Receive, Scope, Send
 
 from nuke_di import DI, BackgroundTasks, Client, Dependencies, NotSingletonClient, Shutdown
-from nuke_di.litestar import ClientPlugin
+from nuke_di.integration.testing import check
+from nuke_di.litestar import _LITESTAR, ClientPlugin
 
 if TYPE_CHECKING:
     from decimal import Decimal
@@ -455,3 +456,31 @@ def test_handlers_without_clients_are_left_to_litestar() -> None:
             assert ws.receive_text() == "ping"
 
     assert events == []
+
+
+# --- the contract ----------------------------------------------------------------------------------------
+
+
+def contract_app(container: Dependencies, handler: Callable[..., Any]) -> Litestar:
+    # `debug` puts the error of a handler into the response
+    return make_app(container, [get("/")(handler)], debug=True)
+
+
+def contract_get(client: TestClient[Litestar]) -> None:
+    response = client.get("/")
+    if response.is_server_error:
+        raise RuntimeError(response.text)
+
+
+@asynccontextmanager
+async def contract_run(app: Litestar, lifespan: bool) -> AsyncIterator[Callable[[], object]]:
+    if lifespan:
+        with TestClient(app) as client:
+            yield lambda: contract_get(client)
+    else:
+        yield lambda: contract_get(TestClient(app))
+
+
+async def test_keeps_the_integration_contract() -> None:
+    # A plain Framework: Litestar provides dependencies by name, so the case of a dependency is skipped
+    await check(_LITESTAR, contract_app, contract_run)

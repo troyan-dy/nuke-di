@@ -12,8 +12,8 @@ A injeção de dependências mais simples para projetos Python assíncronos.
 
 As dependências são declaradas com type hints comuns. O `nuke-di` monta a árvore de dependências,
 cria cada cliente uma única vez e cuida do seu ciclo de vida assíncrono: `connect()` na inicialização e
-`disconnect()` no encerramento. Clientes independentes sobem em paralelo, camada por camada,
-das dependências mais profundas para cima.
+`disconnect()` no encerramento. Cada cliente sobe assim que as suas próprias dependências se
+conectaram, em paralelo com todos os outros clientes que já estão prontos.
 
 Além disso, um único decorador transforma uma função assíncrona em um processo com argumentos de linha
 de comando, e os handlers do FastAPI, do Litestar e do FastStream recebem clientes pelo type hint da mesma forma.
@@ -96,9 +96,10 @@ O que aconteceu:
   escopos para configurar. Um objeto de terceiros vira uma dependência quando é envolvido em uma classe assim.
 - **Os type hints são a ligação.** Um cliente pede as suas dependências no `__init__`, uma função na
   sua assinatura. Nada mais as nomeia, então renomear ou adicionar uma dependência é uma refatoração comum.
-- **Inicialização em paralelo, encerramento em ordem.** Os clientes se conectam camada por camada, das
-  dependências mais profundas para cima, e os clientes de uma mesma camada se conectam em paralelo. Eles se desconectam
-  na ordem inversa, e um `disconnect()` que falha não impede os demais.
+- **Inicialização em paralelo, encerramento em ordem.** Um cliente se conecta assim que as suas próprias
+  dependências se conectaram, em paralelo com todos os outros clientes que estão prontos, então um cliente
+  lento segura apenas os clientes que precisam dele. Eles se desconectam na ordem inversa, e um
+  `disconnect()` que falha não impede os demais.
 - **Falhar cedo.** Uma árvore que não pode ser construída falha antes de qualquer conexão, com o nome do argumento e
   o caminho até ele, e o `mypy` com o
   [plugin](pt-BR/clients.md#checking-the-tree-with-mypy)
@@ -109,6 +110,12 @@ O que aconteceu:
   durante um teste; o código testado não muda.
 - **Sem dependências em tempo de execução.** O núcleo usa só a biblioteca padrão; as integrações com
   frameworks são extras.
+
+Assim é uma inicialização, com o exemplo do [guia de clientes](pt-BR/clients.md#connect-order): `Consumer`
+precisa só do `Kafka`, então não espera o lento `Postgres`, e a inicialização leva o tempo da sua cadeia de
+dependências mais longa.
+
+![Seis clientes conectando pelas suas próprias dependências: Consumer e Http começam assim que Kafka e Redis conectam, a inicialização leva 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/66f74f76407da320cfc97ef22b761d85e298eddd/docs/connect-now.svg)
 
 ## <a id="performance"></a>Desempenho
 
@@ -138,8 +145,8 @@ por requisição. Com anotações em string, o dependency-injector, que não lê
 um quinto à frente. Em uma raiz em cache o `nuke-di` empata com o wireup, e o `get()` em Cython do
 dependency-injector vence por cerca de 50 ns, uma diferença que nenhuma aplicação percebe.
 
-Sozinho, `resolve()` custa 4–7 µs por cliente, então uma árvore de 1000 clientes é construída em menos de 6 ms, e
-`connect()` acrescenta 9–15 µs por cliente em uma camada. [docs/benchmarks.md](../benchmarks.md) explica cada
+Sozinho, `resolve()` custa 3,5–6,3 µs por cliente, então uma árvore de 1000 clientes é construída em menos de
+5,5 ms, e `connect()` acrescenta 13–18 µs por cliente. [docs/benchmarks.md](../benchmarks.md) explica cada
 cenário, registra a linha de base no Python 3.11–3.14 e traz a comparação completa, com o método.
 
 ## <a id="a-job-with-command-line-arguments"></a>Um job com argumentos de linha de comando
@@ -349,13 +356,14 @@ Routers, websockets e o lifespan da própria aplicação são tratados em [FastA
 ## <a id="documentation"></a>Documentação
 
 - [Clientes](pt-BR/clients.md): `Client` e `NotSingletonClient`, o ciclo de vida, clientes dataclass,
-  camadas, tempos de inicialização, o grafo de dependências, erros de conexão e de resolução
+  ordem de conexão, tempos de inicialização, o grafo de dependências, erros de conexão e de resolução
 - [O container](pt-BR/container.md): `Dependencies` e o `DI` global, `resolve()`, `inject()`,
   `mock()`, `override()`
 - [Workers e jobs](pt-BR/workers-and-jobs.md): `@job` e `@worker`, parâmetros de linha de comando,
   `Shutdown`, o período de tolerância, tarefas em segundo plano, códigos de saída, hooks, Kubernetes
 - Frameworks: [FastAPI](pt-BR/fastapi.md), [Litestar](pt-BR/litestar.md),
-  [FastStream](pt-BR/faststream.md)
+  [FastStream](pt-BR/faststream.md) e
+  [como escrever uma integração](pt-BR/integrations.md) para outro framework com `nuke_di.integration`
 - [Testes](pt-BR/testing.md): `mock()`, `override()`, as fixtures do pytest, a verificação da ligação
 - [Configuração](pt-BR/configuration.md): timeouts, concorrência e o período de tolerância
 - [Erros](pt-BR/errors.md): cada exceção e quando ela é lançada

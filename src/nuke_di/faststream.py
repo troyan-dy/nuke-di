@@ -10,8 +10,8 @@ from typing import Any
 from faststream import Depends, FastStream
 from faststream.asgi import AsgiFastStream
 
-from nuke_di._integration import Binding, DependsFramework, bind, unique, wrap_lifespan
 from nuke_di.core import DI, Dependencies
+from nuke_di.integration import Binding, DependsFramework, bind, unique, wrap_lifespan
 
 __all__ = ("setup",)
 

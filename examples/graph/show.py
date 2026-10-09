@@ -8,9 +8,10 @@ def main() -> None:
     deps.inject(place_order)  # builds the tree and connects nothing
     graph = deps.graph()
 
-    for node in sorted(graph.nodes, key=lambda node: node.layer or 0):
+    # In resolution order: a client comes after its dependencies
+    for node in graph.nodes:
         needs = ", ".join(dependency.name for dependency in node.dependencies.values()) or "-"
-        print(f"layer {node.layer}  {node.name:<16} needs {needs}")
+        print(f"{node.name:<16} needs {needs}")
     print()
     print(graph.to_mermaid(), end="")
 

@@ -35,7 +35,7 @@ class UserCache(Client):
         self._users: dict[int, str] = {}
 
     async def connect(self) -> None:
-        # Database is in an earlier layer, so it is connected by now
+        # Database is a dependency, so it is connected by now
         await self.refresh()
         print(f"cache: warmed with {len(self._users)} users")
         self._tasks.spawn(self._refresh_forever(), name="cache-refresh")

@@ -6,7 +6,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.12.2] - 2026-10-09
+## [1.14.1] - 2026-10-09
 
 ### Documentation
 
@@ -27,6 +27,70 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   three times each: 12/18 without the skill, 18/18 with it and 18/18 with the `AGENTS.md` block; the skill also
   halves the cost and the turns of a run. Without either, the agent retried in `connect()`, created an
   `httpx.AsyncClient` in `__init__` and typed a client's argument with a `Protocol`.
+## [1.14.0] - 2026-10-09
+
+### Added
+
+- The integration kit is public: `nuke_di.integration` (#66), with `Framework`, `DependsFramework`, `Binding`,
+  `bind()`, `client_of()`, `running()`, `wrap_lifespan()` and `unique()`. The FastAPI, FastStream and Litestar
+  integrations are built on it, so an integration with another framework can live in its own package.
+- `nuke_di.integration.testing.check(framework, make_app, run)`: the contract every integration keeps, as one
+  call for the integration's own tests. It brings its own clients and handlers and checks that a handler takes
+  clients by type hint, and a dependency too with a `DependsFramework`, that `override()` before startup applies, that a handler called
+  without the app's lifespan raises the framework's "not connected" error, and that a failed `connect()` fails
+  the startup with a `RuntimeError` and leaves the container flushed. Failed cases come back as one
+  `ExceptionGroup`, each with a note naming its case. The FastAPI, FastStream and Litestar integrations run it.
+- A guide page, "Writing an integration" (`docs/guide/integrations.md`), mirrored in the six translations: the
+  kit, the FastStream integration written on it as the worked example, what `per_container` means, frameworks
+  without `Depends`, and `check()` with its real output. The README "Documentation" section links to it.
+
+### Deprecated
+
+- `nuke_di._integration` imports with a `DeprecationWarning` and is removed in 1.15.0; import from
+  `nuke_di.integration`.
+
+## [1.13.0] - 2026-10-09
+
+### Changed
+
+- Clients connect by their own dependencies instead of layer by layer
+  ([#28](https://github.com/troyan-dy/nuke-di/issues/28), ADR-0007): a client starts as soon as the clients it
+  declares in `__init__` have connected, concurrently with every other client that is ready, and disconnects as
+  soon as the clients that depend on it have, whatever their `disconnect()` ended in. A slow client holds back
+  only the clients that need it: the example in the Clients guide (Postgres 0.3 s; Consumer 0.3 s, which needs
+  only the 0.05 s Kafka) starts in 0.35 s instead of 0.60 s, and one hung `disconnect()` no longer stalls the
+  clients beside it. Only declared dependencies are ordered, as before: a client that relied on an unrelated
+  client of the layer below being connected first has to declare it now.
+- The first failure in `connect()` cancels every client still connecting, across the whole graph; the clients
+  still waiting for their dependencies keep `None` in their `ClientTiming`, and the connected ones are rolled
+  back as before.
+- A client whose `connect()` ends in a `CancelledError` of its own, e.g. re-raised from a task it awaited, fails
+  the connect with a `ConnectError` like an exception does; its consumers would otherwise wait for it forever. Up
+  to 1.12 it was skipped as not connected and the layers above it connected anyway. Its `connect_outcome` is
+  `"failed"`, which tells it apart from the clients cancelled because of it, and the message has no empty `: `
+  after an exception without one. A `CancelledError` of its own in `disconnect()` is logged now, like a failure.
+- `CONNECT_CONCURRENCY` counts only clients in `connect()` or `disconnect()`; a client waiting for its
+  dependencies does not take a slot.
+- The `DEBUG` records of a client connecting or disconnecting say how many have finished so far:
+  `Connecting client Consumer (2/7 connected)`, `Disconnected client Http in 0.000s (4/7 disconnected)`.
+  The startup summary drops the layers: `Connected 7 clients in 0.35s (slowest: ...)`.
+- `deps.timings` and `Run.clients` list the clients in resolution order, a client after its dependencies, instead
+  of layer by layer.
+- The Clients guide section "Layers" is "Connect order" now, with an animated SVG of the example tree connected
+  three ways: one after another as in 1.0 (0.90 s), by layer as up to 1.12 (0.60 s) and by own dependencies
+  (0.35 s). The README shows how a startup goes now with a second animation, `docs/connect-now.svg`, in every
+  language.
+- The benchmark scenarios are renamed: `wide: N independent clients`, `deep: a chain of N`, and the application
+  rows `ideal: the critical path` and `above the critical path`.
+
+### Removed
+
+- Layers: `ClientTiming.layer`, `Node.layer`, the `layer` field of log records, the `Connecting layer N` debug
+  record and the layer subgraphs of `Graph.to_mermaid()`, which now draws the clients and the arrows alone. Removing
+  public fields in a minor release departs from semantic versioning on purpose: the fields described a schedule
+  that no longer exists (ADR-0007).
+- `ClientTiming` takes everything after `name` by keyword only, so `ClientTiming("Orders", 1)`, which set the
+  layer up to 1.12, raises a `TypeError` instead of setting `connect` silently.
 
 ## [1.12.1] - 2026-10-09
 
@@ -524,8 +588,10 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.12.2...HEAD
-[1.12.2]: https://github.com/troyan-dy/nuke-di/compare/v1.12.1...v1.12.2
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.14.1...HEAD
+[1.14.1]: https://github.com/troyan-dy/nuke-di/compare/v1.14.0...v1.14.1
+[1.14.0]: https://github.com/troyan-dy/nuke-di/compare/v1.13.0...v1.14.0
+[1.13.0]: https://github.com/troyan-dy/nuke-di/compare/v1.12.1...v1.13.0
 [1.12.1]: https://github.com/troyan-dy/nuke-di/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/troyan-dy/nuke-di/compare/v1.11.5...v1.12.0
 [1.11.5]: https://github.com/troyan-dy/nuke-di/compare/v1.11.4...v1.11.5

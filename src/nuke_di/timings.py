@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from typing import Literal
 
 Outcome = Literal["ok", "failed", "timed_out", "cancelled"]
@@ -9,12 +9,13 @@ class ClientTiming:
     """
     How one client's connect() and disconnect() went in the last connect of its container.
 
-    A phase that never started has no duration and no outcome: e.g. a client of a layer
-    that was not reached because a lower layer failed, or one cancelled while waiting for CONNECT_CONCURRENCY.
+    A phase that never started has no duration and no outcome: e.g. a client still waiting for its dependencies when
+    another client failed, or one cancelled while waiting for CONNECT_CONCURRENCY.
     """
 
     name: str
-    layer: int
+    # The rest by keyword only: a second positional argument was the layer up to 1.12, and would land in `connect`
+    _: KW_ONLY
     # Seconds spent in connect(), not counting the wait for CONNECT_CONCURRENCY
     connect: float | None = None
     connect_outcome: Outcome | None = None

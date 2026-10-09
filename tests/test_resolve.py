@@ -94,7 +94,7 @@ async def test_typed_self() -> None:
 
 def chain(n: int, name: str = "Link", bottom: type[Client] | None = None) -> list[type[Client]]:
     """
-    `n` clients, each taking the one before it, the first one taking `bottom` if given: a tree `n` layers deep.
+    `n` clients, each taking the one before it, the first one taking `bottom` if given: a tree `n` clients deep.
     """
     links: list[type[Client]] = []
     below = bottom
@@ -124,7 +124,7 @@ def test_chain_deeper_than_the_recursion_limit() -> None:
         built.append(built[-1].below)
     assert [type(client) for client in reversed(built)] == links
     assert dep.connect_clients == built[::-1]
-    assert [node.layer for node in dep.graph().nodes] == list(range(2000))
+    assert [node.cls for node in dep.graph().nodes] == links
 
 
 class Unbuildable(Client):

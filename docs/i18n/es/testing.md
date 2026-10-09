@@ -92,7 +92,7 @@ Las reglas:
   registrado; `mock(cls, other)` y `override(cls)` lanzan `ConnectError: Database already has a
   replacement`.
 - **Los Reemplazos no se conectan.** Nunca se llama a su `connect()` / `disconnect()`, y no
-  participan en las [capas](clients.md#layers).
+  participan en el [orden de conexión](clients.md#connect-order).
 - **Cuánto dura un Reemplazo.** El de `mock()` se descarta con el siguiente `flush()`, incluido el
   que hay al final de `disconnect()`: una prueba que conecta el contenedor más de una vez debería usar
   `override()`, cuyo Reemplazo sobrevive a cada `flush()` hasta que termina su bloque. Una excepción dentro

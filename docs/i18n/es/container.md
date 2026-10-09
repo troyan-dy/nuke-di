@@ -11,14 +11,14 @@ cuando necesites aislamiento, por ejemplo en las pruebas.
 |----------------------|-------------------------------------------------------------------------|
 | `resolve(cls)`       | Construye `cls` y su árbol de dependencias. Idempotente para `Client`.  |
 | `inject(func)`       | Devuelve `functools.partial(func, ...)` con los argumentos de tipo cliente ya vinculados. Todo argumento de `func`, salvo `*args` / `**kwargs`, debe tener type hint. |
-| `connect()`          | Llama a `connect()` en cada cliente resuelto, capa por capa.            |
-| `disconnect()`       | Llama a `disconnect()` capa por capa en orden inverso y luego hace `flush()` del contenedor. |
+| `connect()`          | Llama a `connect()` en cada cliente resuelto, cada uno después de sus dependencias. |
+| `disconnect()`       | Llama a `disconnect()` en cada cliente, cada uno después de sus consumidores, y luego hace `flush()` del contenedor. |
 | `async with`         | `connect()` al entrar, `disconnect()` al salir.                         |
 | `mock(cls, new=None)`| Registra un Reemplazo para `cls` (por defecto, un mock con autospec) hasta el siguiente `flush()`. Debe llamarse antes de resolver `cls`. |
 | `override(cls, new=None)` | Un Reemplazo que dura lo que dura un bloque `with`, seguido de `flush()`; consulta [Pruebas](testing.md). |
 | `flush()`            | Olvida todos los clientes resueltos.                                    |
 | `timings`            | Un `ClientTiming` por cliente del último `connect()`; ver [Tiempos de arranque](clients.md#startup-timings). |
-| `graph()`            | Un `Graph` de los clientes resueltos con sus dependencias y capas, `to_mermaid()` incluido; ver [El grafo](clients.md#the-graph). |
+| `graph()`            | Un `Graph` de los clientes resueltos con sus dependencias, `to_mermaid()` incluido; ver [El grafo](clients.md#the-graph). |
 
 El resultado de `inject()` conserva el tipo de retorno de la función, mientras que sus argumentos
 restantes quedan sin tipar: un verificador de tipos no puede restar los argumentos cliente de una firma.

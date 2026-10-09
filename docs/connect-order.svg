@@ -1,0 +1,205 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="696" viewBox="0 0 760 696" role="img" aria-labelledby="t d">
+<title id="t">Connect order of six clients: one after another, by layer and by own dependencies</title>
+<desc id="d">Postgres takes 0.3 s, Kafka and Redis 0.05 s; Repository needs Postgres, Consumer (0.3 s) needs Kafka, Http (0.2 s) needs Redis. One after another, in resolution order, the startup takes 0.90 s. By layer, Consumer and Http wait for Postgres and it takes 0.60 s. By own dependencies, Consumer and Http start once Kafka and Redis have connected and it takes 0.35 s.</desc>
+<style>
+svg {
+  --surface: #fcfcfb; --border: #e4e3df; --text: #0b0b0b; --muted: #52514e; --grid: #ecebe7;
+  --bar: #2a78d6; --wait: #a3a29c; --total: #0b0b0b; --playhead: #eb6834;
+}
+@media (prefers-color-scheme: dark) {
+  svg {
+    --surface: #1a1a19; --border: #33332f; --text: #ffffff; --muted: #c3c2b7; --grid: #2a2a27;
+    --bar: #3987e5; --wait: #77766f; --total: #ffffff; --playhead: #d95926;
+  }
+}
+text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--text); }
+.bg { fill: var(--surface); stroke: var(--border); }
+.heading { font-size: 15px; font-weight: 600; }
+.title { font-size: 13px; font-weight: 600; }
+.label { font-size: 12px; }
+.dep, .tick, .note { fill: var(--muted); }
+.tick, .note { font-size: 11px; }
+.total-label { font-size: 13px; font-weight: 600; }
+.grid { stroke: var(--grid); stroke-width: 1; }
+.bar { fill: var(--bar); }
+.wait { fill: url(#hatch); stroke: var(--wait); stroke-width: 1; }
+.hatch-line { stroke: var(--wait); stroke-width: 2; }
+.barrier { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.total { stroke: var(--total); stroke-width: 2; }
+.playhead { stroke: var(--playhead); stroke-width: 2; animation: sweep 12.0s linear infinite; }
+rect.bar, rect.wait { transform-box: fill-box; transform-origin: left center; }
+[class*=" g"], [class*=" a"] { animation-duration: 12.0s; animation-timing-function: linear; animation-iteration-count: infinite; }
+@keyframes sweep {
+  0% { transform: translateX(0); opacity: 1 }
+  75.00% { transform: translateX(492.0px); opacity: 1 }
+  75.01%, 100% { transform: translateX(492.0px); opacity: 0 }
+}
+@keyframes g1 { 0%, 0.00% { transform: scaleX(0) } 25.00%, 100% { transform: scaleX(1) } }
+.g1 { animation-name: g1 }
+@keyframes g2 { 0%, 0.00% { transform: scaleX(0) } 25.00%, 100% { transform: scaleX(1) } }
+.g2 { animation-name: g2 }
+@keyframes g3 { 0%, 25.00% { transform: scaleX(0) } 29.17%, 100% { transform: scaleX(1) } }
+.g3 { animation-name: g3 }
+@keyframes g4 { 0%, 0.00% { transform: scaleX(0) } 54.17%, 100% { transform: scaleX(1) } }
+.g4 { animation-name: g4 }
+@keyframes g5 { 0%, 54.17% { transform: scaleX(0) } 58.33%, 100% { transform: scaleX(1) } }
+.g5 { animation-name: g5 }
+@keyframes a6 { 0%, 25.00% { opacity: 0 } 25.42%, 100% { opacity: 1 } }
+.a6 { animation-name: a6 }
+@keyframes g7 { 0%, 29.17% { transform: scaleX(0) } 54.17%, 100% { transform: scaleX(1) } }
+.g7 { animation-name: g7 }
+@keyframes g8 { 0%, 58.33% { transform: scaleX(0) } 75.00%, 100% { transform: scaleX(1) } }
+.g8 { animation-name: g8 }
+@keyframes a9 { 0%, 75.00% { opacity: 0 } 75.42%, 100% { opacity: 1 } }
+.a9 { animation-name: a9 }
+@keyframes a10 { 0%, 75.00% { opacity: 0 } 75.42%, 100% { opacity: 1 } }
+.a10 { animation-name: a10 }
+@keyframes a11 { 0%, 25.00% { opacity: 0 } 25.42%, 100% { opacity: 1 } }
+.a11 { animation-name: a11 }
+@keyframes a12 { 0%, 25.00% { opacity: 0 } 25.42%, 100% { opacity: 1 } }
+.a12 { animation-name: a12 }
+@keyframes g13 { 0%, 0.00% { transform: scaleX(0) } 25.00%, 100% { transform: scaleX(1) } }
+.g13 { animation-name: g13 }
+@keyframes g14 { 0%, 0.00% { transform: scaleX(0) } 4.17%, 100% { transform: scaleX(1) } }
+.g14 { animation-name: g14 }
+@keyframes g15 { 0%, 0.00% { transform: scaleX(0) } 4.17%, 100% { transform: scaleX(1) } }
+.g15 { animation-name: g15 }
+@keyframes a16 { 0%, 25.00% { opacity: 0 } 25.42%, 100% { opacity: 1 } }
+.a16 { animation-name: a16 }
+@keyframes g17 { 0%, 4.17% { transform: scaleX(0) } 25.00%, 100% { transform: scaleX(1) } }
+.g17 { animation-name: g17 }
+@keyframes g18 { 0%, 25.00% { transform: scaleX(0) } 50.00%, 100% { transform: scaleX(1) } }
+.g18 { animation-name: g18 }
+@keyframes g19 { 0%, 4.17% { transform: scaleX(0) } 25.00%, 100% { transform: scaleX(1) } }
+.g19 { animation-name: g19 }
+@keyframes g20 { 0%, 25.00% { transform: scaleX(0) } 41.67%, 100% { transform: scaleX(1) } }
+.g20 { animation-name: g20 }
+@keyframes a21 { 0%, 50.00% { opacity: 0 } 50.42%, 100% { opacity: 1 } }
+.a21 { animation-name: a21 }
+@keyframes a22 { 0%, 50.00% { opacity: 0 } 50.42%, 100% { opacity: 1 } }
+.a22 { animation-name: a22 }
+@keyframes g23 { 0%, 0.00% { transform: scaleX(0) } 25.00%, 100% { transform: scaleX(1) } }
+.g23 { animation-name: g23 }
+@keyframes g24 { 0%, 0.00% { transform: scaleX(0) } 4.17%, 100% { transform: scaleX(1) } }
+.g24 { animation-name: g24 }
+@keyframes g25 { 0%, 0.00% { transform: scaleX(0) } 4.17%, 100% { transform: scaleX(1) } }
+.g25 { animation-name: g25 }
+@keyframes a26 { 0%, 25.00% { opacity: 0 } 25.42%, 100% { opacity: 1 } }
+.a26 { animation-name: a26 }
+@keyframes g27 { 0%, 4.17% { transform: scaleX(0) } 29.17%, 100% { transform: scaleX(1) } }
+.g27 { animation-name: g27 }
+@keyframes g28 { 0%, 4.17% { transform: scaleX(0) } 20.83%, 100% { transform: scaleX(1) } }
+.g28 { animation-name: g28 }
+@keyframes a29 { 0%, 29.17% { opacity: 0 } 29.58%, 100% { opacity: 1 } }
+.a29 { animation-name: a29 }
+@keyframes a30 { 0%, 29.17% { opacity: 0 } 29.58%, 100% { opacity: 1 } }
+.a30 { animation-name: a30 }
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; }
+  .playhead { display: none; }
+}
+</style>
+<defs>
+  <pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+    <line class="hatch-line" x1="0" y1="0" x2="0" y2="6"/>
+  </pattern>
+</defs>
+<rect class="bg" x="0.5" y="0.5" width="759" height="695" rx="8"/>
+<text class="heading" x="16" y="26">The same six clients, connected three ways</text>
+<text class="title" x="16" y="60">One after another, 1.0</text>
+<line class="grid" x1="204.0" y1="70" x2="204.0" y2="218"/>
+<line class="grid" x1="258.7" y1="70" x2="258.7" y2="218"/>
+<line class="grid" x1="313.3" y1="70" x2="313.3" y2="218"/>
+<line class="grid" x1="368.0" y1="70" x2="368.0" y2="218"/>
+<line class="grid" x1="422.7" y1="70" x2="422.7" y2="218"/>
+<line class="grid" x1="477.3" y1="70" x2="477.3" y2="218"/>
+<line class="grid" x1="532.0" y1="70" x2="532.0" y2="218"/>
+<line class="grid" x1="586.7" y1="70" x2="586.7" y2="218"/>
+<line class="grid" x1="641.3" y1="70" x2="641.3" y2="218"/>
+<line class="grid" x1="696.0" y1="70" x2="696.0" y2="218"/>
+<text class="label" x="196" y="86" text-anchor="end">Postgres</text>
+<rect class="bar g1" x="204.0" y="74" width="164.0" height="14" rx="3"/>
+<text class="label" x="196" y="110" text-anchor="end">Kafka</text>
+<rect class="wait g2" x="204.0" y="98" width="164.0" height="14" rx="3"/>
+<rect class="bar g3" x="368.0" y="98" width="27.3" height="14" rx="3"/>
+<text class="label" x="196" y="134" text-anchor="end">Redis</text>
+<rect class="wait g4" x="204.0" y="122" width="355.3" height="14" rx="3"/>
+<rect class="bar g5" x="559.3" y="122" width="27.3" height="14" rx="3"/>
+<text class="label" x="196" y="158" text-anchor="end">Repository<tspan class="dep"> ← Postgres</tspan></text>
+<rect class="bar a6" x="366.0" y="146" width="4" height="14" rx="2"/>
+<text class="label" x="196" y="182" text-anchor="end">Consumer<tspan class="dep"> ← Kafka</tspan></text>
+<rect class="bar g7" x="395.3" y="170" width="164.0" height="14" rx="3"/>
+<text class="label" x="196" y="206" text-anchor="end">Http<tspan class="dep"> ← Redis</tspan></text>
+<rect class="bar g8" x="586.7" y="194" width="109.3" height="14" rx="3"/>
+<line class="total a9" x1="696.0" y1="48" x2="696.0" y2="220"/>
+<text class="total-label a10" x="701.0" y="60">0.90 s</text>
+<text class="title" x="16" y="264">By layer, 1.1 to 1.12</text>
+<line class="grid" x1="204.0" y1="274" x2="204.0" y2="422"/>
+<line class="grid" x1="258.7" y1="274" x2="258.7" y2="422"/>
+<line class="grid" x1="313.3" y1="274" x2="313.3" y2="422"/>
+<line class="grid" x1="368.0" y1="274" x2="368.0" y2="422"/>
+<line class="grid" x1="422.7" y1="274" x2="422.7" y2="422"/>
+<line class="grid" x1="477.3" y1="274" x2="477.3" y2="422"/>
+<line class="grid" x1="532.0" y1="274" x2="532.0" y2="422"/>
+<line class="grid" x1="586.7" y1="274" x2="586.7" y2="422"/>
+<line class="grid" x1="641.3" y1="274" x2="641.3" y2="422"/>
+<line class="grid" x1="696.0" y1="274" x2="696.0" y2="422"/>
+<line class="barrier a11" x1="368.0" y1="272" x2="368.0" y2="424"/>
+<text class="note a12" x="372.0" y="436">the next layer starts after Postgres</text>
+<text class="label" x="196" y="290" text-anchor="end">Postgres</text>
+<rect class="bar g13" x="204.0" y="278" width="164.0" height="14" rx="3"/>
+<text class="label" x="196" y="314" text-anchor="end">Kafka</text>
+<rect class="bar g14" x="204.0" y="302" width="27.3" height="14" rx="3"/>
+<text class="label" x="196" y="338" text-anchor="end">Redis</text>
+<rect class="bar g15" x="204.0" y="326" width="27.3" height="14" rx="3"/>
+<text class="label" x="196" y="362" text-anchor="end">Repository<tspan class="dep"> ← Postgres</tspan></text>
+<rect class="bar a16" x="366.0" y="350" width="4" height="14" rx="2"/>
+<text class="label" x="196" y="386" text-anchor="end">Consumer<tspan class="dep"> ← Kafka</tspan></text>
+<rect class="wait g17" x="231.3" y="374" width="136.7" height="14" rx="3"/>
+<rect class="bar g18" x="368.0" y="374" width="164.0" height="14" rx="3"/>
+<text class="label" x="196" y="410" text-anchor="end">Http<tspan class="dep"> ← Redis</tspan></text>
+<rect class="wait g19" x="231.3" y="398" width="136.7" height="14" rx="3"/>
+<rect class="bar g20" x="368.0" y="398" width="109.3" height="14" rx="3"/>
+<line class="total a21" x1="532.0" y1="252" x2="532.0" y2="424"/>
+<text class="total-label a22" x="537.0" y="264">0.60 s</text>
+<text class="title" x="16" y="468">By own dependencies, from 1.13</text>
+<line class="grid" x1="204.0" y1="478" x2="204.0" y2="626"/>
+<line class="grid" x1="258.7" y1="478" x2="258.7" y2="626"/>
+<line class="grid" x1="313.3" y1="478" x2="313.3" y2="626"/>
+<line class="grid" x1="368.0" y1="478" x2="368.0" y2="626"/>
+<line class="grid" x1="422.7" y1="478" x2="422.7" y2="626"/>
+<line class="grid" x1="477.3" y1="478" x2="477.3" y2="626"/>
+<line class="grid" x1="532.0" y1="478" x2="532.0" y2="626"/>
+<line class="grid" x1="586.7" y1="478" x2="586.7" y2="626"/>
+<line class="grid" x1="641.3" y1="478" x2="641.3" y2="626"/>
+<line class="grid" x1="696.0" y1="478" x2="696.0" y2="626"/>
+<text class="label" x="196" y="494" text-anchor="end">Postgres</text>
+<rect class="bar g23" x="204.0" y="482" width="164.0" height="14" rx="3"/>
+<text class="label" x="196" y="518" text-anchor="end">Kafka</text>
+<rect class="bar g24" x="204.0" y="506" width="27.3" height="14" rx="3"/>
+<text class="label" x="196" y="542" text-anchor="end">Redis</text>
+<rect class="bar g25" x="204.0" y="530" width="27.3" height="14" rx="3"/>
+<text class="label" x="196" y="566" text-anchor="end">Repository<tspan class="dep"> ← Postgres</tspan></text>
+<rect class="bar a26" x="366.0" y="554" width="4" height="14" rx="2"/>
+<text class="label" x="196" y="590" text-anchor="end">Consumer<tspan class="dep"> ← Kafka</tspan></text>
+<rect class="bar g27" x="231.3" y="578" width="164.0" height="14" rx="3"/>
+<text class="label" x="196" y="614" text-anchor="end">Http<tspan class="dep"> ← Redis</tspan></text>
+<rect class="bar g28" x="231.3" y="602" width="109.3" height="14" rx="3"/>
+<line class="total a29" x1="395.3" y1="456" x2="395.3" y2="628"/>
+<text class="total-label a30" x="400.3" y="468">0.35 s</text>
+<text class="tick" x="204.0" y="652" text-anchor="middle">0.0 s</text>
+<text class="tick" x="258.7" y="652" text-anchor="middle">0.1 s</text>
+<text class="tick" x="313.3" y="652" text-anchor="middle">0.2 s</text>
+<text class="tick" x="368.0" y="652" text-anchor="middle">0.3 s</text>
+<text class="tick" x="422.7" y="652" text-anchor="middle">0.4 s</text>
+<text class="tick" x="477.3" y="652" text-anchor="middle">0.5 s</text>
+<text class="tick" x="532.0" y="652" text-anchor="middle">0.6 s</text>
+<text class="tick" x="586.7" y="652" text-anchor="middle">0.7 s</text>
+<text class="tick" x="641.3" y="652" text-anchor="middle">0.8 s</text>
+<text class="tick" x="696.0" y="652" text-anchor="middle">0.9 s</text>
+<rect class="bar" x="16" y="668" width="22" height="12" rx="3"/>
+<text class="note" x="44" y="678">connect()</text>
+<rect class="wait" x="130" y="668" width="22" height="12" rx="3"/>
+<text class="note" x="158" y="678">ready to connect, waiting for its turn</text>
+<line class="playhead" x1="204" y1="66" x2="204" y2="630"/>
+</svg>

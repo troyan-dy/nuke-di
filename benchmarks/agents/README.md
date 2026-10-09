@@ -47,7 +47,7 @@ A run passes when all four do:
 
 ## Results
 
-2026-10-09, Claude Code 2.1.283, `--model sonnet`, 6 tasks × 3 runs per condition, nuke-di 1.12.2
+2026-10-09, Claude Code 2.1.283, `--model sonnet`, 6 tasks × 3 runs per condition, on the code of 1.12.1
 ([raw results](results/2026-10-09-sonnet.json)):
 
 | Task | baseline | skill | agents-md |

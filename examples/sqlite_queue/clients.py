@@ -53,7 +53,7 @@ class TaskQueue(Client):
         self._db = db
 
     async def connect(self) -> None:
-        # Database is connected first: it is a dependency, so it is in an earlier layer
+        # Database is connected first: it is a dependency
         self._db.connection.execute(
             "CREATE TABLE IF NOT EXISTS tasks ("
             " id INTEGER PRIMARY KEY AUTOINCREMENT,"

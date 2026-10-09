@@ -170,7 +170,7 @@ class Shape(Protocol):
 
 def wide(n: int, strings: bool = False) -> Tree:
     """
-    One root that declares `n - 1` clients with no dependencies: two layers.
+    One root that declares `n - 1` clients with no dependencies: a tree two clients deep.
     """
     module = new_module(strings)
     leaves = [client(f"Wide{number}", module=module) for number in range(n - 1)]
@@ -180,7 +180,7 @@ def wide(n: int, strings: bool = False) -> Tree:
 
 def deep(n: int, strings: bool = False) -> Tree:
     """
-    A chain of `n` clients: `n` layers.
+    A chain of `n` clients: a tree `n` clients deep.
     """
     module = new_module(strings)
     clients: list[type[Client]] = []
@@ -192,7 +192,7 @@ def deep(n: int, strings: bool = False) -> Tree:
 def mixed(n: int, strings: bool = False) -> Tree:
     """
     A pyramid of `n` clients, 1, 2, 4, ... wide from the top; every client depends on two or three of the
-    level below, so the levels share their dependencies like a diamond. About log2(n) layers.
+    row below, so the rows share their dependencies like a diamond. About log2(n) clients deep.
     """
     widths = []
     total, width = 0, 1
@@ -332,8 +332,8 @@ def connect_sample(
     return library[-1] - direct[-1]
 
 
-def one_layer(n: int) -> list[type[Client]]:
-    return [client(f"Layer{number}") for number in range(n)]
+def independent(n: int) -> list[type[Client]]:
+    return [client(f"Independent{number}") for number in range(n)]
 
 
 def chain(n: int) -> list[type[Client]]:
@@ -341,8 +341,8 @@ def chain(n: int) -> list[type[Client]]:
 
 
 # An application: clients whose connect() and disconnect() take the time a real connection does, in a tree
-# with slack between its branches, so the wall time is what a startup and a shutdown take and the layers
-# of the container, which wait for the slowest client of each, show against the critical path (#28)
+# with slack between its branches, so the wall time is what a startup and a shutdown take, against the critical
+# path: a client that waited for more than its own dependencies would show (#28)
 
 
 class Sleeper(Client):
@@ -438,9 +438,9 @@ async def after(
 
 async def critical_path(clients: list[Sleeper]) -> float:
     """
-    The same coroutines without the layers: every connect() starts as soon as the client's dependencies are
+    The same coroutines scheduled by hand: every connect() starts as soon as the client's dependencies are
     connected and every disconnect() as soon as its consumers are disconnected, so the wall time is the
-    longest chain of the tree, what a schedule by dependency rather than by layer would give.
+    longest chain of the tree, the least any schedule can take.
     """
     consumers: dict[int, list[Sleeper]] = {id(client): [] for client in clients}
     for client in clients:
@@ -463,7 +463,7 @@ async def critical_path(clients: list[Sleeper]) -> float:
 
 
 def connect_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
-    for shape, build in {"wide: N in one layer": one_layer, "deep: N layers": chain}.items():
+    for shape, build in {"wide: N independent clients": independent, "deep: a chain of N": chain}.items():
         for n in sizes:
             library: list[float] = []
             direct: list[float] = []
@@ -475,11 +475,10 @@ def connect_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
 
     # The sleeps are the figure here, not the scheduling, so nothing is per client
     library, direct = [], []
-    lost = collect(partial(connect_sample, [Api], library, direct, critical_path), repeat)
+    above = collect(partial(connect_sample, [Api], library, direct, critical_path), repeat)
     yield Result("connect() + disconnect(), wall time", APPLICATION, 8, library[1:], per_client=False)
-    ideal_path = "connect() + disconnect(), ideal: the critical path, no layer barriers"
-    yield Result(ideal_path, APPLICATION, 8, direct[1:], per_client=False)
-    yield Result("connect() + disconnect(), lost at the layer barriers", APPLICATION, 8, lost, per_client=False)
+    yield Result("connect() + disconnect(), ideal: the critical path", APPLICATION, 8, direct[1:], per_client=False)
+    yield Result("connect() + disconnect(), above the critical path", APPLICATION, 8, above, per_client=False)
 
 
 class Database(Client):

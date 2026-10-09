@@ -92,7 +92,7 @@ As regras:
   registrado; `mock(cls, other)` e `override(cls)` lançam `ConnectError: Database already has a
   replacement`.
 - **Substitutos não são conectados.** Os seus `connect()` / `disconnect()` nunca são chamados, e eles
-  não fazem parte das [camadas](clients.md#layers).
+  não fazem parte da [ordem de conexão](clients.md#connect-order).
 - **Quanto tempo um substituto dura.** O de `mock()` é descartado pelo próximo `flush()`, inclusive o
   do final de `disconnect()`: um teste que conecta o container mais de uma vez deve usar
   `override()`, cujo substituto sobrevive a todos os `flush()` até o fim do bloco. Uma exceção dentro

@@ -11,8 +11,8 @@ The simplest dependency injection for async Python projects.
 
 Dependencies are declared with plain type hints. `nuke-di` builds the dependency tree,
 creates every client once and drives its async lifecycle: `connect()` on startup and
-`disconnect()` on shutdown. Independent clients start concurrently, layer by layer,
-from the deepest dependencies up.
+`disconnect()` on shutdown. Every client starts as soon as its own dependencies have
+connected, concurrently with every other client that is ready.
 
 On top of that, one decorator turns an async function into a process with command-line
 arguments, and FastAPI, Litestar and FastStream handlers take clients by type hint the same way.
@@ -95,9 +95,9 @@ What happened:
   scopes to configure. A third-party object becomes a dependency by wrapping it in such a class.
 - **Type hints are the wiring.** A client asks for its dependencies in `__init__`, a function in
   its signature. Nothing else names them, so renaming or adding a dependency is an ordinary refactoring.
-- **Concurrent startup, ordered shutdown.** Clients connect layer by layer, from the deepest
-  dependencies up, and the clients of one layer connect concurrently. They disconnect in reverse,
-  and a failing `disconnect()` does not stop the others.
+- **Concurrent startup, ordered shutdown.** A client connects as soon as its own dependencies have,
+  concurrently with every other client that is ready, so a slow client holds back only the clients that
+  need it. They disconnect in reverse, and a failing `disconnect()` does not stop the others.
 - **Fail fast.** A tree that cannot be built fails before anything connects, naming the argument and
   the path to it, and `mypy` with the
   [plugin](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#checking-the-tree-with-mypy)
@@ -108,6 +108,13 @@ What happened:
   for one test; the code under test does not change.
 - **No runtime dependencies.** The core uses only the standard library; the framework
   integrations are extras.
+
+How a startup goes, on the example of the
+[Clients guide](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#connect-order): `Consumer` needs
+only `Kafka`, so it does not wait for the slow `Postgres`, and the startup takes as long as its longest chain of
+dependencies.
+
+![Six clients connecting by their own dependencies: Consumer and Http start once Kafka and Redis have connected, the startup takes 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/66f74f76407da320cfc97ef22b761d85e298eddd/docs/connect-now.svg)
 
 ## Performance
 
@@ -137,8 +144,8 @@ long per request. With string annotations dependency-injector, which reads no an
 On a cached root `nuke-di` is level with wireup, and the Cython `get()` of dependency-injector wins by about
 50 ns, a difference no application notices.
 
-On its own, `resolve()` costs 4–7 µs per client, so a tree of 1000 clients is built in under 6 ms, and
-`connect()` adds 9–15 µs per client in a layer. [docs/benchmarks.md](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md) explains every
+On its own, `resolve()` costs 3.5–6.3 µs per client, so a tree of 1000 clients is built in under 5.5 ms,
+and `connect()` adds 13–18 µs per client. [docs/benchmarks.md](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md) explains every
 scenario, records the baseline on Python 3.11–3.14 and has the whole comparison with its method.
 
 ## A job with command-line arguments
@@ -348,13 +355,14 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
 ## Documentation
 
 - [Clients](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md): `Client` and `NotSingletonClient`, the lifecycle, dataclass clients,
-  layers, startup timings, the dependency graph, connect and resolution errors
+  connect order, startup timings, the dependency graph, connect and resolution errors
 - [The container](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/container.md): `Dependencies` and the global `DI`, `resolve()`, `inject()`,
   `mock()`, `override()`
 - [Workers and jobs](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md): `@job` and `@worker`, command-line parameters,
   `Shutdown`, the grace period, background tasks, exit codes, hooks, Kubernetes
 - Frameworks: [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md),
-  [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md)
+  [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), and
+  [writing an integration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/integrations.md) for another framework with `nuke_di.integration`
 - [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md): `mock()`, `override()`, the pytest fixtures, checking the wiring
 - [Configuration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/configuration.md): timeouts, concurrency and the grace period
 - [Errors](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/errors.md): every exception and when it is raised
@@ -493,48 +501,73 @@ True
 
 It accepts the same keyword arguments as `dataclasses.dataclass`.
 
-## Layers
+## Connect order
 
-Clients connect concurrently in layers. Clients without dependencies form layer 0;
-every other client sits one layer above its highest dependency. A layer starts only
-after the previous one has connected, so a client never connects before its own
-dependencies. `disconnect()` walks the layers in reverse.
+A client connects as soon as its own dependencies have, concurrently with every other client
+that is ready, so a slow client holds back only the clients that need it. `disconnect()` goes
+the other way: a client disconnects as soon as the clients that depend on it have.
 
 ```python
+# connect_order.py
 import asyncio
 import logging
+import time
 
 from nuke_di import Client, Dependencies
 
-logging.basicConfig(level=logging.DEBUG, format="%(message)s")
-logging.getLogger("asyncio").setLevel(logging.WARNING)  # keep only the nuke_di records
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+started = time.perf_counter()
+
+
+async def connecting(name: str, seconds: float) -> None:
+    await asyncio.sleep(seconds)  # a real client opens its connection here
+    print(f"{time.perf_counter() - started:.2f}s  {name} connected")
 
 
 class Postgres(Client):
     async def connect(self) -> None:
-        await asyncio.sleep(0.2)
-        print("  postgres ready")
+        await connecting("Postgres", 0.3)
+
+
+class Kafka(Client):
+    async def connect(self) -> None:
+        await connecting("Kafka", 0.05)
 
 
 class Redis(Client):
     async def connect(self) -> None:
-        await asyncio.sleep(0.1)
-        print("  redis ready")
+        await connecting("Redis", 0.05)
 
 
-class Payments(Client):
+class Repository(Client):
     def __init__(self, pg: Postgres) -> None:
         self.pg = pg
 
 
-class Checkout(Client):
-    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
-        self.pg, self.redis, self.payments = pg, redis, payments
+class Consumer(Client):
+    def __init__(self, kafka: Kafka) -> None:
+        self.kafka = kafka
+
+    async def connect(self) -> None:
+        await connecting("Consumer", 0.3)
+
+
+class Http(Client):
+    def __init__(self, redis: Redis) -> None:
+        self.redis = redis
+
+    async def connect(self) -> None:
+        await connecting("Http", 0.2)
+
+
+class App(Client):
+    def __init__(self, repository: Repository, consumer: Consumer, http: Http) -> None:
+        self.repository, self.consumer, self.http = repository, consumer, http
 
 
 async def main() -> None:
     deps = Dependencies()
-    deps.resolve(Checkout)
+    deps.resolve(App)
     async with deps:
         print("-- application is running --")
 
@@ -542,47 +575,31 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-The `DEBUG` log of the `nuke_di` logger shows the layers:
-
-```text
-Resolving dependency "Checkout"
-Resolving dependency "Postgres"
-Resolving dependency "Redis"
-Resolving dependency "Payments"
-Connecting layer 0: Postgres, Redis
-Connecting client Postgres
-Connecting client Redis
-  redis ready
-Connected client Redis in 0.101s
-  postgres ready
-Connected client Postgres in 0.201s
-Connecting layer 1: Payments
-Connecting client Payments
-Connected client Payments in 0.000s
-Connecting layer 2: Checkout
-Connecting client Checkout
-Connected client Checkout in 0.000s
-Connected 4 clients in 3 layers in 0.20s (slowest: Postgres 0.20s, Redis 0.10s, Payments 0.00s)
+```console
+$ python connect_order.py
+0.05s  Kafka connected
+0.05s  Redis connected
+0.25s  Http connected
+0.30s  Postgres connected
+0.35s  Consumer connected
+INFO Connected 7 clients in 0.35s (slowest: Postgres 0.30s, Consumer 0.30s, Http 0.20s)
 -- application is running --
-Disconnecting client Checkout
-Disconnected client Checkout in 0.000s
-Disconnecting client Payments
-Disconnected client Payments in 0.000s
-Disconnecting client Postgres
-Disconnected client Postgres in 0.000s
-Disconnecting client Redis
-Disconnected client Redis in 0.000s
 ```
 
-```text
-Checkout(pg, redis, payments)    layer 2
-Payments(pg)                     layer 1
-Postgres, Redis                  layer 0  <- connect together, in 0.2s rather than 0.3s
-```
+`Consumer` needs only `Kafka`, so it starts at 0.05s while `Postgres` is still connecting, and
+the startup takes as long as its longest chain of dependencies, `Kafka` → `Consumer`. Up to
+1.12 the clients connected in layers, each waiting for the slowest client of the layer below,
+which took 0.60s here, and in 1.0 one after another in resolution order, which took 0.90s:
+
+![The six clients of the example connected one after another in 0.90s, by layer in 0.60s and by their own dependencies in 0.35s](https://github.com/troyan-dy/nuke-di/blob/master/docs/connect-order.svg)
+
+With `DEBUG` on, the `nuke_di` logger names every client as it starts and finishes, with how
+many have connected so far: `Connecting client Consumer (2/7 connected)`, and the same for
+`disconnect()`.
 
 Only dependencies declared in `__init__` are ordered. If a client needs another one to be
 connected first, declare it as a dependency. Set `CONNECT_CONCURRENCY` to limit how many
-clients connect at once.
+clients connect at once; a client waiting for its dependencies does not take a slot.
 
 ## Startup timings
 
@@ -627,7 +644,7 @@ async def main() -> None:
 
     for t in deps.timings:
         print(
-            f"{t.name:<8} layer {t.layer}  connect {t.connect:.2f}s {t.connect_outcome:<3}  "
+            f"{t.name:<8} connect {t.connect:.2f}s {t.connect_outcome:<3}  "
             f"disconnect {t.disconnect:.2f}s {t.disconnect_outcome}"
         )
 
@@ -637,39 +654,37 @@ asyncio.run(main())
 
 ```console
 $ python startup.py
-INFO Connected 3 clients in 2 layers in 1.60s (slowest: Kafka 1.60s, Postgres 0.20s, Orders 0.00s)
+INFO Connected 3 clients in 1.60s (slowest: Kafka 1.60s, Postgres 0.20s, Orders 0.00s)
 WARNING Client Kafka took 1.60s to connect, more than half of CONNECT_TIMEOUT_SECONDS (3s)
 -- application is running --
-Postgres layer 0  connect 0.20s ok   disconnect 0.00s ok
-Kafka    layer 0  connect 1.60s ok   disconnect 0.30s ok
-Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
+Postgres connect 0.20s ok   disconnect 0.00s ok
+Kafka    connect 1.60s ok   disconnect 0.30s ok
+Orders   connect 0.00s ok   disconnect 0.00s ok
 ```
 
-`deps.timings` holds one `ClientTiming` per client of the last `connect()`, in connect
-order. It outlives `disconnect()`, so it can be read once the container has stopped. In a
-FastAPI app, the lifespan you pass to `FastAPI()` runs inside the connected container, so it
-sees the connect timings. A worker or a job gets the same list as
-[`Run.clients`](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md#startup-metrics-and-structured-logs).
+`deps.timings` holds one `ClientTiming` per client of the last `connect()`, in resolution
+order, so a client comes after its dependencies. It outlives `disconnect()`, so it can be read
+once the container has stopped. In a FastAPI app, the lifespan you pass to `FastAPI()` runs
+inside the connected container, so it sees the connect timings. A worker or a job gets the same
+list as [`Run.clients`](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md#startup-metrics-and-structured-logs).
 
 | `ClientTiming` field | Value |
 |----------------------|-------|
 | `name`               | The class name of the client |
-| `layer`              | The [layer](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#layers) of the client |
 | `connect`            | Seconds spent in `connect()`, not counting the wait for `CONNECT_CONCURRENCY`; `None` if `connect()` never ran |
 | `connect_outcome`    | `"ok"`, `"failed"`, `"timed_out"`, `"cancelled"`, or `None` if `connect()` never started |
 | `disconnect`, `disconnect_outcome` | The same for `disconnect()`; `None` until the client disconnects |
 
-When a client fails to connect, the clients of its layer that are still connecting end
-up `"cancelled"`, the layers above keep `None`, and the clients that had connected are
-rolled back, so they get a `disconnect_outcome`. The library only measures: exporting the
+When a client fails to connect, the clients still connecting end up `"cancelled"`, the
+clients still waiting for their dependencies keep `None`, and the clients that had connected
+are rolled back, so they get a `disconnect_outcome`. The library only measures: exporting the
 timings as metrics or spans is up to your code.
 
 ## The graph
 
-The dependency graph exists only inside a running process: the `DEBUG` log above is the only
-place that shows which clients an entrypoint pulls in and in which layer each one connects.
-`graph()` returns the same picture as data, before `connect()` or after it. The clients of the
-[Layers](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#layers) example, without their `connect()`:
+The dependency graph exists only inside a running process: the `DEBUG` log is the only place
+that shows which clients an entrypoint pulls in and what each one waits for. `graph()` returns
+the same picture as data, before `connect()` or after it:
 
 ```python
 # graph.py
@@ -698,29 +713,23 @@ deps = Dependencies()
 deps.resolve(Checkout)
 nodes = {node.name: node for node in deps.graph().nodes}
 for node in nodes.values():
-    print(f"{node.name:<8} layer {node.layer}  needs {list(node.dependencies)}")
+    print(f"{node.name:<8} needs {list(node.dependencies)}")
 print("shared:", nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"])
 print(deps.graph().to_mermaid())
 ```
 
 ```console
 $ python graph.py
-Postgres layer 0  needs []
-Redis    layer 0  needs []
-Payments layer 1  needs ['pg']
-Checkout layer 2  needs ['pg', 'redis', 'payments']
+Postgres needs []
+Redis    needs []
+Payments needs ['pg']
+Checkout needs ['pg', 'redis', 'payments']
 shared: True
 graph BT
-  subgraph layer0 [layer 0]
-    Postgres
-    Redis
-  end
-  subgraph layer1 [layer 1]
-    Payments
-  end
-  subgraph layer2 [layer 2]
-    Checkout
-  end
+  Postgres
+  Redis
+  Payments
+  Checkout
   Postgres --> Payments
   Postgres --> Checkout
   Redis --> Checkout
@@ -732,16 +741,10 @@ its architecture without a running process:
 
 ```mermaid
 graph BT
-  subgraph layer0 [layer 0]
-    Postgres
-    Redis
-  end
-  subgraph layer1 [layer 1]
-    Payments
-  end
-  subgraph layer2 [layer 2]
-    Checkout
-  end
+  Postgres
+  Redis
+  Payments
+  Checkout
   Postgres --> Payments
   Postgres --> Checkout
   Redis --> Checkout
@@ -757,20 +760,19 @@ its dependencies. It is a snapshot: `flush()` empties it, apart from the Replace
 | `name`         | The class name of the client |
 | `cls`          | The class the consumers asked for |
 | `singleton`    | `True` for a `Client`, `False` for a `NotSingletonClient` |
-| `layer`        | The [layer](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#layers) of the client; `None` for a Replacement, which is never connected |
 | `replacement`  | The object registered with `mock()` or `override()` in place of `cls`; `None` for a real client |
 | `dependencies` | The clients of the `__init__` arguments, by argument name |
 
 A `NotSingletonClient` gets one node per instance, all with the same name; `to_mermaid()` numbers
-them from the second one (`Session`, `Session_2`). A Replacement is drawn outside the layers with a
+them from the second one (`Session`, `Session_2`). A Replacement is drawn with a
 dashed border and the name of the object in its place: `Postgres: AsyncMock`. Nodes compare by
 identity, so the `shared: True` above says that `Checkout` and `Payments` got the same `Postgres`.
 
 ## When a client fails to connect
 
-If a client fails to connect, the rest of its layer is cancelled and the next layers never
-start. The clients that already connected are disconnected, layers in reverse, and the
-container is left disconnected and empty:
+If a client fails to connect, every client still connecting is cancelled and the clients
+waiting for it never start. The clients that already connected are disconnected, each after
+the clients that depend on it, and the container is left disconnected and empty:
 
 ```python
 import asyncio
@@ -822,7 +824,7 @@ connected: False
 
 The same cleanup happens when `connect()` itself is cancelled. `ConnectError` derives from
 `SystemExit`, so an application that does not catch it stops, which is usually what you want
-when a dependency is down. Mocked clients are not connected and do not affect the layers.
+when a dependency is down. Mocked clients are not connected, and nothing waits for them.
 
 ## When the tree cannot be built
 
@@ -1003,14 +1005,14 @@ when you need isolation, e.g. in tests.
 |----------------------|-------------------------------------------------------------------------|
 | `resolve(cls)`       | Build `cls` and its dependency tree. Idempotent for `Client`.           |
 | `inject(func)`       | Return `functools.partial(func, ...)` with client arguments bound. Every argument of `func` except `*args` / `**kwargs` must have a type hint. |
-| `connect()`          | Call `connect()` on every resolved client, layer by layer.              |
-| `disconnect()`       | Call `disconnect()` layer by layer in reverse, then `flush()` the container. |
+| `connect()`          | Call `connect()` on every resolved client, each after its dependencies. |
+| `disconnect()`       | Call `disconnect()` on every client, each after its consumers, then `flush()` the container. |
 | `async with`         | `connect()` on enter, `disconnect()` on exit.                           |
 | `mock(cls, new=None)`| Register a Replacement for `cls` (an autospec mock by default) until the next `flush()`. Must come before `cls` is resolved. |
 | `override(cls, new=None)` | A Replacement for the duration of a `with` block, then `flush()`; see [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md). |
 | `flush()`            | Forget every resolved client.                                           |
 | `timings`            | One `ClientTiming` per client of the last `connect()`; see [Startup timings](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#startup-timings). |
-| `graph()`            | A `Graph` of the resolved clients with their dependencies and layers, `to_mermaid()` included; see [The graph](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#the-graph). |
+| `graph()`            | A `Graph` of the resolved clients with their dependencies, `to_mermaid()` included; see [The graph](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#the-graph). |
 
 The result of `inject()` keeps the return type of the function, while its remaining arguments are
 untyped: a type checker cannot subtract the client arguments from a signature.
@@ -1174,7 +1176,7 @@ $ python -m app.jobs.sync
 INFO  nuke_di.run: Starting job app.jobs.sync.sync
 postgres: connected
 warehouse: connected
-INFO  nuke_di.core: Connected 4 clients in 1 layer in 0.00s (slowest: Warehouse 0.00s, Postgres 0.00s, Shutdown 0.00s)
+INFO  nuke_di.core: Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)
 postgres: upserted 3 rows into users
 postgres: upserted 3 rows into orders
 postgres: disconnected
@@ -1466,8 +1468,8 @@ A signal that arrives while the clients are still connecting stops the startup, 
 clients that already connected are disconnected.
 
 In the worst case a process stops in
-`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers`. With the defaults, a tree of
-two layers takes the whole Kubernetes default `terminationGracePeriodSeconds` of 30 seconds,
+`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies`. With
+the defaults, a chain of two clients takes the whole Kubernetes default `terminationGracePeriodSeconds` of 30 seconds,
 so lower the timeouts or raise the grace period for deeper trees.
 
 ## Background tasks
@@ -1637,7 +1639,7 @@ from app.clients import Postgres, Warehouse
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        fields = {key: getattr(record, key) for key in ("run", "client", "layer", "duration") if hasattr(record, key)}
+        fields = {key: getattr(record, key) for key in ("run", "client", "duration") if hasattr(record, key)}
         return json.dumps({"level": record.levelname, "message": record.getMessage(), **fields})
 
 
@@ -1665,7 +1667,7 @@ $ python -m app.jobs.startup
 {"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
 postgres: connected
 warehouse: connected
-{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00015945796621963382}
+{"level": "INFO", "message": "Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00022179202642291784}
 startup: done
 postgres: disconnected
 warehouse: disconnected
@@ -1680,7 +1682,6 @@ metric: Warehouse connect=0.000s ok
 |------------|-------------------------------------------------------------------------------|
 | `run`      | Every record made inside a worker or a job, the container's included: the name of the run |
 | `client`   | Every record about one client: resolving, connecting, disconnecting, failures |
-| `layer`    | Every record about a connecting or disconnecting client, and `Connecting layer` |
 | `duration` | Seconds: a connected or disconnected client, the startup summary, a finished run |
 
 Every run also connects its own `Shutdown` and `BackgroundTasks` clients, so they appear
@@ -1722,7 +1723,7 @@ spec:
     metadata:
       labels: {app: consumer}
     spec:
-      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers
+      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × longest chain
       containers:
         - name: consumer
           image: registry.example.com/app:1.0
@@ -1842,7 +1843,8 @@ What happened:
    global `DI`, and wrapped the app's lifespan.
 2. `@app.get` saw `users: UserService` and only recorded it; nothing was built on import.
 3. On startup the lifespan resolved the clients of the routes the app serves, its own and those of
-   the routers it includes, and connected them, layer by layer. On shutdown it disconnected them.
+   the routers it includes, and connected them, each after its dependencies. On shutdown it
+   disconnected them.
 4. A request to `/users/42` got the connected `UserService`. `/me` went through the dependency
    `current_user`, which takes `db: Database` the same way.
 
@@ -2256,6 +2258,213 @@ A message handled without the app's lifespan, e.g. through `TestNatsBroker(broke
 raises `RuntimeError: UserService is not connected: start the app with its lifespan`. A subscriber
 added after the app has started raises `RuntimeError: UserService was not started with the app`.
 
+<!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/integrations.md -->
+
+# Writing an integration
+
+
+
+An integration with a framework does two things: the framework's handlers take clients by type hint, through
+the framework's own dependency injection, and the container connects when the app starts and disconnects when
+it stops. The [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md) and [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md) integrations are
+built on `nuke_di.integration`, and an integration with another framework needs nothing from nuke-di beyond it
+and the public API.
+
+| Name | What it does |
+|---|---|
+| `Framework(name, not_started, not_connected)` | What the users of a framework are told when a client is missing; `{client}` in a message is the client's class name. |
+| `DependsFramework(..., depends, make_depends, per_container=True)` | A framework that injects through `Depends(...)` markers: `depends` is the class of its markers, `make_depends` builds one for a function. |
+| `bind(call, container, framework)` | Rewrites the signature of a handler, a dependency function or a dependency class, and of the dependencies it uses: each client argument becomes `Annotated[Client, Depends(...)]`. Returns the `Binding` of each client. |
+| `Binding` | One client argument; `get()` returns the client resolved on startup, or raises `not_started` / `not_connected`. |
+| `running(container, bindings)` | An async context manager: resolves the clients of `bindings`, connects the container, and on exit sets `Shutdown`, stops the `BackgroundTasks` and disconnects. A `ConnectError` or `InitializeDependencyError` becomes a `RuntimeError`, which a server reports as a failed startup; an error of the client tree, such as a cycle, passes as it is. |
+| `wrap_lifespan(original, container, bindings)` | A lifespan that runs the app's own `original` lifespan inside `running()`; `bindings` is called on startup, so handlers declared after `setup()` are found. |
+| `client_of(hint, *markers)` | The client a type hint asks for, or `None`: `Client`, or `Annotated[Client, ...]` without any of `markers`. |
+| `unique(bindings)` | `bindings` without repeats: one dependency is often reachable from several handlers. |
+
+## <a id="a-framework-with-depends"></a>A framework with `Depends`
+
+FastAPI and FastStream (through fast-depends) read `inspect.signature()` of a handler and call the dependency
+in each `Depends(...)` marker, and so does any framework whose markers work the same way. For them, `bind()` replaces `users: UserService` with
+`users: Annotated[UserService, Depends(binding.get)]`, and the framework does the rest. The FastStream
+integration, written on the public kit alone, is this module:
+
+```python
+# myapp/faststream_di.py
+from typing import Any
+
+from faststream import Depends, FastStream
+
+from nuke_di import DI, Dependencies
+from nuke_di.integration import Binding, DependsFramework, bind, unique, wrap_lifespan
+
+
+def _noop() -> None: ...
+
+
+FRAMEWORK = DependsFramework(
+    name="FastStream",
+    # The class of FastStream's markers, and the function that builds one
+    depends=type(Depends(_noop)),
+    make_depends=Depends,
+    not_started="{client} was not started with the app: declare its subscriber before the app starts",
+    not_connected="{client} is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`",
+    # FastStream builds a subscriber on every start: a function is bound once, whatever the container
+    per_container=False,
+)
+
+
+def setup(app: FastStream, container: Dependencies = DI) -> None:
+    # Connect the container around the app's own lifespan, with the clients found on startup
+    app.lifespan_context = wrap_lifespan(app.lifespan_context, container, lambda: _bindings(app, container))
+    for broker in app.brokers:
+        # Rewrite a subscriber's function whenever FastStream builds the subscriber
+        config = broker.config.fd_config
+        config.call_decorators = (*config.call_decorators, _Rewrite(container))
+
+
+class _Rewrite:
+    def __init__(self, container: Dependencies) -> None:
+        self.container = container
+
+    def __call__(self, call: Any) -> Any:
+        bind(call, self.container, FRAMEWORK)
+        return call
+
+
+def _bindings(app: FastStream, container: Dependencies) -> list[Binding]:
+    # The clients of every subscriber and of the dependencies it declares, each once
+    bindings: list[Binding] = []
+    for broker in app.brokers:
+        for subscriber in broker.subscribers:
+            for item in subscriber.calls:
+                bindings += bind(item.handler._declared_call, container, FRAMEWORK)
+                for depends in item.dependencies:
+                    bindings += bind(depends.dependency, container, FRAMEWORK)
+    return unique(bindings)
+```
+
+Three things are specific to a framework, and each integration finds them in that framework's internals:
+
+- **When the signature is read.** `bind()` must run before the framework reads the handler's signature.
+  FastAPI reads it when a route is declared, so `nuke_di.fastapi` binds in its route class; FastStream reads it
+  when it builds a subscriber, on every start, so the module above binds in a `call_decorators` hook.
+- **Where the handlers are.** On startup, `wrap_lifespan()` calls `bindings()` to learn which clients to
+  resolve: the integration walks the app's routes, subscribers or tasks, binds each one and returns the
+  `Binding`s. A client nobody reaches from the app is not connected.
+- **Where the lifespan is.** `wrap_lifespan()` replaces the app's lifespan; the app's own lifespan runs inside
+  it, so its startup code can use the clients.
+
+The real `nuke_di.faststream` adds what the example leaves out: FastStream 0.6, the dependencies of brokers
+and routers, and one rewrite hook per broker when several apps share it.
+
+### <a id="per-container"></a>`per_container`
+
+`bind()` rewrites a function in place and remembers the container it was bound to. With `per_container=True`
+(the default, FastAPI) a function bound to one container and declared again for another is bound again: FastAPI
+reads a route's signature once, when the route is declared, so each app keeps the bindings it captured, and two
+apps on two containers can serve the same function at once.
+
+With `per_container=False` (FastStream) a function is bound once, whatever the container, and every app that
+starts resolves the same `Binding`s. FastStream builds a subscriber on every start, and under a test broker
+even before the app's lifespan runs, so the signature must not change from one app to the next. The cost: two
+apps that share a handler function run one at a time, and the second raises `RuntimeError: ... is filled for
+another app that is running`. Choose `False` when the framework may read a signature again after the first
+app has started.
+
+## <a id="a-framework-without-depends"></a>A framework without `Depends`
+
+Litestar provides dependencies by name, and aiogram passes them by name from middleware. There `bind()` does
+not apply: use `Framework` for the messages, `client_of()` to find the client arguments of a handler, a
+`Binding` per client whose `get` the framework calls by its own means, and `running()` inside the app's
+lifespan. `nuke_di.litestar` is the worked example: it registers `Provide(binding.get)` under the argument's
+name.
+
+## <a id="checking-an-integration"></a>Checking an integration
+
+`nuke_di.integration.testing.check()` runs the contract every integration keeps, against your integration:
+
+- a handler takes a client by type hint, connected for the time the app runs;
+- a dependency of a handler takes a client by type hint (with a `DependsFramework` only);
+- `override()` before startup replaces a client the handler gets through another client;
+- a handler called without the app's lifespan raises the framework's `not_connected` error;
+- a failed `connect()` fails the app's startup with a `RuntimeError` and leaves the container flushed.
+
+It brings its own clients and handlers. You give it the framework and two functions: `make_app(container,
+handler)` returns a new app set up with `container` that serves `handler`, an `async def` with no arguments
+but clients; `run(app, lifespan)` is an async context manager that runs the app, with its lifespan only when
+`lifespan` is true, and yields a `send()` that calls the handler once through the framework and raises what
+the handler raised. For the module above:
+
+```python
+# tests/test_contract.py
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
+from typing import Any
+
+from faststream import FastStream, TestApp
+from faststream.nats import NatsBroker, TestNatsBroker
+
+from myapp.faststream_di import FRAMEWORK, setup
+from nuke_di import Dependencies
+from nuke_di.integration.testing import Send, check
+
+
+def make_app(container: Dependencies, handler: Callable[..., Any]) -> FastStream:
+    broker = NatsBroker()
+    app = FastStream(broker)
+    setup(app, container)
+    broker.subscriber("check")(handler)
+    return app
+
+
+@asynccontextmanager
+async def run(app: FastStream, lifespan: bool) -> AsyncIterator[Send]:
+    # connect_only: FastStream would guess it from the mention of TestApp below
+    async with TestNatsBroker(app.broker, connect_only=lifespan) as broker:
+        if lifespan:
+            async with TestApp(app):
+                yield lambda: broker.publish(None, "check")
+        else:
+            yield lambda: broker.publish(None, "check")
+
+
+async def test_contract() -> None:
+    await check(FRAMEWORK, make_app, run)
+```
+
+```console
+$ pytest -q tests/test_contract.py
+.                                                                        [100%]
+1 passed in 0.29s
+```
+
+`check()` is a coroutine: run it under pytest-asyncio or anyio. It raises an `ExceptionGroup` of every case
+that failed, each with a note naming the case. With the `wrap_lifespan()` line of `setup()` left out, the
+container never connects:
+
+```console
+$ pytest -q --tb=short tests/test_contract.py
+F                                                                        [100%]
+  | ExceptionGroup: the FastStream integration breaks the nuke-di contract (4 sub-exceptions)
+    | RuntimeError: Greeter is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`
+    | FastStream integration, case handler: a handler takes a client by type hint, connected for the time the app runs
+    | RuntimeError: Greeter is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`
+    | FastStream integration, case dependency: a dependency of a handler takes a client by type hint
+    | RuntimeError: Greeter is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`
+    | FastStream integration, case override: override() before startup replaces a client the handler gets through another client
+    | AssertionError: expected a RuntimeError with 'nuke-di clients failed to start' about Broken, got RuntimeError('Broken is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`')
+    | FastStream integration, case failed_connect: a failed connect() fails the app's startup with a RuntimeError and leaves the container flushed
+FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
+1 failed in 0.17s
+```
+
+(Tracebacks shortened.) A framework that reports the error of a handler instead of raising it needs a `send()`
+that raises it: an HTTP framework's test client returns a 500, so `send()` checks the status. Litestar puts
+the error into the response only with `debug=True`.
+
+`nuke_di._integration`, the private module this kit lived in before 1.14.0, still imports with a
+`DeprecationWarning` and is removed in 1.15.0.
+
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md -->
 
 # Testing
@@ -2350,7 +2559,7 @@ The rules:
   registered; `mock(cls, other)` and `override(cls)` raise `ConnectError: Database already has a
   replacement`.
 - **Replacements are not connected.** Their `connect()` / `disconnect()` are never called, and they
-  do not take part in the [layers](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#layers).
+  do not take part in the [connect order](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#connect-order).
 - **How long a Replacement lasts.** One from `mock()` is dropped by the next `flush()`, including the
   one at the end of `disconnect()`: a test that connects the container more than once should use
   `override()`, whose Replacement survives every `flush()` until its block ends. An exception inside

@@ -1,8 +1,8 @@
 # The graph
 
 An application of three infrastructure clients, two repositories and three services, and the
-dependency graph of one entrypoint: as a table of layers, as a Mermaid diagram for a README, and
-as the `DEBUG` log of a real startup. Useful to document an architecture and to see why a startup
+dependency graph of one entrypoint: as a list of who needs whom, as a Mermaid diagram for a README,
+and as the `DEBUG` log of a real startup. Useful to document an architecture and to see why a startup
 takes as long as it does.
 
 | File              | What it holds                                                             |
@@ -11,41 +11,33 @@ takes as long as it does.
 | `repositories.py` | `UserRepository` and `OrderRepository`                                    |
 | `services.py`     | `OrderService`, `Notifications` and `Checkout` on top of them             |
 | `api.py`          | `place_order`, the entrypoint whose tree is drawn                         |
-| `show.py`         | Prints the layers and `to_mermaid()`; connects nothing                    |
+| `show.py`         | Prints who needs whom and `to_mermaid()`; connects nothing                |
 | `start.py`        | Connects the tree with the `DEBUG` log of `nuke_di` on                    |
-| `test_graph.py`   | The layers, the shared `Postgres`, and that the diagram below is current  |
+| `test_graph.py`   | The dependencies, the shared `Postgres`, and that the diagram below is current |
 
 ## Run
 
 ```console
 $ cd examples
 $ uv run python -m graph.show
-layer 0  Postgres         needs -
-layer 0  Redis            needs -
-layer 0  Kafka            needs -
-layer 1  OrderRepository  needs Postgres, Redis
-layer 1  UserRepository   needs Postgres
-layer 2  OrderService     needs OrderRepository, UserRepository, Kafka
-layer 2  Notifications    needs UserRepository, Kafka
-layer 3  Checkout         needs OrderService, Notifications
+Postgres         needs -
+Redis            needs -
+OrderRepository  needs Postgres, Redis
+UserRepository   needs Postgres
+Kafka            needs -
+OrderService     needs OrderRepository, UserRepository, Kafka
+Notifications    needs UserRepository, Kafka
+Checkout         needs OrderService, Notifications
 
 graph BT
-  subgraph layer0 [layer 0]
-    Postgres
-    Redis
-    Kafka
-  end
-  subgraph layer1 [layer 1]
-    OrderRepository
-    UserRepository
-  end
-  subgraph layer2 [layer 2]
-    OrderService
-    Notifications
-  end
-  subgraph layer3 [layer 3]
-    Checkout
-  end
+  Postgres
+  Redis
+  OrderRepository
+  UserRepository
+  Kafka
+  OrderService
+  Notifications
+  Checkout
   Postgres --> OrderRepository
   Redis --> OrderRepository
   Postgres --> UserRepository
@@ -62,22 +54,14 @@ The same text in a ` ```mermaid ` block, which GitHub draws:
 
 ```mermaid
 graph BT
-  subgraph layer0 [layer 0]
-    Postgres
-    Redis
-    Kafka
-  end
-  subgraph layer1 [layer 1]
-    OrderRepository
-    UserRepository
-  end
-  subgraph layer2 [layer 2]
-    OrderService
-    Notifications
-  end
-  subgraph layer3 [layer 3]
-    Checkout
-  end
+  Postgres
+  Redis
+  OrderRepository
+  UserRepository
+  Kafka
+  OrderService
+  Notifications
+  Checkout
   Postgres --> OrderRepository
   Redis --> OrderRepository
   Postgres --> UserRepository
@@ -90,8 +74,8 @@ graph BT
   Notifications --> Checkout
 ```
 
-The `DEBUG` log of a real startup shows the same layers connecting one after another, and the
-clients of a layer connecting together. The durations vary a little from run to run:
+The `DEBUG` log of a real startup shows every client starting as soon as its own dependencies have
+connected, with how many have connected so far. The durations vary a little from run to run:
 
 ```console
 $ uv run python -m graph.start
@@ -104,53 +88,49 @@ DEBUG Resolving dependency "Redis"
 DEBUG Resolving dependency "UserRepository"
 DEBUG Resolving dependency "Kafka"
 DEBUG Resolving dependency "Notifications"
-DEBUG Connecting layer 0: Postgres, Redis, Kafka
-DEBUG Connecting client Postgres
-DEBUG Connecting client Redis
-DEBUG Connecting client Kafka
+DEBUG Connecting client Postgres (0/8 connected)
+DEBUG Connecting client Redis (0/8 connected)
+DEBUG Connecting client Kafka (0/8 connected)
 redis: connected
-DEBUG Connected client Redis in 0.051s
+DEBUG Connected client Redis in 0.050s (1/8 connected)
 kafka: connected
-DEBUG Connected client Kafka in 0.101s
+DEBUG Connected client Kafka in 0.101s (2/8 connected)
 postgres: connected
-DEBUG Connected client Postgres in 0.201s
-DEBUG Connecting layer 1: OrderRepository, UserRepository
-DEBUG Connecting client OrderRepository
-DEBUG Connected client OrderRepository in 0.000s
-DEBUG Connecting client UserRepository
-DEBUG Connected client UserRepository in 0.000s
-DEBUG Connecting layer 2: OrderService, Notifications
-DEBUG Connecting client OrderService
-DEBUG Connected client OrderService in 0.000s
-DEBUG Connecting client Notifications
-DEBUG Connected client Notifications in 0.000s
-DEBUG Connecting layer 3: Checkout
-DEBUG Connecting client Checkout
-DEBUG Connected client Checkout in 0.000s
-INFO  Connected 8 clients in 4 layers in 0.20s (slowest: Postgres 0.20s, Kafka 0.10s, Redis 0.05s)
+DEBUG Connected client Postgres in 0.201s (3/8 connected)
+DEBUG Connecting client OrderRepository (3/8 connected)
+DEBUG Connected client OrderRepository in 0.000s (4/8 connected)
+DEBUG Connecting client UserRepository (4/8 connected)
+DEBUG Connected client UserRepository in 0.000s (5/8 connected)
+DEBUG Connecting client OrderService (5/8 connected)
+DEBUG Connected client OrderService in 0.000s (6/8 connected)
+DEBUG Connecting client Notifications (6/8 connected)
+DEBUG Connected client Notifications in 0.000s (7/8 connected)
+DEBUG Connecting client Checkout (7/8 connected)
+DEBUG Connected client Checkout in 0.000s (8/8 connected)
+INFO  Connected 8 clients in 0.20s (slowest: Postgres 0.20s, Kafka 0.10s, Redis 0.05s)
 postgres: order 1 of user-42
 kafka: orders.created <- 1
 kafka: notifications <- order 1 for user-42
 placed order 1
-DEBUG Disconnecting client Checkout
-DEBUG Disconnected client Checkout in 0.000s
-DEBUG Disconnecting client OrderService
-DEBUG Disconnected client OrderService in 0.000s
-DEBUG Disconnecting client Notifications
-DEBUG Disconnected client Notifications in 0.000s
-DEBUG Disconnecting client OrderRepository
-DEBUG Disconnected client OrderRepository in 0.000s
-DEBUG Disconnecting client UserRepository
-DEBUG Disconnected client UserRepository in 0.000s
-DEBUG Disconnecting client Postgres
-postgres: disconnected
-DEBUG Disconnected client Postgres in 0.000s
-DEBUG Disconnecting client Redis
-redis: disconnected
-DEBUG Disconnected client Redis in 0.000s
-DEBUG Disconnecting client Kafka
+DEBUG Disconnecting client Checkout (0/8 disconnected)
+DEBUG Disconnected client Checkout in 0.000s (1/8 disconnected)
+DEBUG Disconnecting client OrderService (1/8 disconnected)
+DEBUG Disconnected client OrderService in 0.000s (2/8 disconnected)
+DEBUG Disconnecting client Notifications (2/8 disconnected)
+DEBUG Disconnected client Notifications in 0.000s (3/8 disconnected)
+DEBUG Disconnecting client OrderRepository (3/8 disconnected)
+DEBUG Disconnected client OrderRepository in 0.000s (4/8 disconnected)
+DEBUG Disconnecting client UserRepository (4/8 disconnected)
+DEBUG Disconnected client UserRepository in 0.000s (5/8 disconnected)
+DEBUG Disconnecting client Kafka (5/8 disconnected)
 kafka: disconnected
-DEBUG Disconnected client Kafka in 0.000s
+DEBUG Disconnected client Kafka in 0.000s (6/8 disconnected)
+DEBUG Disconnecting client Postgres (6/8 disconnected)
+postgres: disconnected
+DEBUG Disconnected client Postgres in 0.000s (7/8 disconnected)
+DEBUG Disconnecting client Redis (7/8 disconnected)
+redis: disconnected
+DEBUG Disconnected client Redis in 0.000s (8/8 disconnected)
 ```
 
 ## Test
@@ -165,8 +145,9 @@ $ uv run pytest -q graph
 
 - `deps.inject(place_order)` builds the whole tree without connecting anything, so `show.py` and
   the test need no database. `graph()` works the same before and after `connect()`.
-- Layer 0 takes as long as its slowest client: the startup took 0.20 s, not 0.35 s, because
-  `Postgres`, `Redis` and `Kafka` connect together.
+- The startup takes as long as its longest chain of dependencies, `Postgres` → `OrderRepository` →
+  `OrderService` → `Checkout`: 0.20 s, not 0.35 s, because `Postgres`, `Redis` and `Kafka` connect
+  together, and nothing that does not need `Postgres` waits for it.
 - `node.dependencies` maps argument names to nodes, and nodes compare by identity: the test checks
   that both repositories got the same `Postgres`.
 - `test_readme_diagram_is_current` fails when the code changes and the diagram above does not.

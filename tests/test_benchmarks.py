@@ -71,15 +71,16 @@ def test_connects_an_application_shaped_tree(tmp_path: Path) -> None:
     application = [row for row in data["results"] if row["shape"].startswith("application: ")]
     assert [row["scenario"] for row in application] == [
         "connect() + disconnect(), wall time",
-        "connect() + disconnect(), ideal: the critical path, no layer barriers",
-        "connect() + disconnect(), lost at the layer barriers",
+        "connect() + disconnect(), ideal: the critical path",
+        "connect() + disconnect(), above the critical path",
     ]
-    wall, ideal, lost = application
+    wall, ideal, above = application
     # The sleeps of the clients are the figure, so no per-client value; the clients sleep for 0.1 s in all
     assert all(row["n"] == 8 and row["per_client"] is None and len(row["samples"]) == 1 for row in application)
     assert wall["median"] > 0.05 and ideal["median"] > 0.05
-    assert lost["median"] == wall["samples"][0] - ideal["samples"][0]
-    assert any(row["shape"] == "wide: N in one layer" and row["per_client"] is not None for row in data["results"])
+    assert above["median"] == wall["samples"][0] - ideal["samples"][0]
+    wide = [row for row in data["results"] if row["shape"] == "wide: N independent clients"]
+    assert any(row["per_client"] is not None for row in wide)
 
 
 def test_compares_libraries(tmp_path: Path) -> None:

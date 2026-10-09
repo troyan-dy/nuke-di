@@ -6,7 +6,7 @@ from typing import Any
 from nuke_di import Run
 
 # The structured fields that nuke_di sets on its log records
-FIELDS = ("run", "client", "layer", "duration")
+FIELDS = ("run", "client", "duration")
 
 
 class JsonFormatter(logging.Formatter):
@@ -51,7 +51,7 @@ def render(run: Run) -> list[str]:
         f"job_exit_code{{{job}}} {run.exit_code}",
     ]
     for client in run.clients:
-        labels = f'{job},client="{client.name}",layer="{client.layer}"'
+        labels = f'{job},client="{client.name}"'
         if client.connect is not None:
             outcome = f'outcome="{client.connect_outcome}"'
             lines.append(f"client_connect_seconds{{{labels},{outcome}}} {client.connect:.3f}")
