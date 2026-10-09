@@ -323,7 +323,8 @@ class Dependencies:
         Idempotent operation.
         """
         if self.connected is True:
-            raise self._state_error(f"resolve({qualname(cls)})")
+            # `_type_name`, not `qualname`: `cls` may be no class at all
+            raise self._state_error(f"resolve({_type_name(cls)})")
 
         # A resolved singleton is handed out without the lock: it is complete once it is in `clients`, and a lookup
         # in a dict is safe next to a writer on every build of CPython. The cold path takes the lock once for the
@@ -339,14 +340,15 @@ class Dependencies:
 
         # A plain class would be built and appended, and the process would die at connect() with an
         # AttributeError on `connect`; a type checker sees the bound, `Any` and `# type: ignore` do not. Checked
-        # after the lookup, which never finds a non-client: the check costs about 60 ns, a warm hit must not pay it
+        # after the lookup, which never finds a non-client since mock() refuses one too: the check costs about
+        # 60 ns, a warm hit must not pay it
         if not isnotsingleton(cls):
-            raise InvalidSignatureError(f"{_type_name(cls)} is not a client: subclass Client or NotSingletonClient")
+            raise _not_a_client(cls)
 
         with self._lock:
             # Checked again under the lock, where connect() flips it
             if self.connected is True:
-                raise self._state_error(f"resolve({qualname(cls)})")
+                raise self._state_error(f"resolve({_type_name(cls)})")
             return self._resolve(cls)
 
     def _resolve(self, cls: type[CT]) -> CT:
@@ -600,6 +602,8 @@ class Dependencies:
         """
         Register a Replacement for `cls`, an autospec mock by default; `flush()` drops it.
         """
+        if not isnotsingleton(cls):
+            raise _not_a_client(cls)
         with self._lock:
             name = self._name(cls)
             if self.connected is True:
@@ -819,6 +823,10 @@ def _display_names(classes: Iterable[type]) -> dict[type, str]:
     names = {cls: qualname(cls) for cls in classes}
     shared = {name for name, count in Counter(names.values()).items() if count > 1}
     return {cls: f"{cls.__module__}.{cls.__qualname__}" if name in shared else name for cls, name in names.items()}
+
+
+def _not_a_client(cls: Any) -> InvalidSignatureError:
+    return InvalidSignatureError(f"{_type_name(cls)} is not a client: subclass Client or NotSingletonClient")
 
 
 def _count(number: int, noun: str) -> str:

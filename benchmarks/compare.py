@@ -6,9 +6,9 @@ nuke-di against other dependency injection libraries, on the trees of benchmarks
 Every library gets the same classes, whose `__init__` takes the dependencies by type hint, and does the
 same work: `cold` builds a container, registers the classes and gets the root of the tree, which
 constructs every client, on classes made for every sample, as the cold row of benchmarks/run.py; `warm`
-gets the root again from that container, the singleton; `request` is
-one FastAPI request to a handler that takes a client through the library's integration. The figures of
-the baseline are in docs/benchmarks.md.
+gets the root again from that container, the singleton; `request` is one FastAPI request to a handler
+that takes a client through the library's integration. The figures of the baseline are in
+docs/benchmarks.md.
 
 The libraries are the `compare` dependency group: `uv sync --group compare`.
 """
