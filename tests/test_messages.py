@@ -177,7 +177,7 @@ def test_inject_leaves_a_non_client_argument_to_the_caller() -> None:
     injected = Dependencies().inject(handler)
 
     with pytest.raises(TypeError):
-        injected()
+        injected()  # type: ignore[call-arg]
 
 
 def test_a_non_client_argument_is_named_with_the_path() -> None:
@@ -185,7 +185,7 @@ def test_a_non_client_argument_is_named_with_the_path() -> None:
         InvalidSignatureError,
         match=r'^Argument "settings" of "Reports.__init__" is Settings, which is not a client \(resolving Reports\)$',
     ):
-        Dependencies().resolve(Reports)
+        Dependencies().resolve(Reports)  # type: ignore[nuke-di]
 
 
 async def test_a_non_client_on_a_connected_container_gets_the_state_error() -> None:
@@ -250,7 +250,7 @@ def test_two_clients_with_one_name_are_told_apart_in_the_path() -> None:
         def __init__(self, orders: Database, broken: Broken) -> None: ...
 
     with pytest.raises(InvalidSignatureError) as info:
-        Dependencies().resolve(Root)
+        Dependencies().resolve(Root)  # type: ignore[nuke-di]
 
     assert str(info.value) == (
         'Argument "pool" of "Broken.__init__" is int, which is not a client (resolving Root -> Broken)'
@@ -317,7 +317,7 @@ def test_a_nested_class_is_named_in_full_in_an_argument_error() -> None:
         def __init__(self, inner: Outer.Inner | None) -> None: ...
 
     with pytest.raises(InvalidSignatureError, match=r"is Outer.Inner \| None, a client cannot be optional"):
-        Dependencies().resolve(Reports)
+        Dependencies().resolve(Reports)  # type: ignore[nuke-di]
     with pytest.raises(InvalidSignatureError, match=r"^Outer is not a client"):
         Dependencies().resolve(Outer)  # type: ignore[type-var]
 

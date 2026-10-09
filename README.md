@@ -100,8 +100,11 @@ What happened:
   dependencies up, and the clients of one layer connect concurrently. They disconnect in reverse,
   and a failing `disconnect()` does not stop the others.
 - **Fail fast.** A tree that cannot be built fails before anything connects, naming the argument and
-  the path to it. A client that cannot connect stops the application once the connected ones are
-  disconnected. There are no retries: restarting is the orchestrator's job.
+  the path to it, and `mypy` with the
+  [plugin](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#checking-the-tree-with-mypy)
+  reports the same error before the process starts. A client that cannot connect stops the
+  application once the connected ones are disconnected. There are no retries: restarting is the
+  orchestrator's job.
 - **Tests replace, they do not rewire.** `mock()` and `override()` put a fake in place of a client
   for one test; the code under test does not change.
 - **No runtime dependencies.** The core uses only the standard library; the framework

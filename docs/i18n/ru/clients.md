@@ -527,3 +527,93 @@ InvalidSignatureError: UserRepository is not a client: subclass Client or NotSin
 прямо сказано. Если ошибка пришла из `inject()`, путь начинается с функции:
 `(resolving handler -> Checkout -> Profiles)`. В [воркере или джобе](workers-and-jobs.md)
 любая из этих ошибок завершает запуск с кодом `1` ещё до подключения.
+
+## <a id="checking-the-tree-with-mypy"></a>Проверка дерева с помощью mypy
+
+`nuke_di.mypy` — плагин для mypy, который находит эти ошибки, пока mypy проверяет типы, ещё до запуска
+процесса или теста. Включите его в `pyproject.toml`:
+
+```toml
+[tool.mypy]
+plugins = ["nuke_di.mypy"]
+```
+
+На каждом `resolve()`, `inject()`, `@job` и `@worker` плагин обходит `__init__` каждого клиента,
+которого построил бы этот вызов, так же, как это делает контейнер, и сообщает о том, с чем упал бы
+контейнер, тем же сообщением:
+
+```python
+# tree.py
+from typing import Protocol, reveal_type
+
+from nuke_di import DI, Client, job
+
+
+class Postgres(Client):
+    pass
+
+
+class UserRepository(Protocol):
+    async def get(self, user_id: int) -> str: ...
+
+
+class Profiles(Client):
+    def __init__(self, pg: Postgres, users: UserRepository) -> None:
+        self.pg, self.users = pg, users
+
+
+class Checkout(Client):
+    def __init__(self, profiles: Profiles) -> None:
+        self.profiles = profiles
+
+
+class Orders(Client):
+    def __init__(self, payments: "Payments") -> None:
+        self.payments = payments
+
+
+class Payments(Client):
+    def __init__(self, orders: Orders) -> None:
+        self.orders = orders
+
+
+async def greet(user_id: int, pg: Postgres) -> str:
+    return f"Hello, user-{user_id}!"
+
+
+DI.resolve(Checkout)
+reveal_type(DI.inject(greet))
+
+
+@job
+async def settle(orders: Orders) -> None:
+    pass
+```
+
+```console
+$ mypy tree.py
+tree.py:39: error: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)  [nuke-di]
+tree.py:40: note: Revealed type is "def (user_id: int) -> typing.Coroutine[Any, Any, str]"
+tree.py:43: error: Circular dependency: settle -> Orders -> Payments -> Orders  [nuke-di]
+Found 2 errors in 1 file (checked 1 source file)
+```
+
+- Проверяется каждая строка таблицы выше, циклы тоже, а также аргумент без аннотации типа в функции,
+  переданной в `inject()`, `@job` или `@worker`. Об ошибке сообщается на том вызове, который бы её
+  бросил, с путём от этого вызова; дерево с несколькими ошибками сообщает их все, тогда как
+  контейнер останавливается на первой.
+- `inject()` возвращает функцию без её аргументов-клиентов — тип `partial`, который он строит:
+  `def (user_id: int) -> Coroutine[Any, Any, str]` в примере выше вместо
+  `Callable[..., Coroutine[Any, Any, str]]`. Аргумент, идущий после аргумента-клиента, становится
+  только именованным, поскольку позиционное значение попало бы на место клиента.
+- Остаётся контейнеру: аннотация типа, которую не удаётся вычислить во время выполнения, хотя mypy
+  её всё равно вычисляет; класс в переменной типа `type[...]`, где может оказаться подкласс с другим
+  `__init__`; декорированный или перегруженный `__init__`; `inject()` класса; роуты и обработчики
+  интеграций с FastAPI, Litestar и FastStream; тип, которого mypy не знает, например класс из
+  библиотеки без аннотаций типов.
+- Намеренная ошибка, в тесте этой самой ошибки, заглушается с помощью `# type: ignore[nuke-di]`.
+- Работает с mypy 1.13 и новее, с кешем так же, как без него: изменение клиента глубоко в дереве
+  заново проверяет вызовы этого дерева. Демон mypy, `dmypy`, может не заметить такое изменение до
+  перезапуска.
+- У Pyright нет API для плагинов. С Pyright те же ошибки находит
+  [тест, который вызывает `inject()` для каждого entrypoint-а](testing.md).
