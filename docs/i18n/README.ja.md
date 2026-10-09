@@ -326,7 +326,8 @@ $ pytest -q tests/test_api.py
 - [クライアント](ja/clients.md)：`Client` と `NotSingletonClient`、ライフサイクル、データクラスのクライアント、接続順序、起動時間、依存グラフ、接続エラーと解決エラー
 - [コンテナ](ja/container.md)：`Dependencies` とグローバルな `DI`、`resolve()`、`inject()`、`mock()`、`override()`
 - [ワーカーとジョブ](ja/workers-and-jobs.md)：`@job` と `@worker`、コマンドラインパラメータ、`Shutdown`、猶予期間、バックグラウンドタスク、終了コード、フック、Kubernetes
-- フレームワーク：[FastAPI](ja/fastapi.md)、[Litestar](ja/litestar.md)、[FastStream](ja/faststream.md)
+- フレームワーク：[FastAPI](ja/fastapi.md)、[Litestar](ja/litestar.md)、[FastStream](ja/faststream.md)、
+  そして `nuke_di.integration` でほかのフレームワーク向けに[インテグレーションを書く](ja/integrations.md)
 - [テスト](ja/testing.md)：`mock()`、`override()`、pytest フィクスチャ、配線の確認
 - [設定](ja/configuration.md)：タイムアウト、並行数、猶予期間
 - [エラー](ja/errors.md)：すべての例外と、それが送出される条件

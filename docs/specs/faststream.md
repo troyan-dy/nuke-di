@@ -69,7 +69,7 @@ with DI.override(Database, replacement):
 
 | # | Question | Decision |
 |---|---|---|
-| 1 | Mechanism | The FastAPI signature rewrite (ADR-0003), shared in `nuke_di._integration`: fast-depends reads `inspect.signature()`, so `Annotated[C, Depends(getter)]` works, nested `Depends` functions and classes included. |
+| 1 | Mechanism | The FastAPI signature rewrite (ADR-0003), shared in `nuke_di.integration`: fast-depends reads `inspect.signature()`, so `Annotated[C, Depends(getter)]` works, nested `Depends` functions and classes included. |
 | 2 | Hook for connecting | `app.lifespan_context`, wrapped: the outermost scope, entered by `faststream run`, `TestApp` and the ASGI app alike, so the app's lifespan and every hook see connected clients and the brokers consume only after the clients connect. `on_startup` / `after_shutdown` hooks would run in registration order relative to the user's. |
 | 3 | When the clients are found | On startup, from the brokers' subscribers, not when a subscriber is declared: FastStream has no registration hook, and routers are declared apart from the broker. |
 | 4 | Why also `call_decorators` | The field FastStream keeps "to patch injection by integrations" (its own comment), applied on every build: without it a test that forgets `TestApp` gets a pydantic error about the message instead of the fix. |

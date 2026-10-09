@@ -18,8 +18,8 @@ from litestar.handlers.websocket_handlers import WebsocketListenerRouteHandler
 from litestar.plugins import InitPlugin
 from litestar.routes import HTTPRoute
 
-from nuke_di._integration import Binding, Framework, client_of, running
 from nuke_di.core import DI, Dependencies
+from nuke_di.integration import Binding, Framework, client_of, running
 from nuke_di.types import NotSingletonClient
 from nuke_di.utils import sname
 
