@@ -23,25 +23,25 @@ It prints a Markdown table with the median and the p95 of the repeats and a figu
 
 ```console
 $ uv run python benchmarks/run.py --only resolve --size 100
-nuke-di 1.12.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 3baafcc · N = 100 · 20 repeats
+nuke-di 1.13.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 36ddfff · N = 100 · 20 repeats
 
 | Scenario                                         | Shape          |   N |  Median |     p95 | Per client |
 |--------------------------------------------------|----------------|----:|--------:|--------:|-----------:|
-| resolve(), cold                                  | wide           | 100 |  393 µs |  945 µs |    3.93 µs |
-| resolve(), second container, classes seen before | wide           | 100 |  109 µs |  441 µs |    1.09 µs |
-| resolve(), warm                                  | wide           | 100 | 93.7 ns |  112 ns |            |
-| resolve(), cold                                  | deep           | 100 |  374 µs |  414 µs |    3.74 µs |
-| resolve(), second container, classes seen before | deep           | 100 | 91.6 µs | 96.5 µs |     916 ns |
-| resolve(), warm                                  | deep           | 100 | 92.4 ns | 93.6 ns |            |
-| resolve(), cold                                  | mixed          | 100 |  451 µs |  474 µs |    4.51 µs |
-| resolve(), second container, classes seen before | mixed          | 100 | 94.8 µs |  105 µs |     948 ns |
-| resolve(), warm                                  | mixed          | 100 | 89.1 ns | 92.2 ns |            |
-| resolve(), cold                                  | wide, strings  | 100 |  662 µs |  695 µs |    6.62 µs |
-| resolve(), second container, classes seen before | wide, strings  | 100 | 94.1 µs |  123 µs |     941 ns |
-| resolve(), cold                                  | deep, strings  | 100 |  709 µs |  900 µs |    7.09 µs |
-| resolve(), second container, classes seen before | deep, strings  | 100 | 95.0 µs |  107 µs |     950 ns |
-| resolve(), cold                                  | mixed, strings | 100 | 1.10 ms | 1.71 ms |    11.0 µs |
-| resolve(), second container, classes seen before | mixed, strings | 100 |  101 µs |  109 µs |    1.01 µs |
+| resolve(), cold                                  | wide           | 100 |  354 µs |  482 µs |    3.54 µs |
+| resolve(), second container, classes seen before | wide           | 100 |  102 µs |  146 µs |    1.02 µs |
+| resolve(), warm                                  | wide           | 100 | 89.8 ns | 96.2 ns |            |
+| resolve(), cold                                  | deep           | 100 |  342 µs |  400 µs |    3.42 µs |
+| resolve(), second container, classes seen before | deep           | 100 | 94.7 µs | 99.4 µs |     947 ns |
+| resolve(), warm                                  | deep           | 100 | 88.8 ns | 94.6 ns |            |
+| resolve(), cold                                  | mixed          | 100 |  443 µs |  587 µs |    4.43 µs |
+| resolve(), second container, classes seen before | mixed          | 100 |  109 µs |  172 µs |    1.09 µs |
+| resolve(), warm                                  | mixed          | 100 | 87.8 ns | 92.1 ns |            |
+| resolve(), cold                                  | wide, strings  | 100 |  655 µs |  791 µs |    6.55 µs |
+| resolve(), second container, classes seen before | wide, strings  | 100 | 96.0 µs |  110 µs |     960 ns |
+| resolve(), cold                                  | deep, strings  | 100 |  690 µs |  850 µs |    6.90 µs |
+| resolve(), second container, classes seen before | deep, strings  | 100 |  118 µs |  196 µs |    1.18 µs |
+| resolve(), cold                                  | mixed, strings | 100 | 1.05 ms | 3.30 ms |    10.5 µs |
+| resolve(), second container, classes seen before | mixed, strings | 100 | 97.4 µs |  106 µs |     974 ns |
 ```
 
 The suite needs only the standard library and `nuke-di`; the `fastapi` scenario needs `fastapi` and
