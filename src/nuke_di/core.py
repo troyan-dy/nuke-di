@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from functools import partial
 from types import MappingProxyType
-from typing import Any, Literal, TypeVar, Union, cast, get_args, get_origin, get_type_hints
+from typing import Any, Literal, NamedTuple, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
 from nuke_di.errors import (
     CircularDependencyError,
@@ -73,7 +73,7 @@ class Dependencies:
     # Clients being resolved right now, outermost first: finds cycles and names the path in errors
     _resolving: list[type[NotSingletonClient]] = field(default_factory=list, init=False)
     # The same classes, for the cycle check: the list would be scanned once per client, as long as the depth
-    _resolving_set: set[type[NotSingletonClient]] = field(default_factory=set, init=False, repr=False)
+    _resolving_set: set[type[NotSingletonClient]] = field(default_factory=set, init=False)
     # The function `inject()` is resolving for, named first in the path but never part of a cycle
     _injecting: Callable[..., Any] | None = field(default=None, init=False)
 
@@ -334,16 +334,21 @@ class Dependencies:
             # `inspect.signature` parses the text signature of a slot wrapper on every call
             return {}
 
-        # `vars()`, not getattr(): a subclass that redefines `__init__` must not reuse its base class's entry
-        entry: tuple[Callable[..., Any], dict[str, type[NotSingletonClient]]] | None = vars(cls).get(
-            "__nuke_di_arguments__"
+        # A subclass that inherits `__init__` finds its base class's entry and shares it; one that redefines
+        # `__init__` fails the check below and stores its own
+        entry: tuple[Callable[..., Any], dict[str, type[NotSingletonClient]]] | None = getattr(
+            cls, "__nuke_di_arguments__", None
         )
         if entry is not None and entry[0] is init:
             return entry[1]
 
         # Only a success is kept: a type hint that fails to evaluate must fail on the next resolve too
         arguments = self._read_arguments(cls, init)
-        cls.__nuke_di_arguments__ = (init, arguments)  # type: ignore[attr-defined]
+        try:
+            cls.__nuke_di_arguments__ = (init, arguments)  # type: ignore[attr-defined]
+        except AttributeError:
+            # A metaclass that forbids setting attributes: the class is read again on the next resolve
+            pass
         return arguments
 
     def _read_arguments(
@@ -352,13 +357,14 @@ class Dependencies:
         hints = self._type_hints(init, f"{sname(cls)}.__init__")
 
         clients: dict[str, type[NotSingletonClient]] = {}
-        for name, positional_only, has_default in _parameters(init):
+        for argument in _init_arguments(init):
+            name = argument.name
             hint: Any = hints.get(name)
             if isnotsingleton(hint):
-                if positional_only:
+                if argument.positional_only:
                     raise self._signature_error(cls, name, "is positional-only, a client is passed by keyword")
                 clients[name] = hint
-            elif has_default:
+            elif argument.has_default:
                 # Not ours to fill: the default stays
                 continue
             elif hint is None:
@@ -499,10 +505,19 @@ class Dependencies:
         return signature
 
 
-def _parameters(init: Callable[..., Any]) -> list[tuple[str, bool, bool]]:
+class _Argument(NamedTuple):
     """
-    The parameters of `init` after `self`, without `*args` and `**kwargs`:
-    the name, whether it is positional-only and whether it has a default.
+    One argument of an `__init__`, as much of its signature as the container needs.
+    """
+
+    name: str
+    positional_only: bool
+    has_default: bool
+
+
+def _init_arguments(init: Callable[..., Any]) -> list[_Argument]:
+    """
+    The arguments of `init` after `self`, without `*args` and `**kwargs`.
     """
     # A plain function is read from its code object, which is what `inspect.signature` does at thirty times the cost;
     # a decorated one (`__wrapped__`), a declared signature or a C function go through `inspect.signature`
@@ -513,16 +528,18 @@ def _parameters(init: Callable[..., Any]) -> list[tuple[str, bool, bool]]:
         positional_only = code.co_posonlyargcount
         first_default = positional - len(init.__defaults__ or ())
         kwdefaults = init.__kwdefaults__ or {}
-        # `self` is the first parameter, unless the method takes it through `*args`
+        # `self` is the first argument, unless the method takes it through `*args`
         start = 1 if positional or not code.co_flags & inspect.CO_VARARGS else 0
         return [
-            (name, index < positional_only, index >= first_default if index < positional else name in kwdefaults)
+            _Argument(
+                name, index < positional_only, index >= first_default if index < positional else name in kwdefaults
+            )
             for index, name in enumerate(names[start:], start)
         ]
 
     parameters = list(inspect.signature(init).parameters.values())[1:]
     return [
-        (param.name, param.kind is param.POSITIONAL_ONLY, param.default is not param.empty)
+        _Argument(param.name, param.kind is param.POSITIONAL_ONLY, param.default is not param.empty)
         for param in parameters
         if param.kind not in _VARIADIC
     ]

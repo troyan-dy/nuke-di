@@ -106,11 +106,27 @@ def test_arguments_are_read_once_per_class() -> None:
     assert isinstance(first.db, Database) and isinstance(second.db, Database) and first is not second
 
 
-def test_inherited_init_is_read_as_its_own() -> None:
+def test_inherited_init_shares_the_entry_of_the_base_class() -> None:
+    Dependencies().resolve(Repository)
     client = Dependencies().resolve(Inherits)
 
     assert isinstance(client.db, Database)
-    assert vars(Inherits)[ENTRY] == (Repository.__init__, {"db": Database})
+    assert ENTRY not in vars(Inherits)
+    assert Inherits.__nuke_di_arguments__ is vars(Repository)[ENTRY]  # type: ignore[attr-defined]
+
+
+def test_class_that_forbids_attributes_is_read_every_time() -> None:
+    class Frozen(type):
+        def __setattr__(cls, name: str, value: object) -> None:
+            raise AttributeError(f"{cls.__name__} is read-only")
+
+    class Sealed(Client, metaclass=Frozen):
+        def __init__(self, db: Database) -> None:
+            self.db = db
+
+    for _ in range(2):
+        assert isinstance(Dependencies().resolve(Sealed).db, Database)
+    assert ENTRY not in vars(Sealed)
 
 
 def test_redefined_init_gets_its_own_entry() -> None:
