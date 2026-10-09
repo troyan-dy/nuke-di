@@ -9,22 +9,29 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - The benchmark baseline on Python 3.11–3.14 and the comparison with other libraries on 3.11.7 are retaken at
-  1.11.1, after the performance changes of 1.9.1–1.11.1 (#29, #30, #32, #33, #35, #36); the 1.9.0 figures are in
-  the git history of `docs/benchmarks/`. A cold `resolve()` costs 4–6.5 µs per client instead of 7–14 µs, a
-  chain of 1000 clients 4.6–4.9 ms instead of 12.3–13.8 ms, and a second container of the same process, what
-  every test after the first pays, 1.2–2.2 µs per client with real or string annotations, where it cost the
-  same as the first. `connect()` of a chain of 1000 clients on 3.11 takes 105 ms instead of 211 ms. A warm
-  `resolve()` went from 100–135 ns to 150–185 ns, the client check in front of the cache lookup since 1.11.0
-  ([#55](https://github.com/troyan-dy/nuke-di/issues/55)). Against the other libraries at 100 clients, a
-  cold start costs 527 µs against 1.23 ms for dependency-injector, 1.41 ms for injector, 12.4 ms for dishka
-  and 21.7 ms for wireup; with string annotations dependency-injector is 1.1 times ahead; a cached root is
-  163 ns against 38 ns for dependency-injector and 108 ns for wireup; a FastAPI request costs the same as with
-  dishka, half of wireup and dependency-injector. `docs/benchmarks.md`, the README "Performance" section and
-  its translations show the new figures.
+  1.11.1, after the performance changes of 1.9.1–1.11.1 (#29, #30, #32, #33, #35, #36) and the fix below; the
+  1.9.0 figures are in the git history of `docs/benchmarks/`. A cold `resolve()` costs 3.7–6.9 µs per client
+  instead of 7–14 µs, a chain of 1000 clients 4.2–5.1 ms instead of 12.3–13.8 ms, and a second container of
+  the same process, what every test after the first pays, 1.1–1.7 µs per client with real or string
+  annotations, where it cost the same as the first. A warm `resolve()` is 82–109 ns instead of 100–135 ns.
+  `connect()` of a chain of 1000 clients on 3.11 takes 100 ms instead of 211 ms. Against the other libraries
+  at 100 clients, a cold start costs 532 µs against 1.02 ms for dependency-injector, 1.38 ms for injector,
+  13.2 ms for dishka and 21.0 ms for wireup; with string annotations dependency-injector is 1.2 times ahead; a
+  cached root is 93 ns against 37 ns for dependency-injector and 97 ns for wireup; a FastAPI request costs the
+  same as with dishka, half of wireup and dependency-injector. `docs/benchmarks.md`, the README "Performance"
+  section and its translations show the new figures.
 - `benchmarks/compare.py` makes the classes of the cold start for every sample, as the cold row of
   `benchmarks/run.py` does: with the same classes every sample, the per-class cache of 1.9.1 served `nuke-di`
   after the first one, so the row measured its second container, 158 µs for 100 clients instead of a cold
-  527–563 µs.
+  494–532 µs.
+
+### Fixed
+
+- A warm `resolve()`, the singleton handed out again, is back to about 100 ns: the check that the class is a
+  client ([#55](https://github.com/troyan-dy/nuke-di/issues/55)) runs after the cache lookup instead of before
+  it, which a non-client never passes anyway. On 3.11.7 a warm `resolve()` of the same root in a loop took
+  99 ns in 1.10.2, 164 ns in 1.11.0 and 1.11.1, and 99 ns now; the baseline has it at 82–109 ns on 3.11–3.14.
+  An unhashable argument, `resolve({})`, still gets the "is not a client" message.
 
 ## [1.11.1] - 2026-10-09
 
