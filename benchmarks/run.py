@@ -23,7 +23,7 @@ import subprocess
 import sys
 import time
 import tracemalloc
-from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Iterable, Iterator, Sequence
 from dataclasses import dataclass, make_dataclass
 from datetime import UTC, datetime
 from functools import partial
@@ -273,43 +273,51 @@ def resolve_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
                 tree = build(n, strings)
                 yield Result(SEEN, shape_label(shape, strings), n, collect(partial(seen_resolve, tree.root), repeat))
 
-                if strings:
-                    # The cache hit does not read the hints
-                    continue
-                deps = Dependencies()
-                deps.resolve(tree.root)
-                samples = collect(partial(warm_resolve, deps, tree.root), repeat)
-                yield Result("resolve(), warm", shape, n, samples, per_client=False)
+                if not strings:
+                    # The cache hit does not read the hints, so it has no strings variant
+                    deps = Dependencies()
+                    deps.resolve(tree.root)
+                    samples = collect(partial(warm_resolve, deps, tree.root), repeat)
+                    yield Result("resolve(), warm", shape, n, samples, per_client=False)
+                tree.discard()
 
 
-async def cycle(deps: Dependencies) -> float:
+async def timed(run: Callable[[], Awaitable[None]]) -> float:
+    """
+    Seconds of one `await run()`, garbage collection paused.
+    """
     gc.disable()
     try:
         started = time.perf_counter()
-        await deps.connect()
-        await deps.disconnect()
+        await run()
         return time.perf_counter() - started
     finally:
         gc.enable()
+
+
+async def cycle(deps: Dependencies) -> float:
+    async def run() -> None:
+        await deps.connect()
+        await deps.disconnect()
+
+    return await timed(run)
 
 
 async def ideal(clients: list[NotSingletonClient]) -> float:
     """
     What the same clients cost without the container: every coroutine awaited directly, in order.
     """
-    gc.disable()
-    try:
-        started = time.perf_counter()
+
+    async def run() -> None:
         for instance in clients:
             await instance.connect()
         for instance in reversed(clients):
             await instance.disconnect()
-        return time.perf_counter() - started
-    finally:
-        gc.enable()
+
+    return await timed(run)
 
 
-Reference = Callable[[list[Any]], Awaitable[float]]
+Reference = Callable[[list[Any]], Coroutine[Any, Any, float]]
 
 
 def connect_sample(
@@ -444,21 +452,19 @@ async def critical_path(clients: list[Sleeper]) -> float:
         for dependency in client.dependencies:
             consumers[id(dependency)].append(client)
 
-    gc.disable()
-    try:
-        started = time.perf_counter()
+    async def run() -> None:
+        # A task body runs only when the loop gets control back, after every task is created, so each one
+        # finds the tasks it waits for whatever the order
         connects: dict[int, asyncio.Task[None]] = {}
-        # Dependencies before consumers, as the container resolved them, so every task finds what it waits for
         for client in clients:
             connects[id(client)] = asyncio.create_task(after(connects, client.dependencies, client.connect))
         await asyncio.gather(*connects.values())
         disconnects: dict[int, asyncio.Task[None]] = {}
-        for client in reversed(clients):
+        for client in clients:
             disconnects[id(client)] = asyncio.create_task(after(disconnects, consumers[id(client)], client.disconnect))
         await asyncio.gather(*disconnects.values())
-        return time.perf_counter() - started
-    finally:
-        gc.enable()
+
+    return await timed(run)
 
 
 def connect_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:

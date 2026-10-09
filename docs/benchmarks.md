@@ -42,7 +42,10 @@ Every tree is built from classes made with `dataclasses.make_dataclass`, so each
 `strings` variant of a tree has the same classes with the names of the dependencies as strings in the
 type hints, which is what `from __future__ import annotations` makes of every annotation and what most
 code bases have: `get_type_hints()` then compiles and evaluates every string in the globals of the class's
-module, and the classes live in a module of their own, registered in `sys.modules` as a real one is.
+module, and the classes live in a module of their own, registered in `sys.modules` as a real one is. The
+future import also turns the `-> None` of `__init__` into the string `'None'`, which the `strings` trees
+leave as the object, so real code evaluates one more forward reference per class than they do: a slight
+underestimate.
 
 | Scenario | Shape | The figure |
 |----------|-------|------------|
@@ -100,7 +103,10 @@ connected.
 
 The baseline was taken on an Apple M2 Pro, macOS 26.6.2 (arm64), `nuke-di` 1.9.0 at commit `8a414d6`,
 Python 3.11.7, 3.12.5, 3.13.14 and 3.14.6, each in a fresh `uv` environment from `uv.lock`, with
-`N = 10, 100, 1000` and 20 repeats.
+`N = 10, 100, 1000` and 20 repeats. It is the state before the per-class cache and the `__init__` reader
+of 1.9.1 ([#29](https://github.com/troyan-dy/nuke-di/issues/29),
+[#36](https://github.com/troyan-dy/nuke-di/issues/36)): the tables and the findings below stand as the
+"before" figures until the baseline is retaken once every performance change is in.
 
 - **`resolve()` costs 7–14 µs per client** with real type hints on every version and grows linearly:
   100 clients in about 1 ms, 1000 in 8–14 ms. The chain is the most expensive shape per client (one
@@ -112,12 +118,12 @@ Python 3.11.7, 3.12.5, 3.13.14 and 3.14.6, each in a fresh `uv` environment from
   most, with two or three hints per class against one: `get_type_hints()` compiles and evaluates every
   string on every cold `resolve()`, and the `annotationlib` of 3.14 does more per string. Most code bases
   have `from __future__ import annotations`, so this is the figure they pay, not the one above.
-- **A second container costs the same as the first**: `resolve()` of classes seen before is within
-  20% of the cold figure, mostly a few percent below it, with both kinds of hints; nothing is kept per
-  class, so every container reads the signatures again. This is the row a per-class cache
-  ([#29](https://github.com/troyan-dy/nuke-di/issues/29)) would move. The cold figure is a few percent
-  above it, most likely the first attribute lookups on fresh classes, which fill the type caches of the
-  interpreter.
+- **A second container costs the same as the first**: `resolve()` of classes seen before is 10–20% below
+  the cold figure at `N = 10` and within 10% of it at 100 and 1000, but for one tree (3.12, `wide,
+  strings`, 1000: 22% below), with both kinds of hints; nothing is kept per class, so every container
+  reads the signatures again. This is the row a per-class cache
+  ([#29](https://github.com/troyan-dy/nuke-di/issues/29)) would move. The cold figure is above it most
+  likely for the first attribute lookups on fresh classes, which fill the type caches of the interpreter.
 - **`connect()` and `disconnect()` cost 12–23 µs per client in a layer and 0.1–0.24 ms per layer**,
   all of it scheduling: the clients' own coroutines take 0.2 µs each. A layer is cheapest on 3.14 and
   most expensive on 3.11, where `asyncio.wait_for()` still creates a task per call, which doubles the

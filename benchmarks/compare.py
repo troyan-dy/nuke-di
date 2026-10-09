@@ -56,7 +56,7 @@ from nuke_di.fastapi import setup as nuke_di_setup
 # Registering and resolving: `cold(tree)` builds a container and gets the root; `warm(tree)` builds one,
 # gets the root and returns a function that gets it again
 
-COLD = "cold: container, registration, root"
+COLD_START = "cold: container, registration, root"
 
 
 @dataclass(frozen=True)
@@ -119,15 +119,19 @@ def dependency_injector_root(tree: Tree) -> Any:
     A `Singleton` provider per class on a `DynamicContainer`, wired by the names of the `__init__` arguments.
     """
     container = containers.DynamicContainer()
-    made: dict[Any, Any] = {}
+    made: dict[str, Any] = {}
     for cls in tree.clients:
-        # The type of a field is the class, or its name when the annotations are strings: the library reads
-        # no annotation itself, the wiring is the user's and goes by name either way
-        dependencies = {field.name: made[field.type] for field in fields(cls)}  # type: ignore[arg-type]
+        # The library reads no annotation: the user names the provider of every argument. The type of a field
+        # is the class, or its name when the annotations are strings, and the providers are keyed by name
+        dependencies = {field.name: made[name(field.type)] for field in fields(cls)}  # type: ignore[arg-type]
         provider = providers.Singleton(cls, **dependencies)
         setattr(container, cls.__name__, provider)
-        made[cls] = made[cls.__name__] = provider
-    return made[tree.root]
+        made[cls.__name__] = provider
+    return made[tree.root.__name__]
+
+
+def name(hint: Any) -> str:
+    return hint if isinstance(hint, str) else str(hint.__name__)
 
 
 def dependency_injector_cold(tree: Tree) -> object:
@@ -180,9 +184,6 @@ def attempt(result: Result, sample: Callable[[], float], repeat: int) -> Result:
         result.samples = collect(sample, repeat)
     except RecursionError:
         result.error = "RecursionError"
-    except Exception as exc:
-        # A library that cannot read the string annotations, see docs/benchmarks.md
-        result.error = type(exc).__name__
     return result
 
 
@@ -193,6 +194,7 @@ def trees(sizes: list[int], strings: bool = False) -> Iterator[tuple[str, int, T
             for library in LIBRARIES:
                 library.prepare(tree)
             yield shape_label(shape, strings), n, tree
+            tree.discard()
 
 
 def cold_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
@@ -201,7 +203,7 @@ def cold_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
         for shape, n, tree in trees(sizes, strings):
             for library in LIBRARIES:
                 sample = partial(measure, library.cold, 1, tree)
-                yield attempt(Result(COLD, shape, n, [], library=library.name), sample, repeat)
+                yield attempt(Result(COLD_START, shape, n, [], library=library.name), sample, repeat)
 
 
 def warm_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
@@ -310,8 +312,8 @@ class Figure:
 
 
 FIGURES = [
-    Figure("Cold start: a container and a tree of N clients", COLD, "mixed", "N"),
-    Figure("Cold start: the same N clients with string annotations", COLD, "mixed, strings", "N", chart=False),
+    Figure("Cold start: a container and a tree of N clients", COLD_START, "mixed", "N"),
+    Figure("Cold start: the same N clients with string annotations", COLD_START, "mixed, strings", "N", chart=False),
     Figure("A cached root", "warm: the root again", "mixed", "N"),
     Figure("A FastAPI request with a client", "one request, a client in the handler", "FastAPI", None),
 ]
