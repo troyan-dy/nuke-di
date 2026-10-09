@@ -90,9 +90,11 @@ connected.
   out where it means nothing (a cache hit, the fixed cost of an autospec mock).
 - Garbage collection is paused while a sample runs, as `timeit` does, and one untimed warm-up pays the
   one-off costs, e.g. the lazy import of `unittest.mock` by `mock()`.
-- `resolve()` recurses once per layer, and the default recursion limit stops a chain at about 400 clients
-  on Python 3.11 and 800 on 3.12 and later. The runner raises the limit for its deep trees; a real tree
-  of that depth would have to do the same.
+- `resolve()` builds a tree on a stack of frames of its own, not with a call per client of a chain, so a
+  chain of any length resolves under the default recursion limit and the runner leaves the limit alone
+  ([#35](https://github.com/troyan-dy/nuke-di/issues/35)). The baseline below predates it: the recursion of
+  1.9.0 stopped a chain at about 400 clients on Python 3.11 and 800 on 3.12 and later, and the runner
+  raised the limit for its deep trees. `benchmarks/compare.py` still raises it, for the libraries that recurse.
 - The `connect()` figures include the logging calls of the container (the `nuke_di` logger with no
   handler) and a `ClientTiming` per client, which is what a real startup pays too.
 - The application figures are wall time, and `asyncio.sleep()` overshoots by up to a millisecond per
@@ -208,9 +210,10 @@ on dishka 1.10.1, wireup 2.12.1, dependency-injector 4.49.1 and injector 0.24.0.
   (104–118 µs in the baseline above). Through wireup it costs 229 µs and through dependency-injector
   232 µs, twice that: their integrations do more per request, as their documentation wires them; what
   exactly is not investigated here.
-- A chain of 1000 clients exceeds the default recursion limit in injector as well as in `nuke-di`
-  (see above); the runner raises the limit, which is enough for `nuke-di`, dishka, wireup and
-  dependency-injector but not for injector.
+- A chain of 1000 clients exceeds the default recursion limit in dishka, wireup and injector, in
+  dependency-injector on 3.11 (not on 3.14), and in the `nuke-di` 1.9.0 of this comparison, which recursed
+  until [#35](https://github.com/troyan-dy/nuke-di/issues/35); the runner raises the limit, which is enough
+  for every library but injector.
 
 ### Python 3.11.7, nuke-di 1.9.0 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 

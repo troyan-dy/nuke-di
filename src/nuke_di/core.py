@@ -86,7 +86,8 @@ class Dependencies:
     _replacements: dict[type[NotSingletonClient], NotSingletonClient] = field(default_factory=dict, init=False)
     # Replacements of the open `override()` blocks, outermost first; `flush()` keeps them
     _overrides: list[tuple[type[NotSingletonClient], NotSingletonClient]] = field(default_factory=list, init=False)
-    # Clients being resolved right now, outermost first: finds cycles and names the path in errors
+    # Clients being resolved right now, the open frames of `_resolve_tree()`, outermost first: finds cycles and names
+    # the path in errors
     _resolving: list[type[NotSingletonClient]] = field(default_factory=list, init=False)
     # The same classes, for the cycle check: the list would be scanned once per client, as long as the depth
     _resolving_set: set[type[NotSingletonClient]] = field(default_factory=set, init=False)
@@ -350,40 +351,92 @@ class Dependencies:
         if inst is not None:
             return cast(CT, inst)
 
-        if cls in self._resolving_set:
-            raise CircularDependencyError(f"Circular dependency: {self._path(cls)}")
-
-        if logger.isEnabledFor(logging.DEBUG):
-            name = qualname(cls)
-            logger.debug('Resolving dependency "%s"', name, extra=fields(client=name))
-
-        self._resolving.append(cls)
-        self._resolving_set.add(cls)
+        # Not always 0: a client's `__init__` that resolves on its own runs inside its consumer's frame, and only the
+        # frames opened from here are this call's to close
+        opened = len(self._resolving)
         try:
+            return cast(CT, self._resolve_tree(cls))
+        except BaseException:
+            # The frames a failure leaves open are off the path, as a recursion's `finally` would leave them: the next
+            # resolve sees no stale cycle and names a path of its own
+            self._resolving_set.difference_update(self._resolving[opened:])
+            del self._resolving[opened:]
+            raise
+
+    def _resolve_tree(self, cls: type[NotSingletonClient]) -> NotSingletonClient:
+        """
+        Build `cls` and its dependencies, each before its consumer, on a stack of frames instead of the call stack.
+
+        A call per client of a chain would stop it at the recursion limit, a few hundred clients long; the frames grow
+        with the chain. A frame is a client whose arguments are being resolved, and `_resolving` is the class of every
+        open frame, outermost first, so the cycle check and the path in errors are what a recursion had.
+        """
+        resolving, resolving_set = self._resolving, self._resolving_set
+        # The open frames but the innermost, outermost first, each waiting for the client of its argument `key`
+        waiting: list[_Frame] = []
+        while True:
+            # Open a frame for `cls`: on the path from here on, so a cycle back to it and a signature error name it
+            if cls in resolving_set:
+                raise CircularDependencyError(f"Circular dependency: {self._path(cls)}")
+            if logger.isEnabledFor(logging.DEBUG):
+                name = qualname(cls)
+                logger.debug('Resolving dependency "%s"', name, extra=fields(client=name))
+            resolving.append(cls)
+            resolving_set.add(cls)
             arguments = self._client_arguments(cls)
-            init = {key: self._resolve(dep) for key, dep in arguments.items()}
-        finally:
-            self._resolving.pop()
-            self._resolving_set.remove(cls)
+            init: dict[str, NotSingletonClient] = {}
+            # Most clients of a tree take no client, and share one exhausted cursor
+            pending = iter(arguments.items()) if arguments else _NO_ARGUMENTS
 
-        try:
-            inst = cls(**init)
-        except Exception as exc:
-            # `cls` left the path when its arguments were resolved, so it is named at the end of it here
-            name = self._name(cls)
-            # The path before the cause: a cause such as a pydantic error spans lines
-            where = f"{name}.__init__ raised {type(exc).__name__}{self._path_suffix(cls)}"
-            logger.exception("%s: %s", where, exc, extra=fields(client=name))
-            raise InitializeDependencyError(f"{where}: {exc}") from exc
+            while True:
+                # The innermost frame takes the clients that exist; a break leaves `dep` to build first
+                for key, dep in pending:
+                    # Not kept in a local: an `__init__` that flushes the container replaces the dict
+                    inst = self.clients.get(dep)
+                    if inst is None:
+                        break
+                    init[key] = inst
+                else:
+                    # Every argument is in `init`: the client is built and its frame closed. Off the path before
+                    # `__init__`, so an `__init__` that resolves on its own sees the path of its consumers.
+                    resolving.pop()
+                    resolving_set.remove(cls)
+                    try:
+                        inst = cls(**init)
+                    except Exception as exc:
+                        raise self._init_error(cls, exc) from exc
 
-        # One layer above the highest dependency; mocks are not connected, so they do not count
-        self._layers[id(inst)] = 1 + max((self._layers.get(id(d), -1) for d in init.values()), default=-1)
-        self._dependencies[id(inst)] = {key: (arguments[key], dep) for key, dep in init.items()}
-        self.connect_clients.append(inst)
-        # Published last: the lock-free lookup of resolve() hands out a singleton that the container accounts for
-        if isclient(cls):
-            self.clients[cls] = inst
-        return inst
+                    # One layer above the highest dependency; mocks are not connected, so they do not count
+                    layers = self._layers
+                    layers[id(inst)] = 1 + max((layers.get(id(d), -1) for d in init.values()), default=-1)
+                    self._dependencies[id(inst)] = {arg: (arguments[arg], client) for arg, client in init.items()}
+                    self.connect_clients.append(inst)
+                    # Published last: the lock-free lookup of resolve() hands out a singleton that the container
+                    # accounts for
+                    if isclient(cls):
+                        self.clients[cls] = inst
+
+                    if not waiting:
+                        return inst
+                    # The consumer resumes at its next argument
+                    cls, arguments, init, pending, key = waiting.pop()
+                    init[key] = inst
+                    continue
+                # Before the arguments after it, which is the order of a recursion and of the layers
+                waiting.append((cls, arguments, init, pending, key))
+                cls = dep
+                break
+
+    def _init_error(self, cls: type[NotSingletonClient], exc: Exception) -> InitializeDependencyError:
+        """
+        The error of an `__init__` that raised `exc`, logged with the path that led to it.
+        """
+        # `cls` left the path when its arguments were resolved, so it is named at the end of it here
+        name = self._name(cls)
+        # The path before the cause: a cause such as a pydantic error spans lines
+        where = f"{name}.__init__ raised {type(exc).__name__}{self._path_suffix(cls)}"
+        logger.exception("%s: %s", where, exc, extra=fields(client=name))
+        return InitializeDependencyError(f"{where}: {exc}")
 
     def graph(self) -> Graph:
         """
@@ -649,6 +702,21 @@ class Dependencies:
             self._injecting = outer
 
         return signature
+
+
+# A client waiting for a dependency in `_resolve_tree()`: its class, the arguments of its `__init__` to fill with
+# clients, the clients found so far, the arguments left (an iterator: the index of the next one) and the argument the
+# dependency fills. A plain tuple, for speed: on 3.14 a NamedTuple cost a chain 10-13% per client and methods that
+# open and close a frame 8-10%, measured.
+_Frame = tuple[
+    type[NotSingletonClient],
+    dict[str, type[NotSingletonClient]],
+    dict[str, NotSingletonClient],
+    Iterator[tuple[str, type[NotSingletonClient]]],
+    str,
+]
+# Exhausted: the cursor of every client without arguments
+_NO_ARGUMENTS: Iterator[tuple[str, type[NotSingletonClient]]] = iter(())
 
 
 class _Argument(NamedTuple):
