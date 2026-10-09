@@ -129,9 +129,9 @@ $ uv run pytest -q service_layout
 
 One ConfigMap feeds all three, so they agree on `SERVICE_DB` and the timeouts. Each Deployment's
 `terminationGracePeriodSeconds: 30` covers its worst case,
-`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers`: for the worker
-`10 + 5 × 3 = 25` (`Settings`, `Broker` and `Shutdown`; `Database`; `Outbox`), for the API uvicorn's
-`--timeout-graceful-shutdown 5` plus `5 × 4` layers. SQLite on a shared volume keeps the example
+`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies`: for the
+worker `10 + 5 × 3 = 25` (`Outbox` → `Database` → `Settings`), for the API uvicorn's
+`--timeout-graceful-shutdown 5` plus `5 × 4` (`Orders` → `Outbox` → `Database` → `Settings`). SQLite on a shared volume keeps the example
 self-contained; a real service points `Database` at Postgres and drops the volume.
 
 ## What to look at
@@ -139,7 +139,7 @@ self-contained; a real service points `Database` at Postgres and drops the volum
 - `clients.py` is the only place that knows about SQLite and the environment: the API, the worker
   and the job import the clients they need and never build them.
 - `Orders.create` writes the order and its outbox row in one transaction, through `Outbox.add`, so an
-  order is never stored without its event; `Outbox` is a dependency of `Orders`, a layer below it.
+  order is never stored without its event; `Outbox` is a dependency of `Orders`, so it connects first and disconnects last.
 - The worker sleeps with `asyncio.wait_for(shutdown.wait(), poll_seconds)`: an idle worker stops at
   once on SIGTERM instead of finishing its sleep.
 - The wiring test starts the real app with `override(Database)`, so it catches a broken `__init__`

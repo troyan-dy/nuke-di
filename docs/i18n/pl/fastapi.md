@@ -102,7 +102,8 @@ Co się stało:
    z globalnego `DI`, i opakował lifespan aplikacji.
 2. `@app.get` zauważył `users: UserService` i tylko to zanotował; przy imporcie nic nie zostało zbudowane.
 3. Przy starcie lifespan rozwiązał klientów tras obsługiwanych przez aplikację — jej własnych i tych
-   z dołączonych routerów — i połączył ich, warstwa po warstwie. Przy zamykaniu ich rozłączył.
+   z dołączonych routerów — i połączył każdego po jego zależnościach. Przy zamykaniu ich
+   rozłączył.
 4. Żądanie do `/users/42` dostało połączony `UserService`. `/me` przeszło przez zależność
    `current_user`, która w ten sam sposób przyjmuje `db: Database`.
 

@@ -5,20 +5,20 @@ from nuke_di import Dependencies
 from graph.api import place_order
 
 
-def test_layers(di: Dependencies) -> None:
+def test_dependencies(di: Dependencies) -> None:
     di.inject(place_order)
 
-    layers = {node.name: node.layer for node in di.graph().nodes}
+    needs = {node.name: [dependency.name for dependency in node.dependencies.values()] for node in di.graph().nodes}
 
-    assert layers == {
-        "Postgres": 0,
-        "Redis": 0,
-        "Kafka": 0,
-        "OrderRepository": 1,
-        "UserRepository": 1,
-        "OrderService": 2,
-        "Notifications": 2,
-        "Checkout": 3,
+    assert needs == {
+        "Postgres": [],
+        "Redis": [],
+        "OrderRepository": ["Postgres", "Redis"],
+        "UserRepository": ["Postgres"],
+        "Kafka": [],
+        "OrderService": ["OrderRepository", "UserRepository", "Kafka"],
+        "Notifications": ["UserRepository", "Kafka"],
+        "Checkout": ["OrderService", "Notifications"],
     }
 
 

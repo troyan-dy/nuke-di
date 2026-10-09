@@ -91,7 +91,7 @@ after the block: OrderedDict()
 - **每个类只能有一个替换对象。** 再次调用 `mock(cls)` 会返回已注册的替换对象；
   `mock(cls, other)` 和 `override(cls)` 会抛出 `ConnectError: Database already has a replacement`。
 - **替换对象不会被连接。** 它们的 `connect()` / `disconnect()` 永远不会被调用，
-  也不参与[按层连接](clients.md#layers)。
+  也不参与[连接顺序](clients.md#connect-order)。
 - **替换对象的有效期。** 由 `mock()` 注册的替换对象会在下一次 `flush()` 时被丢弃，包括
   `disconnect()` 末尾的那一次：需要多次连接容器的测试应使用
   `override()`，它的替换对象会在每次 `flush()` 后保留下来，直到代码块结束。代码块内的异常

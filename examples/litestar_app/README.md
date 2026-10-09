@@ -17,7 +17,7 @@ $ uv run --with uvicorn uvicorn litestar_app.app:app
 INFO:     Started server process [66825]
 INFO:     Waiting for application startup.
 database: connected
-INFO - 2026-10-09 19:32:28,744 - nuke_di.core - core - Connected 2 clients in 2 layers in 0.00s (slowest: Database 0.00s, UserService 0.00s)
+INFO - 2026-10-09 19:32:28,744 - nuke_di.core - core - Connected 2 clients in 0.00s (slowest: Database 0.00s, UserService 0.00s)
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 INFO:     127.0.0.1:53281 - "GET /users HTTP/1.1" 200 OK

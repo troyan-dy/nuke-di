@@ -12,8 +12,8 @@ The simplest dependency injection for async Python projects.
 
 Dependencies are declared with plain type hints. `nuke-di` builds the dependency tree,
 creates every client once and drives its async lifecycle: `connect()` on startup and
-`disconnect()` on shutdown. Independent clients start concurrently, layer by layer,
-from the deepest dependencies up.
+`disconnect()` on shutdown. Every client starts as soon as its own dependencies have
+connected, concurrently with every other client that is ready.
 
 On top of that, one decorator turns an async function into a process with command-line
 arguments, and FastAPI, Litestar and FastStream handlers take clients by type hint the same way.
@@ -96,9 +96,9 @@ What happened:
   scopes to configure. A third-party object becomes a dependency by wrapping it in such a class.
 - **Type hints are the wiring.** A client asks for its dependencies in `__init__`, a function in
   its signature. Nothing else names them, so renaming or adding a dependency is an ordinary refactoring.
-- **Concurrent startup, ordered shutdown.** Clients connect layer by layer, from the deepest
-  dependencies up, and the clients of one layer connect concurrently. They disconnect in reverse,
-  and a failing `disconnect()` does not stop the others.
+- **Concurrent startup, ordered shutdown.** A client connects as soon as its own dependencies have,
+  concurrently with every other client that is ready, so a slow client holds back only the clients that
+  need it. They disconnect in reverse, and a failing `disconnect()` does not stop the others.
 - **Fail fast.** A tree that cannot be built fails before anything connects, naming the argument and
   the path to it, and `mypy` with the
   [plugin](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#checking-the-tree-with-mypy)
@@ -109,6 +109,13 @@ What happened:
   for one test; the code under test does not change.
 - **No runtime dependencies.** The core uses only the standard library; the framework
   integrations are extras.
+
+How a startup goes, on the example of the
+[Clients guide](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#connect-order): `Consumer` needs
+only `Kafka`, so it does not wait for the slow `Postgres`, and the startup takes as long as its longest chain of
+dependencies.
+
+![Six clients connecting by their own dependencies: Consumer and Http start once Kafka and Redis have connected, the startup takes 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/66f74f76407da320cfc97ef22b761d85e298eddd/docs/connect-now.svg)
 
 ## Performance
 
@@ -138,8 +145,8 @@ long per request. With string annotations dependency-injector, which reads no an
 On a cached root `nuke-di` is level with wireup, and the Cython `get()` of dependency-injector wins by about
 50 ns, a difference no application notices.
 
-On its own, `resolve()` costs 4–7 µs per client, so a tree of 1000 clients is built in under 6 ms, and
-`connect()` adds 9–15 µs per client in a layer. [docs/benchmarks.md](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md) explains every
+On its own, `resolve()` costs 3.5–6.3 µs per client, so a tree of 1000 clients is built in under 5.5 ms,
+and `connect()` adds 13–18 µs per client. [docs/benchmarks.md](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md) explains every
 scenario, records the baseline on Python 3.11–3.14 and has the whole comparison with its method.
 
 ## A job with command-line arguments
@@ -349,7 +356,7 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
 ## Documentation
 
 - [Clients](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md): `Client` and `NotSingletonClient`, the lifecycle, dataclass clients,
-  layers, startup timings, the dependency graph, connect and resolution errors
+  connect order, startup timings, the dependency graph, connect and resolution errors
 - [The container](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/container.md): `Dependencies` and the global `DI`, `resolve()`, `inject()`,
   `mock()`, `override()`
 - [Workers and jobs](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md): `@job` and `@worker`, command-line parameters,

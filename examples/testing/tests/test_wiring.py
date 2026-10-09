@@ -30,24 +30,23 @@ def test_wiring_catches_a_broken_init() -> None:
 
 
 def test_graph() -> None:
-    """deps.graph(): assert on which clients an entrypoint pulls in and in which layer."""
+    """deps.graph(): assert on which clients an entrypoint pulls in and what each one needs."""
     deps = Dependencies()
     deps.inject(signups)
     nodes = {node.name: node for node in deps.graph().nodes}
 
-    assert nodes["Signups"].layer == 1
     assert list(nodes["Signups"].dependencies) == ["db", "mailer"]
-    assert {name for name, node in nodes.items() if node.layer == 0} == {"Queue", "Database", "Mailer", "Shutdown"}
+    leaves = {name for name, node in nodes.items() if not node.dependencies}
+    assert leaves == {"Queue", "Database", "Mailer", "Shutdown"}
     assert "Database --> Signups" in deps.graph().to_mermaid()
 
 
 def test_graph_shows_replacements() -> None:
-    """A mocked client is a node with `replacement` set and no layer: it is never connected."""
+    """A mocked client shows up in the graph with `replacement` set: it is never connected."""
     deps = Dependencies()
     db = deps.mock(Database)
     deps.inject(reminders)
     nodes = {node.name: node for node in deps.graph().nodes}
 
     assert nodes["Database"].replacement is db
-    assert nodes["Database"].layer is None
     assert nodes["Mailer"].replacement is None

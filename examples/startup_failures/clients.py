@@ -35,7 +35,7 @@ class Orders(Client):
         self.kafka = kafka
 
     async def connect(self) -> None:
-        print("orders: connected")  # never printed: the layer below failed
+        print("orders: connected")  # never printed: a dependency failed
 
 
 class Reports(Client):

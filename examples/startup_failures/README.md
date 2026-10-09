@@ -34,9 +34,9 @@ postgres: disconnected
 ConnectError: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 __cause__: OSError('broker kafka-1:9092 is unreachable')
 connected: False
-Postgres layer 0  connect ok  disconnect ok
-Kafka    layer 0  connect failed  disconnect None
-Orders   layer 1  connect None  disconnect None
+Postgres connect ok  disconnect ok
+Kafka    connect failed  disconnect None
+Orders   connect None  disconnect None
 ```
 
 A `connect()` that never returns, cut off after one second instead of the default 30:
@@ -57,9 +57,9 @@ TimeoutError
 postgres: disconnected
 ConnectTimeoutError: Search did not connect within 1s (CONNECT_TIMEOUT_SECONDS)
 __cause__: TimeoutError()
-Postgres layer 0  connect ok  disconnect ok
-Search   layer 0  connect timed_out  disconnect None
-Reports  layer 1  connect None  disconnect None
+Postgres connect ok  disconnect ok
+Search   connect timed_out  disconnect None
+Reports  connect None  disconnect None
 ```
 
 The same failure in a job: the body never runs, and the exit code tells the scheduler:
@@ -123,8 +123,8 @@ $ uv run pytest -q startup_failures
 
 - `ConnectError` carries the original exception as `__cause__`; `ConnectTimeoutError` is a
   `ConnectError`, so one `except ConnectError` covers both.
-- The clients that connected are rolled back, layers in reverse; a client that failed, and the
-  layers above it, are never disconnected because they never connected.
+- The clients that connected are rolled back, each after the clients that depend on it; a client
+  that failed, and the clients that need it, are never disconnected because they never connected.
 - `ConnectError` derives from `SystemExit`: a process that does not catch it stops. A dependency
   that is down is reported, not retried: the orchestrator restarts the process.
 - A resolution error is a bug in the code, not in the environment, and the test of a job's wiring

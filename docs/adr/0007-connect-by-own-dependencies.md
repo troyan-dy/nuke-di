@@ -1,0 +1,12 @@
+# Clients connect by their own dependencies, not by layer
+
+[ADR-0001](0001-layered-concurrent-connect.md), which this one supersedes in part, grouped clients into layers by their height in the dependency graph and connected one layer after another, so a slow client held back every client one layer up, including the ones that do not depend on it. On a six-client tree shaped like an application (Postgres 0.3 s; Kafka and Redis 0.05 s; Consumer, which needs only Kafka, 0.3 s) the startup took 0.60 s instead of 0.35 s, because Consumer waited for Postgres. The same barrier held a whole layer back on shutdown behind one client that hung until `DISCONNECT_TIMEOUT_SECONDS`. Now every client connects as soon as its own dependencies have, and disconnects as soon as the clients that depend on it have, whatever their `disconnect()` ended in; the wall time of a startup is its longest chain of dependencies. Decided on 2026-10-09 in issue #28.
+
+The principle of ADR-0001 stays: only dependencies declared in `__init__` order clients, and a client that relies on another being connected first declares it. The layer was an implementation artefact of the old schedule, so the term goes with it: `ClientTiming.layer`, `Node.layer`, the `layer` field of log records and the layer subgraphs of `Graph.to_mermaid()` are removed rather than kept as a height nobody schedules by. The removal ships in a minor release, 1.13.0, on purpose: a field that describes how clients used to be scheduled has no meaning left to keep compatible.
+
+## Considered Options
+
+- **Cancel only the consumers of a failed client** and let unrelated branches finish connecting before the rollback: rejected, it keeps connections open that the rollback closes right after, and delays the exit of a process that is failing anyway. The first failure cancels every client still connecting, across the whole graph, as it cancelled the rest of a layer before.
+- **Keep the dependencies of a client whose `disconnect()` failed or timed out connected**: rejected, nothing could release them; a failure is logged and the dependencies disconnect after it, as the next layer did before.
+- **Keep `layer` as a display-only height** in timings, graph and logs: rejected, a number that no longer says when a client connects invites the wrong reading.
+- **Await the clients with nothing to wait for inline instead of in a task**: rejected, it saves about a millisecond on a chain of 1000 clients and makes independent clients connect one after another if done naively.

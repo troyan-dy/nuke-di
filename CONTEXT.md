@@ -20,12 +20,16 @@ _Avoid_: Registry, injector
 Building a client together with its whole dependency tree, before the container connects.
 _Avoid_: Instantiation, wiring
 
-**Layer**:
-A set of client instances with the same height in the dependency graph: clients with no dependencies form layer 0, every other client sits one layer above its highest dependency. All clients of one layer connect concurrently.
-_Avoid_: Level, tier, depth
+**Connect order**:
+A client connects as soon as its own dependencies have and disconnects as soon as its consumers have; only dependencies declared in `__init__` order clients, and every client that is ready connects concurrently with the others.
+_Avoid_: Layer, level, DAG schedule
+
+**Connect concurrency**:
+The most `connect()` or `disconnect()` calls of one container running at once; unlimited by default. A client waiting for its own dependencies does not count against it.
+_Avoid_: Parallelism, workers
 
 **Graph**:
-Every client the container has resolved so far, with who depends on whom and the Layer of each. A snapshot: a flush empties it, apart from the Replacements of open Override blocks. Resolution of one root builds that root's tree; the container holds the graph, because singletons are shared between trees.
+Every client the container has resolved so far, with who depends on whom. A snapshot: a flush empties it, apart from the Replacements of open Override blocks. Resolution of one root builds that root's tree; the container holds the graph, because singletons are shared between trees.
 _Avoid_: Tree (for the whole container), DAG, node, edge
 
 **Client timing**:

@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 import types
-from collections import Counter, OrderedDict, defaultdict
+from collections import Counter, OrderedDict
 from collections.abc import Callable, Coroutine, Iterable, Iterator
 from dataclasses import dataclass, field
 from functools import partial
@@ -71,14 +71,14 @@ class Dependencies:
     connect_clients: list[NotSingletonClient] = field(default_factory=list)
     settings: DependenciesSettings = field(default_factory=DependenciesSettings)
     connected: bool = field(default=False, init=False)
-    # One entry per client of the last connect(), in connect order; kept after disconnect()
+    # One entry per client of the last connect(), in resolution order: a client after its dependencies; kept after
+    # disconnect()
     timings: list[ClientTiming] = field(default_factory=list, init=False)
     # The entries of `timings` by `id()` of their client, until the container is flushed
     _timings: dict[int, ClientTiming] = field(default_factory=dict, init=False)
-    # Layer of every client in `connect_clients`, keyed by `id()`: dataclass clients may be unhashable
-    _layers: dict[int, int] = field(default_factory=dict, init=False)
-    # For `graph()`: the class asked for and the client passed, per `__init__` argument of every client in
-    # `connect_clients`, keyed by `id()`. The class tells a Replacement apart from the clients it stands in for.
+    # The class asked for and the client passed, per `__init__` argument of every client in `connect_clients`, keyed
+    # by `id()`: dataclass clients may be unhashable. Orders connect() and disconnect(), and makes `graph()`; the
+    # class tells a Replacement apart from the clients it stands in for.
     _dependencies: dict[int, dict[str, tuple[type[NotSingletonClient], NotSingletonClient]]] = field(
         default_factory=dict, init=False
     )
@@ -117,7 +117,6 @@ class Dependencies:
 
             self.clients = OrderedDict()
             self.connect_clients = []
-            self._layers = {}
             self._dependencies = {}
             self._timings = {}
             self._replacements = {}
@@ -139,30 +138,24 @@ class Dependencies:
             # Flipped and snapshotted together: a thread inside resolve() finishes before or fails after, never
             # leaves a client that this connect() does not see
             self.connected = True
-            layers = self._group_by_layer(self.connect_clients)
+            clients = list(self.connect_clients)
         limiter = self._limiter()
         # Computed once: the timings, the logs and the errors of this connect() all name a client the same way
         names = self._names()
-        self._timings = {
-            id(client): ClientTiming(names[type(client)], self._layer(client)) for layer in layers for client in layer
-        }
+        self._timings = {id(client): ClientTiming(names[type(client)]) for client in clients}
         self.timings = list(self._timings.values())
         # Clients whose connect() finished, so a failure knows what to roll back
         connected: list[NotSingletonClient] = []
         started = time.perf_counter()
 
         try:
-            for number, layer in enumerate(layers):
-                logger.debug(
-                    "Connecting layer %d: %s",
-                    number,
-                    ", ".join(self._timings[id(client)].name for client in layer),
-                    extra=fields(layer=number),
-                )
-                # The first failure cancels the rest of the layer
-                async with asyncio.TaskGroup() as group:
-                    for client in layer:
-                        group.create_task(self._connect_client(client, limiter, connected))
+            # A client connects once its dependencies have; the first failure cancels every client still connecting
+            # and every client still waiting
+            await _in_dependency_order(
+                clients,
+                self._dependencies_among(clients),
+                partial(self._connect_client, limiter=limiter, connected=connected, total=len(clients)),
+            )
 
         except ExceptionGroup as eg:
             await self._rollback(connected)
@@ -174,17 +167,16 @@ class Dependencies:
             await self._rollback(connected)
             raise
 
-        self._log_startup(len(layers), time.perf_counter() - started)
+        self._log_startup(time.perf_counter() - started)
 
-    def _log_startup(self, layers: int, duration: float) -> None:
+    def _log_startup(self, duration: float) -> None:
         if not self.timings:
             return
 
         slowest = sorted(self.timings, key=lambda timing: timing.connect or 0, reverse=True)[:3]
         logger.info(
-            "Connected %s in %s in %.2fs (slowest: %s)",
+            "Connected %s in %.2fs (slowest: %s)",
             _count(len(self.timings), "client"),
-            _count(layers, "layer"),
             duration,
             ", ".join(f"{timing.name} {timing.connect or 0:.2f}s" for timing in slowest),
             extra=fields(duration=duration),
@@ -202,7 +194,7 @@ class Dependencies:
                 )
 
     async def _connect_client(
-        self, client: NotSingletonClient, limiter: Limiter, connected: list[NotSingletonClient]
+        self, client: NotSingletonClient, *, limiter: Limiter, connected: list[NotSingletonClient], total: int
     ) -> None:
         timing = self._timings[id(client)]
         name = timing.name
@@ -211,13 +203,20 @@ class Dependencies:
         try:
             async with limiter:
                 if debug:
-                    logger.debug("Connecting client %s", name, extra=_fields(timing))
+                    logger.debug(
+                        "Connecting client %s (%d/%d connected)", name, len(connected), total, extra=_fields(timing)
+                    )
                 with _measure(timing, "connect"):
                     await _within(self.settings.connect_timeout, client.connect())
             connected.append(client)
             if debug:
                 logger.debug(
-                    "Connected client %s in %.3fs", name, timing.connect, extra=_fields(timing, timing.connect)
+                    "Connected client %s in %.3fs (%d/%d connected)",
+                    name,
+                    timing.connect,
+                    len(connected),
+                    total,
+                    extra=_fields(timing, timing.connect),
                 )
 
         except TimeoutError as exc:
@@ -234,11 +233,17 @@ class Dependencies:
             error.__cause__ = exc
             raise _ClientConnectError(error) from exc
 
-        except Exception as exc:
-            logger.exception(
-                "%s.connect() raised %s: %s", name, type(exc).__name__, exc, extra=_fields(timing, timing.connect)
-            )
-            error = ConnectError(f"{name}.connect() raised {type(exc).__name__}: {exc}")
+        except (Exception, asyncio.CancelledError) as exc:
+            if isinstance(exc, asyncio.CancelledError):
+                # A cancellation of connect() itself, or by the failure of another client, goes on. One of the client's
+                # own fails the connect like an exception, its consumers would wait for it forever, and the timing
+                # tells the culprit apart from the clients cancelled because of it
+                if _cancelled_from_outside():
+                    raise
+                timing.connect_outcome = "failed"
+            raised = f"{name}.connect() raised {_described(exc)}"
+            logger.exception("%s", raised, extra=_fields(timing, timing.connect))
+            error = ConnectError(raised)
             error.__cause__ = exc
             raise _ClientConnectError(error) from exc
 
@@ -246,47 +251,76 @@ class Dependencies:
         if self.connected is False:
             raise ConnectError("disconnect(): already disconnected")
 
-        await self._disconnect_layers(self.connect_clients)
+        await self._disconnect_clients(self.connect_clients)
 
     async def _rollback(self, connected: list[NotSingletonClient]) -> None:
         logger.debug("Connect failed, disconnecting %d connected clients", len(connected), extra=fields())
-        await self._disconnect_layers(connected)
+        await self._disconnect_clients(connected)
 
-    async def _disconnect_layers(self, clients: list[NotSingletonClient]) -> None:
+    async def _disconnect_clients(self, to_disconnect: list[NotSingletonClient]) -> None:
         with self._lock:
             self.connected = False
-            layers = self._group_by_layer(clients)
-        limiter = self._limiter()
+            clients = list(to_disconnect)
+            # Read with the flag: once it is down, another thread may flush() the dependencies away
+            dependencies = self._dependencies_among(clients)
+        # A client disconnects once its consumers have, however their disconnect() ended
+        consumers: dict[int, list[int]] = {id(client): [] for client in clients}
+        for consumer, ids in dependencies.items():
+            for dependency in ids:
+                consumers[dependency].append(consumer)
+        # Clients whose disconnect() ended, for the progress in the records
+        disconnected: list[NotSingletonClient] = []
 
         try:
-            for layer in reversed(layers):
-                # A client whose disconnect() ends in a CancelledError of its own made gather() raise it out of here,
-                # skipping the rest; a TaskGroup ignores a cancelled child and finishes the layer. A client that fails
-                # with an Exception is logged by _disconnect_client, so only a cancellation ends the group early
-                async with asyncio.TaskGroup() as group:
-                    for client in layer:
-                        group.create_task(self._disconnect_client(client, limiter))
+            # Only a cancellation of disconnect() itself ends it early: _disconnect_client logs and swallows what a
+            # client raises
+            await _in_dependency_order(
+                clients,
+                consumers,
+                partial(
+                    self._disconnect_client, limiter=self._limiter(), disconnected=disconnected, total=len(clients)
+                ),
+            )
         finally:
             # Cancelled or not, the container keeps no half-disconnected client for the next connect() to reuse
             self.flush()
 
-    async def _disconnect_client(self, client: NotSingletonClient, limiter: Limiter) -> None:
+    async def _disconnect_client(
+        self, client: NotSingletonClient, *, limiter: Limiter, disconnected: list[NotSingletonClient], total: int
+    ) -> None:
         timing = self._timings[id(client)]
         name = timing.name
         debug = logger.isEnabledFor(logging.DEBUG)
         try:
             async with limiter:
                 if debug:
-                    logger.debug("Disconnecting client %s", name, extra=_fields(timing))
-                with _measure(timing, "disconnect"):
-                    await _within(self.settings.disconnect_timeout, client.disconnect())
+                    logger.debug(
+                        "Disconnecting client %s (%d/%d disconnected)",
+                        name,
+                        len(disconnected),
+                        total,
+                        extra=_fields(timing),
+                    )
+                try:
+                    with _measure(timing, "disconnect"):
+                        await _within(self.settings.disconnect_timeout, client.disconnect())
+                finally:
+                    disconnected.append(client)
             if debug:
                 logger.debug(
-                    "Disconnected client %s in %.3fs",
+                    "Disconnected client %s in %.3fs (%d/%d disconnected)",
                     name,
                     timing.disconnect,
+                    len(disconnected),
+                    total,
                     extra=_fields(timing, timing.disconnect),
                 )
+        except asyncio.CancelledError:
+            # A CancelledError of the client's own, re-raised from a task it awaited, ends its disconnect() alone: its
+            # dependencies still have to be stopped. A cancellation of disconnect() itself goes on.
+            if _cancelled_from_outside():
+                raise
+            logger.exception("%s.disconnect() raised CancelledError", name, extra=_fields(timing, timing.disconnect))
         except TimeoutError:
             logger.exception(
                 "%s did not disconnect within %gs (DISCONNECT_TIMEOUT_SECONDS)",
@@ -309,14 +343,20 @@ class Dependencies:
             return contextlib.nullcontext()
         return asyncio.Semaphore(self.settings.connect_concurrency)
 
-    def _layer(self, client: NotSingletonClient) -> int:
-        return self._layers.get(id(client), 0)
-
-    def _group_by_layer(self, clients: list[NotSingletonClient]) -> list[list[NotSingletonClient]]:
-        layers: defaultdict[int, list[NotSingletonClient]] = defaultdict(list)
-        for client in clients:
-            layers[self._layer(client)].append(client)
-        return [layers[number] for number in sorted(layers)]
+    def _dependencies_among(self, clients: list[NotSingletonClient]) -> dict[int, list[int]]:
+        """
+        The dependencies of every client of `clients` that are among `clients`, by `id()`: a Replacement is never
+        connected, so nothing waits for it.
+        """
+        ids = {id(client) for client in clients}
+        return {
+            id(client): [
+                id(dependency)
+                for _, dependency in self._dependencies.get(id(client), {}).values()
+                if id(dependency) in ids
+            ]
+            for client in clients
+        }
 
     def resolve(self, cls: type[CT]) -> CT:
         """
@@ -415,9 +455,6 @@ class Dependencies:
                     except Exception as exc:
                         raise self._init_error(cls, exc) from exc
 
-                    # One layer above the highest dependency; mocks are not connected, so they do not count
-                    layers = self._layers
-                    layers[id(inst)] = 1 + max((layers.get(id(d), -1) for d in init.values()), default=-1)
                     self._dependencies[id(inst)] = {arg: (arguments[arg], client) for arg, client in init.items()}
                     self.connect_clients.append(inst)
                     # Published last: the lock-free lookup of resolve() hands out a singleton that the container
@@ -431,7 +468,7 @@ class Dependencies:
                     cls, arguments, init, pending, key = waiting.pop()
                     init[key] = inst
                     continue
-                # Before the arguments after it, which is the order of a recursion and of the layers
+                # Before the arguments after it, which is the order of a recursion
                 waiting.append((cls, arguments, init, pending, key))
                 cls = dep
                 break
@@ -449,14 +486,14 @@ class Dependencies:
 
     def graph(self) -> Graph:
         """
-        A snapshot of the resolved clients with their dependencies and Layers.
+        A snapshot of the resolved clients with their dependencies.
 
         `flush()` empties it, apart from the Replacements of the open `override()` blocks, which it keeps.
         """
         # A Replacement is one object for every class it stands in for, and may be a resolved client too,
         # so its nodes are keyed by class and the resolved clients by `id()`
         replaced = {
-            cls: Node(cls=cls, singleton=isclient(cls), layer=None, replacement=replacement)
+            cls: Node(cls=cls, singleton=isclient(cls), replacement=replacement)
             for cls, replacement in self._replacements.items()
         }
         resolved: dict[int, Node] = {}
@@ -469,7 +506,6 @@ class Dependencies:
             resolved[id(client)] = Node(
                 cls=type(client),
                 singleton=isclient(type(client)),
-                layer=self._layer(client),
                 replacement=None,
                 dependencies=MappingProxyType(dependencies),
             )
@@ -775,7 +811,7 @@ def _fields(timing: ClientTiming, duration: float | None = None) -> dict[str, An
     """
     The structured fields of a log record about one client.
     """
-    return fields(client=timing.name, layer=timing.layer, duration=duration)
+    return fields(client=timing.name, duration=duration)
 
 
 @contextlib.contextmanager
@@ -792,7 +828,7 @@ def _measure(timing: ClientTiming, phase: Literal["connect", "disconnect"]) -> I
         outcome = "timed_out"
         raise
     except asyncio.CancelledError:
-        # Another client of the layer failed, or the whole connect or disconnect was cancelled
+        # Another client failed, or the whole connect or disconnect was cancelled
         outcome = "cancelled"
         raise
     finally:
@@ -813,6 +849,48 @@ async def _within(seconds: float, coro: Coroutine[Any, Any, None]) -> None:
         raise TimeoutError
     async with asyncio.timeout(seconds):
         await coro
+
+
+async def _in_dependency_order(
+    clients: list[NotSingletonClient],
+    waits_for: dict[int, list[int]],
+    step: Callable[[NotSingletonClient], Coroutine[Any, Any, None]],
+) -> None:
+    """
+    Run `step` for every client of `clients` concurrently, each once `step` has returned for the clients it
+    `waits_for`, by `id()`.
+
+    A client that `step` raised for releases no one: in a connect, the consumers of a failed client must not start
+    before the group cancels them. The first exception cancels every step still running or waiting.
+    """
+    done = {id(client): asyncio.Event() for client in clients}
+
+    async def run(client: NotSingletonClient) -> None:
+        for other in waits_for[id(client)]:
+            await done[other].wait()
+        await step(client)
+        done[id(client)].set()
+
+    async with asyncio.TaskGroup() as group:
+        for client in clients:
+            group.create_task(run(client))
+
+
+def _cancelled_from_outside() -> bool:
+    """
+    Whether the task is being cancelled, as opposed to a client raising a CancelledError of its own, e.g. re-raised
+    from a task it awaited.
+    """
+    task = asyncio.current_task()
+    return task is None or task.cancelling() > 0
+
+
+def _described(exc: BaseException) -> str:
+    """
+    The type of `exc` and its message, if it has one: `OSError: unreachable`, a bare `CancelledError`.
+    """
+    message = str(exc)
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
 def _display_names(classes: Iterable[type]) -> dict[type, str]:

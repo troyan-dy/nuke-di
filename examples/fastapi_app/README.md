@@ -66,7 +66,7 @@ $ uv run pytest -q fastapi_app
 - `setup(app)` comes before the routes; after it `get_user`, `current_user` and `lookup` declare
   `cache: UserCache` and nothing else: no `Depends` for the client, no `inject()`.
 - `account = ClientRouter(prefix="/me")`: a plain `APIRouter` would not fill clients.
-- The startup order: `Database` connects, then `UserCache` (the next layer) warms from it and spawns its
+- The startup order: `Database` connects, then `UserCache`, which needs it, warms from it and spawns its
   refresh loop, then the app's own `lifespan` runs and already sees the connect timings. On shutdown the
   lifespan ends first, the refresh task is cancelled, and only then the clients disconnect.
 - The tests replace `Database` with `DI.override()` before `TestClient` starts the app; the real one is

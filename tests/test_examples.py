@@ -127,7 +127,7 @@ PROGRAMS = [
     Program("not_singleton.main", output=("same HttpSession: False",)),
     Program("dataclass_clients.main", output=("placed order 1",)),
     Program("graph.show", output=("  Notifications --> Checkout",)),
-    Program("graph.start", output=("Connecting layer 3: Checkout", "placed order 1")),
+    Program("graph.start", output=("Connecting client Checkout (7/8 connected)", "placed order 1")),
     Program("startup_failures.connect_error", output=("connected: False",)),
     Program(
         "startup_failures.connect_timeout",

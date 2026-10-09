@@ -102,7 +102,8 @@ O que aconteceu:
    `DI` global, e envolveu o lifespan da aplicação.
 2. `@app.get` viu `users: UserService` e apenas registrou isso; nada foi construído no import.
 3. Na inicialização, o lifespan resolveu os clientes das rotas que a aplicação serve, tanto as dela quanto as
-   dos routers que ela inclui, e os conectou, camada por camada. No encerramento, desconectou-os.
+   dos routers que ela inclui, e os conectou, cada um depois das suas dependências. No encerramento,
+   desconectou-os.
 4. Uma requisição para `/users/42` recebeu o `UserService` já conectado. `/me` passou pela dependência
    `current_user`, que recebe `db: Database` da mesma forma.
 

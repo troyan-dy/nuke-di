@@ -121,48 +121,74 @@ True
 
 Przyjmuje te same argumenty nazwane co `dataclasses.dataclass`.
 
-## <a id="layers"></a>Warstwy
+## <a id="connect-order"></a>Kolejność łączenia
 
-Klienci łączą się współbieżnie, warstwami. Klienci bez zależności tworzą warstwę 0;
-każdy inny klient leży o jedną warstwę wyżej niż jego najwyżej położona zależność. Warstwa startuje
-dopiero wtedy, gdy poprzednia jest już połączona, więc klient nigdy nie łączy się przed własnymi
-zależnościami. `disconnect()` przechodzi przez warstwy w odwrotnej kolejności.
+Klient łączy się, gdy tylko połączą się jego własne zależności, współbieżnie ze wszystkimi innymi
+klientami, którzy są gotowi, więc powolny klient wstrzymuje tylko tych klientów, którzy go potrzebują.
+`disconnect()` idzie w drugą stronę: klient rozłącza się, gdy tylko rozłączą się klienci, którzy od
+niego zależą.
 
 ```python
+# connect_order.py
 import asyncio
 import logging
+import time
 
 from nuke_di import Client, Dependencies
 
-logging.basicConfig(level=logging.DEBUG, format="%(message)s")
-logging.getLogger("asyncio").setLevel(logging.WARNING)  # keep only the nuke_di records
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+started = time.perf_counter()
+
+
+async def connecting(name: str, seconds: float) -> None:
+    await asyncio.sleep(seconds)  # a real client opens its connection here
+    print(f"{time.perf_counter() - started:.2f}s  {name} connected")
 
 
 class Postgres(Client):
     async def connect(self) -> None:
-        await asyncio.sleep(0.2)
-        print("  postgres ready")
+        await connecting("Postgres", 0.3)
+
+
+class Kafka(Client):
+    async def connect(self) -> None:
+        await connecting("Kafka", 0.05)
 
 
 class Redis(Client):
     async def connect(self) -> None:
-        await asyncio.sleep(0.1)
-        print("  redis ready")
+        await connecting("Redis", 0.05)
 
 
-class Payments(Client):
+class Repository(Client):
     def __init__(self, pg: Postgres) -> None:
         self.pg = pg
 
 
-class Checkout(Client):
-    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
-        self.pg, self.redis, self.payments = pg, redis, payments
+class Consumer(Client):
+    def __init__(self, kafka: Kafka) -> None:
+        self.kafka = kafka
+
+    async def connect(self) -> None:
+        await connecting("Consumer", 0.3)
+
+
+class Http(Client):
+    def __init__(self, redis: Redis) -> None:
+        self.redis = redis
+
+    async def connect(self) -> None:
+        await connecting("Http", 0.2)
+
+
+class App(Client):
+    def __init__(self, repository: Repository, consumer: Consumer, http: Http) -> None:
+        self.repository, self.consumer, self.http = repository, consumer, http
 
 
 async def main() -> None:
     deps = Dependencies()
-    deps.resolve(Checkout)
+    deps.resolve(App)
     async with deps:
         print("-- application is running --")
 
@@ -170,47 +196,32 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-Log `DEBUG` loggera `nuke_di` pokazuje warstwy:
-
-```text
-Resolving dependency "Checkout"
-Resolving dependency "Postgres"
-Resolving dependency "Redis"
-Resolving dependency "Payments"
-Connecting layer 0: Postgres, Redis
-Connecting client Postgres
-Connecting client Redis
-  redis ready
-Connected client Redis in 0.101s
-  postgres ready
-Connected client Postgres in 0.201s
-Connecting layer 1: Payments
-Connecting client Payments
-Connected client Payments in 0.000s
-Connecting layer 2: Checkout
-Connecting client Checkout
-Connected client Checkout in 0.000s
-Connected 4 clients in 3 layers in 0.20s (slowest: Postgres 0.20s, Redis 0.10s, Payments 0.00s)
+```console
+$ python connect_order.py
+0.05s  Kafka connected
+0.05s  Redis connected
+0.25s  Http connected
+0.30s  Postgres connected
+0.35s  Consumer connected
+INFO Connected 7 clients in 0.35s (slowest: Postgres 0.30s, Consumer 0.30s, Http 0.20s)
 -- application is running --
-Disconnecting client Checkout
-Disconnected client Checkout in 0.000s
-Disconnecting client Payments
-Disconnected client Payments in 0.000s
-Disconnecting client Postgres
-Disconnected client Postgres in 0.000s
-Disconnecting client Redis
-Disconnected client Redis in 0.000s
 ```
 
-```text
-Checkout(pg, redis, payments)    layer 2
-Payments(pg)                     layer 1
-Postgres, Redis                  layer 0  <- connect together, in 0.2s rather than 0.3s
-```
+`Consumer` potrzebuje tylko `Kafka`, więc startuje w 0.05s, gdy `Postgres` wciąż się łączy, a start
+trwa tyle, ile najdłuższy łańcuch zależności, `Kafka` → `Consumer`. Do wersji 1.12 włącznie klienci łączyli się
+warstwami, a każda warstwa czekała na najwolniejszego klienta warstwy poniżej, co tutaj zajmowało 0.60s,
+a w wersji 1.0 jeden po drugim w kolejności rozwiązywania, co zajmowało 0.90s:
+
+![Sześciu klientów z przykładu połączonych jeden po drugim w 0.90s, warstwami w 0.60s i według własnych zależności w 0.35s](../../connect-order.svg)
+
+Przy włączonym `DEBUG` logger `nuke_di` podaje nazwę każdego klienta, gdy zaczyna i kończy łączenie,
+wraz z liczbą klientów połączonych do tej pory: `Connecting client Consumer (2/7 connected)`, i tak
+samo dla `disconnect()`.
 
 Kolejność ustalana jest wyłącznie na podstawie zależności zadeklarowanych w `__init__`. Jeśli klient
 potrzebuje, żeby inny był połączony wcześniej, zadeklaruj go jako zależność. Ustaw `CONNECT_CONCURRENCY`,
-aby ograniczyć liczbę klientów łączących się jednocześnie.
+aby ograniczyć liczbę klientów łączących się jednocześnie; klient czekający na swoje zależności nie
+zajmuje miejsca.
 
 ## <a id="startup-timings"></a>Czasy startu
 
@@ -255,7 +266,7 @@ async def main() -> None:
 
     for t in deps.timings:
         print(
-            f"{t.name:<8} layer {t.layer}  connect {t.connect:.2f}s {t.connect_outcome:<3}  "
+            f"{t.name:<8} connect {t.connect:.2f}s {t.connect_outcome:<3}  "
             f"disconnect {t.disconnect:.2f}s {t.disconnect_outcome}"
         )
 
@@ -265,16 +276,16 @@ asyncio.run(main())
 
 ```console
 $ python startup.py
-INFO Connected 3 clients in 2 layers in 1.60s (slowest: Kafka 1.60s, Postgres 0.20s, Orders 0.00s)
+INFO Connected 3 clients in 1.60s (slowest: Kafka 1.60s, Postgres 0.20s, Orders 0.00s)
 WARNING Client Kafka took 1.60s to connect, more than half of CONNECT_TIMEOUT_SECONDS (3s)
 -- application is running --
-Postgres layer 0  connect 0.20s ok   disconnect 0.00s ok
-Kafka    layer 0  connect 1.60s ok   disconnect 0.30s ok
-Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
+Postgres connect 0.20s ok   disconnect 0.00s ok
+Kafka    connect 1.60s ok   disconnect 0.30s ok
+Orders   connect 0.00s ok   disconnect 0.00s ok
 ```
 
 `deps.timings` przechowuje po jednym `ClientTiming` na każdego klienta ostatniego `connect()`,
-w kolejności łączenia. Lista przetrwa `disconnect()`, więc można ją odczytać po zatrzymaniu
+w kolejności rozwiązywania, więc klient występuje po swoich zależnościach. Lista przetrwa `disconnect()`, więc można ją odczytać po zatrzymaniu
 kontenera. W aplikacji FastAPI lifespan przekazany do `FastAPI()` działa wewnątrz połączonego
 kontenera, więc widzi czasy łączenia. Worker lub job dostaje tę samą listę w
 [`Run.clients`](workers-and-jobs.md#startup-metrics-and-structured-logs).
@@ -282,22 +293,20 @@ kontenera, więc widzi czasy łączenia. Worker lub job dostaje tę samą listę
 | Pole `ClientTiming`  | Wartość |
 |----------------------|---------|
 | `name`               | Nazwa klasy klienta |
-| `layer`              | [Warstwa](#layers) klienta |
 | `connect`            | Sekundy spędzone w `connect()`, bez czekania na `CONNECT_CONCURRENCY`; `None`, jeśli `connect()` nigdy się nie uruchomił |
 | `connect_outcome`    | `"ok"`, `"failed"`, `"timed_out"`, `"cancelled"` albo `None`, jeśli `connect()` się nie zaczął |
 | `disconnect`, `disconnect_outcome` | To samo dla `disconnect()`; `None`, dopóki klient się nie rozłączy |
 
-Gdy klient nie może się połączyć, klienci jego warstwy, którzy wciąż się łączą, dostają
-`"cancelled"`, wyższe warstwy zostają z `None`, a klienci już połączeni są wycofywani, więc
+Gdy klient nie może się połączyć, klienci, którzy wciąż się łączą, dostają `"cancelled"`,
+klienci wciąż czekający na swoje zależności zostają z `None`, a klienci już połączeni są wycofywani, więc
 dostają `disconnect_outcome`. Biblioteka tylko mierzy: eksport czasów jako metryk lub spanów
 należy do twojego kodu.
 
 ## <a id="the-graph"></a>Graf
 
-Graf zależności istnieje tylko wewnątrz działającego procesu: log `DEBUG` powyżej to jedyne miejsce,
-które pokazuje, jakich klientów ściąga punkt wejścia i w której warstwie każdy z nich się łączy.
-`graph()` zwraca ten sam obraz jako dane, przed `connect()` albo po nim. Klienci z przykładu o
-[warstwach](#layers), bez swojego `connect()`:
+Graf zależności istnieje tylko wewnątrz działającego procesu: log `DEBUG` to jedyne miejsce,
+które pokazuje, jakich klientów ściąga punkt wejścia i na co każdy z nich czeka. `graph()` zwraca
+ten sam obraz jako dane, przed `connect()` albo po nim:
 
 ```python
 # graph.py
@@ -326,29 +335,23 @@ deps = Dependencies()
 deps.resolve(Checkout)
 nodes = {node.name: node for node in deps.graph().nodes}
 for node in nodes.values():
-    print(f"{node.name:<8} layer {node.layer}  needs {list(node.dependencies)}")
+    print(f"{node.name:<8} needs {list(node.dependencies)}")
 print("shared:", nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"])
 print(deps.graph().to_mermaid())
 ```
 
 ```console
 $ python graph.py
-Postgres layer 0  needs []
-Redis    layer 0  needs []
-Payments layer 1  needs ['pg']
-Checkout layer 2  needs ['pg', 'redis', 'payments']
+Postgres needs []
+Redis    needs []
+Payments needs ['pg']
+Checkout needs ['pg', 'redis', 'payments']
 shared: True
 graph BT
-  subgraph layer0 [layer 0]
-    Postgres
-    Redis
-  end
-  subgraph layer1 [layer 1]
-    Payments
-  end
-  subgraph layer2 [layer 2]
-    Checkout
-  end
+  Postgres
+  Redis
+  Payments
+  Checkout
   Postgres --> Payments
   Postgres --> Checkout
   Redis --> Checkout
@@ -360,16 +363,10 @@ architekturę bez działającego procesu:
 
 ```mermaid
 graph BT
-  subgraph layer0 [layer 0]
-    Postgres
-    Redis
-  end
-  subgraph layer1 [layer 1]
-    Payments
-  end
-  subgraph layer2 [layer 2]
-    Checkout
-  end
+  Postgres
+  Redis
+  Payments
+  Checkout
   Postgres --> Payments
   Postgres --> Checkout
   Redis --> Checkout
@@ -385,20 +382,19 @@ jest po swoich zależnościach. To zrzut: `flush()` go opróżnia, poza Replacem
 | `name`         | Nazwa klasy klienta |
 | `cls`          | Klasa, o którą prosili konsumenci |
 | `singleton`    | `True` dla `Client`, `False` dla `NotSingletonClient` |
-| `layer`        | [Warstwa](#layers) klienta; `None` dla Replacement, który nigdy się nie łączy |
 | `replacement`  | Obiekt zarejestrowany przez `mock()` lub `override()` w miejsce `cls`; `None` dla prawdziwego klienta |
 | `dependencies` | Klienci argumentów `__init__`, według nazwy argumentu |
 
 `NotSingletonClient` dostaje po węźle na instancję, wszystkie o tej samej nazwie; `to_mermaid()` numeruje je
-od drugiego (`Session`, `Session_2`). Replacement jest rysowany poza warstwami, z przerywaną ramką i nazwą
+od drugiego (`Session`, `Session_2`). Replacement jest rysowany z przerywaną ramką i nazwą
 obiektu na jego miejscu: `Postgres: AsyncMock`. Węzły porównują się przez tożsamość, więc
 `shared: True` powyżej mówi, że `Checkout` i `Payments` dostali ten sam `Postgres`.
 
 ## <a id="when-a-client-fails-to-connect"></a>Gdy klient nie może się połączyć
 
-Jeśli klientowi nie uda się połączyć, reszta jego warstwy zostaje anulowana, a kolejne warstwy w ogóle
-nie startują. Klienci, którzy zdążyli się połączyć, zostają rozłączeni — warstwami, w odwrotnej
-kolejności — a kontener zostaje rozłączony i pusty:
+Jeśli klientowi nie uda się połączyć, każdy klient, który wciąż się łączy, zostaje anulowany, a klienci
+czekający na niego w ogóle nie startują. Klienci, którzy zdążyli się połączyć, zostają rozłączeni — każdy
+po klientach, którzy od niego zależą — a kontener zostaje rozłączony i pusty:
 
 ```python
 import asyncio
@@ -450,7 +446,7 @@ connected: False
 
 To samo sprzątanie następuje, gdy anulowane zostanie samo `connect()`. `ConnectError` dziedziczy po
 `SystemExit`, więc aplikacja, która go nie przechwyci, kończy działanie — i zwykle właśnie tego chcesz,
-gdy któraś zależność leży. Zamockowani klienci nie są łączeni i nie wpływają na warstwy.
+gdy któraś zależność leży. Zamockowani klienci nie są łączeni i nic na nich nie czeka.
 
 ## <a id="when-the-tree-cannot-be-built"></a>Gdy nie da się zbudować drzewa
 
