@@ -102,7 +102,8 @@ Qué pasó:
    desde el `DI` global, y envolvió el lifespan de la app.
 2. `@app.get` vio `users: UserService` y solo lo anotó; al importar no se construyó nada.
 3. Al arrancar, el lifespan resolvió los clientes de las rutas que sirve la app, las propias y las de
-   los routers que incluye, y los conectó capa por capa. Al apagarse, los desconectó.
+   los routers que incluye, y los conectó, cada uno después de sus dependencias. Al apagarse, los
+   desconectó.
 4. Una petición a `/users/42` recibió el `UserService` ya conectado. `/me` pasó por la dependencia
    `current_user`, que recibe `db: Database` de la misma manera.
 

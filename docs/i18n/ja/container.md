@@ -10,14 +10,14 @@
 |----------------------|-------------------------------------------------------------------------|
 | `resolve(cls)`       | `cls` とその依存関係ツリーを構築します。`Client` に対しては冪等です。   |
 | `inject(func)`       | クライアント引数を束縛した `functools.partial(func, ...)` を返します。`*args` / `**kwargs` を除く `func` のすべての引数に型ヒントが必要です。 |
-| `connect()`          | 解決済みのすべてのクライアントに対して、レイヤーごとに `connect()` を呼び出します。 |
-| `disconnect()`       | レイヤーの逆順に `disconnect()` を呼び出し、その後コンテナを `flush()` します。 |
+| `connect()`          | 解決済みのすべてのクライアントに対して、それぞれの依存先の後に `connect()` を呼び出します。 |
+| `disconnect()`       | すべてのクライアントに対して、それぞれの利用側の後に `disconnect()` を呼び出し、その後コンテナを `flush()` します。 |
 | `async with`         | 開始時に `connect()`、終了時に `disconnect()` を呼び出します。          |
 | `mock(cls, new=None)`| 次の `flush()` まで有効な `cls` の差し替え（デフォルトは autospec モック）を登録します。`cls` が解決される前に呼び出す必要があります。 |
 | `override(cls, new=None)` | `with` ブロックの間だけ有効な差し替えを登録し、ブロックの終了後に `flush()` します。[テスト](testing.md)を参照してください。 |
 | `flush()`            | 解決済みのクライアントをすべて破棄します。                              |
 | `timings`            | 直近の `connect()` のクライアントごとの `ClientTiming`。[起動時間](clients.md#startup-timings)を参照。 |
-| `graph()`            | 解決済みクライアントの `Graph`。依存とレイヤーを持ち、`to_mermaid()` 付き。[依存グラフ](clients.md#the-graph)を参照。 |
+| `graph()`            | 解決済みクライアントの `Graph`。依存を持ち、`to_mermaid()` 付き。[依存グラフ](clients.md#the-graph)を参照。 |
 
 `inject()` の結果は関数の戻り値の型を保ちますが、残りの引数は型付けされません。型チェッカーはシグネチャからクライアント引数を差し引けないからです。
 

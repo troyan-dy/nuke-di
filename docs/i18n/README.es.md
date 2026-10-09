@@ -12,8 +12,8 @@ La inyección de dependencias más sencilla para proyectos asíncronos en Python
 
 Las dependencias se declaran con type hints normales y corrientes. `nuke-di` construye el árbol
 de dependencias, crea cada cliente una sola vez y gestiona su ciclo de vida asíncrono: `connect()`
-al arrancar y `disconnect()` al apagarse. Los clientes independientes arrancan de forma concurrente,
-capa por capa, desde las dependencias más profundas hacia arriba.
+al arrancar y `disconnect()` al apagarse. Cada cliente arranca en cuanto sus propias dependencias se
+han conectado, de forma concurrente con todos los demás clientes que estén listos.
 
 Además, un solo decorador convierte una función asíncrona en un proceso con argumentos de línea de
 comandos, y los handlers de FastAPI, Litestar y FastStream reciben clientes por su type hint de la misma manera.
@@ -96,9 +96,10 @@ Qué pasó:
   sin scopes que configurar. Un objeto de terceros se convierte en dependencia envolviéndolo en una clase así.
 - **Los type hints son el cableado.** Un cliente pide sus dependencias en `__init__`; una función, en
   su firma. Nada más las nombra, así que renombrar o añadir una dependencia es una refactorización corriente.
-- **Arranque concurrente, apagado ordenado.** Los clientes se conectan capa por capa, desde las
-  dependencias más profundas hacia arriba, y los clientes de una misma capa se conectan de forma
-  concurrente. Se desconectan en orden inverso, y un `disconnect()` que falla no detiene a los demás.
+- **Arranque concurrente, apagado ordenado.** Un cliente se conecta en cuanto sus propias dependencias
+  lo han hecho, de forma concurrente con todos los demás clientes que estén listos, así que un cliente
+  lento solo retrasa a los clientes que lo necesitan. Se desconectan en orden inverso, y un
+  `disconnect()` que falla no detiene a los demás.
 - **Fallar pronto.** Un árbol que no se puede construir falla antes de que se conecte nada, indicando el
   argumento y la ruta hasta él. Un cliente que no logra conectarse detiene la aplicación una vez que se
   desconectan los que ya se habían conectado. No hay reintentos: reiniciar es tarea del orquestador.
@@ -136,8 +137,8 @@ petición. Con anotaciones en cadena, dependency-injector, que no lee ninguna an
 por delante. En una raíz en caché `nuke-di` va a la par con wireup, y el `get()` en Cython de
 dependency-injector gana por unos 50 ns, una diferencia que ninguna aplicación nota.
 
-Por sí solo, `resolve()` cuesta 4–7 µs por cliente, así que un árbol de 1000 clientes se construye en
-menos de 6 ms, y `connect()` añade 9–15 µs por cliente en una capa. [docs/benchmarks.md](../benchmarks.md)
+Por sí solo, `resolve()` cuesta 3,5–6,3 µs por cliente, así que un árbol de 1000 clientes se construye en
+menos de 5,5 ms, y `connect()` añade 13–18 µs por cliente. [docs/benchmarks.md](../benchmarks.md)
 explica cada escenario, registra la línea base en Python 3.11–3.14 y contiene la comparación completa con
 su método.
 
@@ -349,7 +350,7 @@ Los routers, los websockets y el lifespan propio de la app se describen en [Fast
 ## <a id="documentation"></a>Documentación
 
 - [Clientes](es/clients.md): `Client` y `NotSingletonClient`, el ciclo de vida, clientes como dataclass,
-  capas, tiempos de arranque, el grafo de dependencias, errores de conexión y de resolución
+  orden de conexión, tiempos de arranque, el grafo de dependencias, errores de conexión y de resolución
 - [El contenedor](es/container.md): `Dependencies` y el `DI` global, `resolve()`, `inject()`,
   `mock()`, `override()`
 - [Workers y jobs](es/workers-and-jobs.md): `@job` y `@worker`, parámetros de línea de comandos,

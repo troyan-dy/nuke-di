@@ -109,7 +109,7 @@ $ python -m app.jobs.sync
 INFO  nuke_di.run: Starting job app.jobs.sync.sync
 postgres: connected
 warehouse: connected
-INFO  nuke_di.core: Connected 4 clients in 1 layer in 0.00s (slowest: Warehouse 0.00s, Postgres 0.00s, Shutdown 0.00s)
+INFO  nuke_di.core: Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)
 postgres: upserted 3 rows into users
 postgres: upserted 3 rows into orders
 postgres: disconnected
@@ -400,7 +400,7 @@ queue: disconnected
 已经连接的客户端会被断开。
 
 最坏情况下，进程停止需要
-`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers`。在默认设置下，两层的依赖树就会
+`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × 最长依赖链的长度`。在默认设置下，由两个客户端组成的依赖链就会
 用完 Kubernetes 默认的 30 秒 `terminationGracePeriodSeconds`，
 因此对于更深的依赖树，请调低超时或调高宽限期。
 
@@ -569,7 +569,7 @@ from app.clients import Postgres, Warehouse
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        fields = {key: getattr(record, key) for key in ("run", "client", "layer", "duration") if hasattr(record, key)}
+        fields = {key: getattr(record, key) for key in ("run", "client", "duration") if hasattr(record, key)}
         return json.dumps({"level": record.levelname, "message": record.getMessage(), **fields})
 
 
@@ -597,7 +597,7 @@ $ python -m app.jobs.startup
 {"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
 postgres: connected
 warehouse: connected
-{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00015945796621963382}
+{"level": "INFO", "message": "Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00022179202642291784}
 startup: done
 postgres: disconnected
 warehouse: disconnected
@@ -612,7 +612,6 @@ metric: Warehouse connect=0.000s ok
 |------------|-------------------------------------------------------------------------------|
 | `run`      | 在 worker 或 job 内产生的每条记录，包括容器的记录：运行的名称                 |
 | `client`   | 关于单个客户端的每条记录：解析、连接、断开、失败                              |
-| `layer`    | 关于客户端连接或断开的每条记录，以及 `Connecting layer`                       |
 | `duration` | 秒数：已连接或已断开的客户端、启动汇总、已结束的运行                          |
 
 每次运行还会连接它自己的 `Shutdown` 和 `BackgroundTasks` 客户端，所以它们也会出现在
@@ -654,7 +653,7 @@ spec:
     metadata:
       labels: {app: consumer}
     spec:
-      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers
+      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × longest chain
       containers:
         - name: consumer
           image: registry.example.com/app:1.0

@@ -11,8 +11,8 @@
 为异步 Python 项目打造的最简单的依赖注入。
 
 依赖用普通的类型提示声明即可。`nuke-di` 会构建依赖树，每个客户端只创建一次，并驱动它的异步生命周期：
-启动时调用 `connect()`，关闭时调用 `disconnect()`。相互独立的客户端按层并发启动，
-从最深层的依赖开始逐层向上。
+启动时调用 `connect()`，关闭时调用 `disconnect()`。每个客户端在自己的依赖连接完成后立即启动，
+与其他所有已就绪的客户端并发进行。
 
 在此之上，只需一个装饰器就能把异步函数变成一个带命令行参数的进程；
 FastAPI、Litestar 和 FastStream 的处理函数也以同样的方式通过类型提示接收客户端。
@@ -93,8 +93,8 @@ database: disconnected
   就成了依赖。
 - **类型提示就是装配。** 客户端在 `__init__` 中请求自己的依赖，函数则在自己的签名中请求。除此之外没有任何地方
   指名它们，因此重命名或新增一个依赖只是一次普通的重构。
-- **并发启动，有序关闭。** 客户端从最深层的依赖开始逐层向上连接，同一层的客户端并发连接。断开时顺序相反，
-  某个 `disconnect()` 失败也不会妨碍其他客户端断开。
+- **并发启动，有序关闭。** 客户端在自己的依赖连接完成后立即连接，与其他所有已就绪的客户端并发进行，
+  因此一个慢的客户端只会拖住需要它的那些客户端。断开时顺序相反，某个 `disconnect()` 失败也不会妨碍其他客户端断开。
 - **快速失败。** 无法构建的依赖树会在任何连接发生之前失败，并指出有问题的参数以及通往它的路径。
   无法连接的客户端会在已连接的客户端断开之后让应用停止。没有重试：重启是编排系统的职责。
 - **测试只做替换，不改装配。** `mock()` 和 `override()` 在单个测试中用替身代替客户端；
@@ -126,8 +126,8 @@ nuke-di 1.11.1 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 �
 使用字符串注解时，不读取任何注解的 dependency-injector 领先约五分之一。在缓存根节点上，`nuke-di` 与 wireup 持平，
 dependency-injector 的 Cython `get()` 领先约 50 ns，这个差距任何应用都察觉不到。
 
-单独来看，`resolve()` 每个客户端耗时 4–7 µs，因此 1000 个客户端的依赖树在 6 ms 内建成；`connect()` 对同一层的每个客户端
-增加 9–15 µs。[docs/benchmarks.md](../benchmarks.md) 解释每个场景，记录 Python 3.11–3.14 上的基线，并给出完整的对比及其方法。
+单独来看，`resolve()` 每个客户端耗时 3.5–6.3 µs，因此 1000 个客户端的依赖树在 5.5 ms 内建成；`connect()` 对每个客户端
+增加 13–18 µs。[docs/benchmarks.md](../benchmarks.md) 解释每个场景，记录 Python 3.11–3.14 上的基线，并给出完整的对比及其方法。
 
 ## <a id="a-job-with-command-line-arguments"></a>带命令行参数的 job
 
@@ -333,7 +333,7 @@ $ pytest -q tests/test_api.py
 ## <a id="documentation"></a>文档
 
 - [客户端](zh-CN/clients.md)：`Client` 与 `NotSingletonClient`、生命周期、dataclass 客户端、
-  层、启动耗时、依赖图、连接错误与解析错误
+  连接顺序、启动耗时、依赖图、连接错误与解析错误
 - [容器](zh-CN/container.md)：`Dependencies` 与全局 `DI`、`resolve()`、`inject()`、
   `mock()`、`override()`
 - [worker 与 job](zh-CN/workers-and-jobs.md)：`@job` 与 `@worker`、命令行参数、

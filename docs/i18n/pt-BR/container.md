@@ -11,14 +11,14 @@ quando precisar de isolamento, por exemplo nos testes.
 |----------------------|-------------------------------------------------------------------------|
 | `resolve(cls)`       | Constrói `cls` e a sua árvore de dependências. Idempotente para `Client`. |
 | `inject(func)`       | Retorna `functools.partial(func, ...)` com os argumentos de cliente já vinculados. Todo argumento de `func`, exceto `*args` / `**kwargs`, precisa ter type hint. |
-| `connect()`          | Chama `connect()` em cada cliente resolvido, camada por camada.         |
-| `disconnect()`       | Chama `disconnect()` camada por camada na ordem inversa e depois faz `flush()` do container. |
+| `connect()`          | Chama `connect()` em cada cliente resolvido, cada um depois das suas dependências. |
+| `disconnect()`       | Chama `disconnect()` em cada cliente, cada um depois dos seus consumidores, e depois faz `flush()` do container. |
 | `async with`         | `connect()` na entrada, `disconnect()` na saída.                        |
 | `mock(cls, new=None)`| Registra um substituto para `cls` (por padrão, um mock com autospec) até o próximo `flush()`. Precisa vir antes de `cls` ser resolvido. |
 | `override(cls, new=None)` | Um substituto que vale durante um bloco `with`, seguido de `flush()`; veja [Testes](testing.md). |
 | `flush()`            | Esquece todos os clientes resolvidos.                                   |
 | `timings`            | Um `ClientTiming` por cliente do último `connect()`; veja [Tempos de inicialização](clients.md#startup-timings). |
-| `graph()`            | Um `Graph` dos clientes resolvidos com suas dependências e camadas, `to_mermaid()` incluído; veja [O grafo](clients.md#the-graph). |
+| `graph()`            | Um `Graph` dos clientes resolvidos com suas dependências, `to_mermaid()` incluído; veja [O grafo](clients.md#the-graph). |
 
 O resultado de `inject()` mantém o tipo de retorno da função, enquanto seus argumentos restantes
 ficam sem tipo: um verificador de tipos não consegue subtrair os argumentos cliente de uma assinatura.

@@ -21,7 +21,7 @@ Building a client together with its whole dependency tree, before the container 
 _Avoid_: Instantiation, wiring
 
 **Connect concurrency**:
-The most `connect()` or `disconnect()` calls of one container running at once; unlimited by default. A client waiting for its own dependencies does not count against it. A client connects as soon as its own dependencies have and disconnects as soon as its dependents have: only dependencies declared in `__init__` order clients.
+The most `connect()` or `disconnect()` calls of one container running at once; unlimited by default. A client waiting for its own dependencies does not count against it. A client connects as soon as its own dependencies have and disconnects as soon as its consumers have: only dependencies declared in `__init__` order clients.
 _Avoid_: Layer, level, parallelism, workers
 
 **Graph**:

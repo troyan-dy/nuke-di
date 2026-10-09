@@ -12,8 +12,8 @@ Najprostsze wstrzykiwanie zależności dla asynchronicznych projektów w Pythoni
 
 Zależności deklaruje się zwykłymi adnotacjami typów. `nuke-di` buduje drzewo zależności,
 tworzy każdego klienta tylko raz i zarządza jego asynchronicznym cyklem życia: `connect()` przy starcie
-i `disconnect()` przy zamykaniu. Niezależni klienci startują współbieżnie, warstwa po warstwie,
-od najgłębszych zależności w górę.
+i `disconnect()` przy zamykaniu. Każdy klient startuje, gdy tylko połączą się jego własne zależności,
+współbieżnie ze wszystkimi innymi klientami, którzy są gotowi.
 
 Do tego jeden dekorator zamienia funkcję asynchroniczną w proces z parametrami wiersza poleceń,
 a handlery FastAPI, Litestar i FastStream przyjmują klientów po adnotacji typu w ten sam sposób.
@@ -96,8 +96,9 @@ Co się stało:
   (scopes) do konfigurowania. Obiekt z zewnętrznej biblioteki staje się zależnością, gdy opakuje się go w taką klasę.
 - **Adnotacje typów to okablowanie.** Klient prosi o swoje zależności w `__init__`, a funkcja — w swojej
   sygnaturze. Nic innego ich nie wymienia, więc zmiana nazwy lub dodanie zależności to zwykły refaktoring.
-- **Współbieżny start, uporządkowane zamykanie.** Klienci łączą się warstwa po warstwie, od najgłębszych
-  zależności w górę, a klienci jednej warstwy łączą się współbieżnie. Rozłączają się w odwrotnej kolejności,
+- **Współbieżny start, uporządkowane zamykanie.** Klient łączy się, gdy tylko połączą się jego własne
+  zależności, współbieżnie ze wszystkimi innymi klientami, którzy są gotowi, więc powolny klient wstrzymuje
+  tylko tych klientów, którzy go potrzebują. Rozłączają się w odwrotnej kolejności,
   a `disconnect()`, który zakończy się błędem, nie zatrzymuje pozostałych.
 - **Szybka porażka (fail fast).** Drzewo, którego nie da się zbudować, zgłasza błąd, zanim cokolwiek się połączy,
   z nazwą argumentu i ścieżką do niego. Klient, który nie może się połączyć, zatrzymuje aplikację, gdy tylko
@@ -135,8 +136,8 @@ na każde żądanie. Z adnotacjami w postaci napisów dependency-injector, któr
 jest o jedną piątą szybszy od `nuke-di`. Na korzeniu z cache `nuke-di` idzie łeb w łeb z wireup, a `get()`
 dependency-injector napisany w Cythonie wygrywa o około 50 ns, czego żadna aplikacja nie zauważy.
 
-Sam `resolve()` kosztuje 4–7 µs na klienta, więc drzewo z 1000 klientów powstaje w mniej niż 6 ms, a
-`connect()` dokłada 9–15 µs na klienta w warstwie. [docs/benchmarks.md](../benchmarks.md) objaśnia każdy
+Sam `resolve()` kosztuje 3,5–6,3 µs na klienta, więc drzewo z 1000 klientów powstaje w mniej niż 5,5 ms,
+a `connect()` dokłada 13–18 µs na klienta. [docs/benchmarks.md](../benchmarks.md) objaśnia każdy
 scenariusz, zapisuje punkt odniesienia dla Pythona 3.11–3.14 i zawiera pełne porównanie wraz z metodą.
 
 ## <a id="a-job-with-command-line-arguments"></a>Job z argumentami wiersza poleceń
@@ -346,7 +347,7 @@ Routery, websockety i własny lifespan aplikacji opisuje rozdział [FastAPI](pl/
 ## <a id="documentation"></a>Dokumentacja
 
 - [Klienci](pl/clients.md): `Client` i `NotSingletonClient`, cykl życia, klienci jako dataclass,
-  warstwy, czasy startu, graf zależności, błędy połączenia i rozwiązywania
+  kolejność łączenia, czasy startu, graf zależności, błędy połączenia i rozwiązywania
 - [Kontener](pl/container.md): `Dependencies` i globalny `DI`, `resolve()`, `inject()`,
   `mock()`, `override()`
 - [Workery i joby](pl/workers-and-jobs.md): `@job` i `@worker`, parametry wiersza poleceń,

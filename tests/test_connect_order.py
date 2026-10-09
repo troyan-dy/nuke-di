@@ -398,3 +398,25 @@ async def test_client_cancelling_its_own_connect_fails_the_connect() -> None:
     assert probe.events == []
     [timing] = [timing for timing in dep.timings if timing.name == "CancelsItself"]
     assert timing.connect_outcome == "cancelled"
+
+
+class HangsOnDisconnect(Tracked):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+    async def disconnect(self) -> None:
+        await probe.run("disconnect:HangsOnDisconnect")
+        await asyncio.sleep(10)
+
+
+async def test_timed_out_disconnect_still_releases_its_dependencies() -> None:
+    dep = Dependencies(settings=DependenciesSettings(disconnect_timeout=0.05))
+    dep.resolve(HangsOnDisconnect)
+    await dep.connect()
+
+    async with asyncio.timeout(1):
+        await dep.disconnect()
+
+    assert probe.before("disconnect:HangsOnDisconnect", "disconnect:Postgres")
+    [timing] = [timing for timing in dep.timings if timing.name == "HangsOnDisconnect"]
+    assert timing.disconnect_outcome == "timed_out"

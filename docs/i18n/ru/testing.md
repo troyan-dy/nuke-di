@@ -92,7 +92,7 @@ after the block: OrderedDict()
   `mock(cls, other)` и `override(cls)` выбрасывают `ConnectError: Database already has a
   replacement`.
 - **Подмены не подключаются.** Их `connect()` / `disconnect()` никогда не вызываются, и они
-  не участвуют в [слоях](clients.md#layers).
+  не участвуют в [порядке подключения](clients.md#connect-order).
 - **Сколько живёт подмена.** Подмену из `mock()` сбрасывает следующий `flush()`, включая тот, что
   выполняется в конце `disconnect()`: тесту, который подключает контейнер больше одного раза, стоит
   использовать `override()` — его подмена переживает любой `flush()` до конца своего блока. Исключение

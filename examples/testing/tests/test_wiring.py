@@ -42,7 +42,7 @@ def test_graph() -> None:
 
 
 def test_graph_shows_replacements() -> None:
-    """A mocked client is a node with `replacement` set: it is never connected."""
+    """A mocked client shows up in the graph with `replacement` set: it is never connected."""
     deps = Dependencies()
     db = deps.mock(Database)
     deps.inject(reminders)

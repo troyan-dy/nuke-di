@@ -11,14 +11,14 @@ gdy potrzebujesz izolacji, np. w testach.
 |----------------------|-------------------------------------------------------------------------|
 | `resolve(cls)`       | Buduje `cls` i jego drzewo zależności. Idempotentne dla `Client`.       |
 | `inject(func)`       | Zwraca `functools.partial(func, ...)` z podpiętymi argumentami-klientami. Każdy argument `func` poza `*args` / `**kwargs` musi mieć adnotację typu. |
-| `connect()`          | Wywołuje `connect()` na każdym rozwiązanym kliencie, warstwa po warstwie. |
-| `disconnect()`       | Wywołuje `disconnect()` warstwa po warstwie w odwrotnej kolejności, a potem `flush()` na kontenerze. |
+| `connect()`          | Wywołuje `connect()` na każdym rozwiązanym kliencie, każdym po jego zależnościach. |
+| `disconnect()`       | Wywołuje `disconnect()` na każdym kliencie, każdym po jego konsumentach, a potem `flush()` na kontenerze. |
 | `async with`         | `connect()` przy wejściu, `disconnect()` przy wyjściu.                  |
 | `mock(cls, new=None)`| Rejestruje zamiennik dla `cls` (domyślnie mock z autospec) do następnego `flush()`. Trzeba wywołać przed rozwiązaniem `cls`. |
 | `override(cls, new=None)` | Zamiennik na czas bloku `with`, a potem `flush()`; zob. [Testowanie](testing.md). |
 | `flush()`            | Zapomina wszystkich rozwiązanych klientów.                              |
 | `timings`            | Po jednym `ClientTiming` na klienta ostatniego `connect()`; zob. [Czasy startu](clients.md#startup-timings). |
-| `graph()`            | `Graph` rozwiązanych klientów z ich zależnościami i warstwami, wraz z `to_mermaid()`; zob. [Graf](clients.md#the-graph). |
+| `graph()`            | `Graph` rozwiązanych klientów z ich zależnościami, wraz z `to_mermaid()`; zob. [Graf](clients.md#the-graph). |
 
 Wynik `inject()` zachowuje typ zwracany funkcji, a jej pozostałe argumenty pozostają bez typów:
 sprawdzacz typów nie potrafi odjąć argumentów-klientów od sygnatury.

@@ -110,7 +110,7 @@ $ python -m app.jobs.sync
 INFO  nuke_di.run: Starting job app.jobs.sync.sync
 postgres: connected
 warehouse: connected
-INFO  nuke_di.core: Connected 4 clients in 1 layer in 0.00s (slowest: Warehouse 0.00s, Postgres 0.00s, Shutdown 0.00s)
+INFO  nuke_di.core: Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)
 postgres: upserted 3 rows into users
 postgres: upserted 3 rows into orders
 postgres: disconnected
@@ -404,8 +404,8 @@ queue: disconnected
 клиенты отключаются.
 
 В худшем случае процесс останавливается за
-`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers`. Со значениями по умолчанию дерево
-из двух слоёв занимает весь стандартный для Kubernetes `terminationGracePeriodSeconds` в 30 секунд,
+`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × длина самой длинной цепочки зависимостей`. Со
+значениями по умолчанию цепочка из двух клиентов занимает весь стандартный для Kubernetes `terminationGracePeriodSeconds` в 30 секунд,
 поэтому для более глубоких деревьев уменьшите таймауты или увеличьте grace period.
 
 ## <a id="background-tasks"></a>Фоновые задачи
@@ -576,7 +576,7 @@ from app.clients import Postgres, Warehouse
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        fields = {key: getattr(record, key) for key in ("run", "client", "layer", "duration") if hasattr(record, key)}
+        fields = {key: getattr(record, key) for key in ("run", "client", "duration") if hasattr(record, key)}
         return json.dumps({"level": record.levelname, "message": record.getMessage(), **fields})
 
 
@@ -604,7 +604,7 @@ $ python -m app.jobs.startup
 {"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
 postgres: connected
 warehouse: connected
-{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00015945796621963382}
+{"level": "INFO", "message": "Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00022179202642291784}
 startup: done
 postgres: disconnected
 warehouse: disconnected
@@ -619,7 +619,6 @@ metric: Warehouse connect=0.000s ok
 |------------|-------------------------------------------------------------------------------|
 | `run`      | Каждая запись внутри воркера или джобы, включая записи контейнера: имя запуска |
 | `client`   | Каждая запись об одном клиенте: разрешение, подключение, отключение, ошибки   |
-| `layer`    | Каждая запись о подключении или отключении клиента и `Connecting layer`       |
 | `duration` | Секунды: подключённый или отключённый клиент, сводка старта, завершённый запуск |
 
 Каждый запуск подключает и свои клиенты `Shutdown` и `BackgroundTasks`, поэтому они есть
@@ -661,7 +660,7 @@ spec:
     metadata:
       labels: {app: consumer}
     spec:
-      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers
+      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × longest chain
       containers:
         - name: consumer
           image: registry.example.com/app:1.0

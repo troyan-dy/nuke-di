@@ -110,7 +110,7 @@ $ python -m app.jobs.sync
 INFO  nuke_di.run: Starting job app.jobs.sync.sync
 postgres: connected
 warehouse: connected
-INFO  nuke_di.core: Connected 4 clients in 1 layer in 0.00s (slowest: Warehouse 0.00s, Postgres 0.00s, Shutdown 0.00s)
+INFO  nuke_di.core: Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)
 postgres: upserted 3 rows into users
 postgres: upserted 3 rows into orders
 postgres: disconnected
@@ -402,8 +402,8 @@ Sygnał, który nadejdzie, gdy klienci jeszcze się łączą, przerywa start, a 
 zdążyli się połączyć, zostają rozłączeni.
 
 W najgorszym przypadku zatrzymanie procesu trwa
-`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers`. Przy wartościach domyślnych drzewo
-z dwiema warstwami zużywa całe domyślne `terminationGracePeriodSeconds` Kubernetesa, czyli 30 sekund,
+`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies`. Przy
+wartościach domyślnych łańcuch dwóch klientów zużywa całe domyślne `terminationGracePeriodSeconds` Kubernetesa, czyli 30 sekund,
 więc przy głębszych drzewach zmniejsz timeouty albo wydłuż okres karencji.
 
 ## <a id="background-tasks"></a>Zadania w tle
@@ -573,7 +573,7 @@ from app.clients import Postgres, Warehouse
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        fields = {key: getattr(record, key) for key in ("run", "client", "layer", "duration") if hasattr(record, key)}
+        fields = {key: getattr(record, key) for key in ("run", "client", "duration") if hasattr(record, key)}
         return json.dumps({"level": record.levelname, "message": record.getMessage(), **fields})
 
 
@@ -601,7 +601,7 @@ $ python -m app.jobs.startup
 {"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
 postgres: connected
 warehouse: connected
-{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00015945796621963382}
+{"level": "INFO", "message": "Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00022179202642291784}
 startup: done
 postgres: disconnected
 warehouse: disconnected
@@ -616,7 +616,6 @@ metric: Warehouse connect=0.000s ok
 |------------|-------------------------------------------------------------------------------|
 | `run`      | Każdym rekordzie powstałym wewnątrz workera lub joba, także kontenera: nazwa uruchomienia |
 | `client`   | Każdym rekordzie o jednym kliencie: rozwiązywanie, łączenie, rozłączanie, błędy |
-| `layer`    | Każdym rekordzie o łączeniu lub rozłączaniu klienta oraz `Connecting layer`   |
 | `duration` | Sekundy: połączony lub rozłączony klient, podsumowanie startu, zakończone uruchomienie |
 
 Każde uruchomienie łączy też własnych klientów `Shutdown` i `BackgroundTasks`, więc pojawiają
@@ -658,7 +657,7 @@ spec:
     metadata:
       labels: {app: consumer}
     spec:
-      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers
+      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × longest chain
       containers:
         - name: consumer
           image: registry.example.com/app:1.0

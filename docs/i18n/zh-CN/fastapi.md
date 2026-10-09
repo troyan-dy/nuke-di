@@ -102,7 +102,7 @@ $ curl localhost:8000/me -H "X-User-Id: 7"
    并包装了应用的 lifespan。
 2. `@app.get` 看到 `users: UserService` 后只做了记录；导入时什么也没有构建。
 3. 启动时，lifespan 为应用所提供的路由（包括它自身的路由和它所包含的路由器中的路由）
-   解析客户端，并逐层连接它们。关闭时则断开它们的连接。
+   解析客户端，并连接它们，每个都在其依赖之后。关闭时则断开它们的连接。
 4. 对 `/users/42` 的请求拿到的是已连接的 `UserService`。`/me` 则经过依赖项
    `current_user`，后者以同样的方式接收 `db: Database`。
 

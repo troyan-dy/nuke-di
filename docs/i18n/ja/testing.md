@@ -79,7 +79,7 @@ after the block: OrderedDict()
 
 - **`override()` は解決済みクライアントのないコンテナから始める。** そうでないと、終了時のフラッシュによって、ブロックより前に解決されたものが黙って破棄されてしまうため、`ConnectError: override(Database) needs a container without resolved clients, found: Database, UserService` が送出されます。先に `DI.flush()` を呼び出すか、後述の `global_di` フィクスチャを使ってください。
 - **差し替えはクラスごとにひとつ。** `mock(cls)` をもう一度呼び出すと、すでに登録されている差し替えが返されます。`mock(cls, other)` と `override(cls)` は `ConnectError: Database already has a replacement` を送出します。
-- **差し替えは接続されない。** 差し替えの `connect()` / `disconnect()` が呼び出されることはなく、[レイヤー](clients.md#layers)にも加わりません。
+- **差し替えは接続されない。** 差し替えの `connect()` / `disconnect()` が呼び出されることはなく、[接続順序](clients.md#connect-order)にも加わりません。
 - **差し替えの有効期間。** `mock()` で登録した差し替えは、`disconnect()` の最後に行われるものも含め、次の `flush()` で破棄されます。コンテナを複数回接続するテストでは `override()` を使ってください。その差し替えは、ブロックが終わるまでどの `flush()` を経ても残ります。ブロック内で発生した例外はそのまま伝播します。コンテナが接続されたままブロックを正常に抜けると、`ConnectError` が送出されます。
 - **ネスト。** 異なるクラスのブロックは、それぞれが何かを解決する前に開かれている限りネストできます（例：`with DI.override(Database), DI.override(Clock):`）。内側のブロックを抜けても、外側の差し替えは残ります。
 

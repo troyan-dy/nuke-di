@@ -37,7 +37,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ### Removed
 
 - Layers: `ClientTiming.layer`, `Node.layer`, the `layer` field of log records, the `Connecting layer N` debug
-  record and the layer subgraphs of `Graph.to_mermaid()`, which now draws the nodes and the arrows alone. Removing
+  record and the layer subgraphs of `Graph.to_mermaid()`, which now draws the clients and the arrows alone. Removing
   public fields in a minor release departs from semantic versioning on purpose: the fields described a schedule
   that no longer exists (ADR-0007).
 
