@@ -6,6 +6,19 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.11.3] - 2026-10-09
+
+### Changed
+
+- The README is a landing page now: the pitch, the Quick start, the principles, the comparison with other DI
+  libraries, a job with command-line arguments and a FastAPI app, each with its real output. The full
+  documentation moved, unchanged, into a guide of one page per topic in `docs/guide/` (clients, the container,
+  workers and jobs, FastAPI, Litestar, FastStream, testing, configuration, errors, development), linked from the
+  README "Documentation" section and translated into the same six languages in `docs/i18n/<language>/`.
+  `tests/test_readme_translations.py` checks the guide pages and their translations as it checks the README,
+  and that a link to a section of another page lands on a heading. The error for a client used as a pydantic
+  type points to `docs/guide/fastapi.md`.
+
 ## [1.11.2] - 2026-10-09
 
 ### Changed
@@ -425,7 +438,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.11.2...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.11.3...HEAD
+[1.11.3]: https://github.com/troyan-dy/nuke-di/compare/v1.11.2...v1.11.3
 [1.11.2]: https://github.com/troyan-dy/nuke-di/compare/v1.11.1...v1.11.2
 [1.11.1]: https://github.com/troyan-dy/nuke-di/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/troyan-dy/nuke-di/compare/v1.10.2...v1.11.0

@@ -23,7 +23,7 @@ class NotSingletonClient:
             raise TypeError(
                 f"{sname(cls)} is a nuke-di client, not a pydantic type. A pydantic model takes it only with "
                 f"arbitrary_types_allowed; FastAPI fills it only as a plain type hint, not as an optional, in the "
-                f'routes declared through nuke_di.fastapi: see "FastAPI" in the nuke-di README'
+                f"routes declared through nuke_di.fastapi: see docs/guide/fastapi.md in the nuke-di repository"
             ) from exc
 
     async def connect(self) -> None:

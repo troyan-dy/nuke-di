@@ -1,0 +1,497 @@
+# <a id="clients"></a>クライアント
+
+[English](../../guide/clients.md) · [Русский](../ru/clients.md) · [简体中文](../zh-CN/clients.md) · [Español](../es/clients.md) · [Português (Brasil)](../pt-BR/clients.md) · **日本語** · [Polski](../pl/clients.md)
+
+← [ドキュメント](../README.ja.md#documentation)
+
+## <a id="client-and-notsingletonclient"></a>Client と NotSingletonClient
+
+すべての依存関係は、次の 2 つの基底クラスのいずれかのサブクラスです。
+
+| 基底クラス           | インスタンス                                       |
+|----------------------|----------------------------------------------------|
+| `Client`             | シングルトン：コンテナごとに 1 インスタンス        |
+| `NotSingletonClient` | それを宣言する利用側ごとに新しいインスタンス       |
+
+```python
+from nuke_di import Client, Dependencies, NotSingletonClient
+
+
+class Settings(Client):
+    pass
+
+
+class HttpSession(NotSingletonClient):
+    pass
+
+
+class Orders(Client):
+    def __init__(self, settings: Settings, http: HttpSession) -> None:
+        self.settings = settings
+        self.http = http
+
+
+class Payments(Client):
+    def __init__(self, settings: Settings, http: HttpSession) -> None:
+        self.settings = settings
+        self.http = http
+
+
+deps = Dependencies()
+orders = deps.resolve(Orders)
+payments = deps.resolve(Payments)
+
+print(orders.settings is payments.settings)  # one Settings for the whole container
+print(orders.http is payments.http)  # every consumer gets its own HttpSession
+print(deps.resolve(Orders) is orders)  # resolve() is idempotent for a Client
+```
+
+```text
+True
+False
+True
+```
+
+クライアントは自身の依存関係を、型注釈付きの `__init__` 引数として宣言します。注入されるのはクライアント型で注釈された引数だけで、解決は再帰的に行われます。
+
+## <a id="connect-and-disconnect"></a>connect() と disconnect()
+
+コネクションプールなどのリソースを確保・解放するには、非同期メソッド `connect()` / `disconnect()` をオーバーライドします。`__init__` では依存関係を保持するだけにとどめ、I/O を伴う処理はすべて `connect()` に書きます。
+
+```python
+class Redis(Client):
+    def __init__(self) -> None:
+        self._pool: Pool | None = None
+
+    async def connect(self) -> None:
+        self._pool = await create_pool()
+
+    async def disconnect(self) -> None:
+        if self._pool is not None:
+            await self._pool.close()
+            self._pool = None
+```
+
+`connect()` にはそれぞれ `CONNECT_TIMEOUT_SECONDS`（デフォルト `30`）、`disconnect()` にはそれぞれ `DISCONNECT_TIMEOUT_SECONDS`（デフォルト `10`）のタイムアウトがかかります。`disconnect()` が失敗したりハングしたりした場合はログに記録され、他のクライアントの終了処理はそのまま続行されます。
+
+## <a id="dataclass-clients"></a>データクラスのクライアント
+
+`client_dataclass` はクラスを `Client` かつデータクラスに一度に変換します。そのため、フィールドがそのまま注入される依存関係になります。あわせて `Client` も継承してください。デコレータは恒等関数として型付けされているので、`Checkout` がクライアントであることを mypy と pyright に伝えるのは基底クラスです。基底クラスがなければ、そのクラスは実行時にだけクライアントになります。
+
+```python
+from nuke_di import Client, Dependencies, client_dataclass
+
+
+class Postgres(Client):
+    pass
+
+
+class Payments(Client):
+    pass
+
+
+@client_dataclass(frozen=True)
+class Checkout(Client):
+    pg: Postgres
+    payments: Payments
+
+
+checkout = Dependencies().resolve(Checkout)
+print(checkout)
+print(isinstance(checkout, Client))
+```
+
+```text
+Checkout(pg=<__main__.Postgres object at 0x...>, payments=<__main__.Payments object at 0x...>)
+True
+```
+
+`dataclasses.dataclass` と同じキーワード引数を受け付けます。
+
+## <a id="layers"></a>レイヤー
+
+クライアントはレイヤー単位で並行して接続されます。依存関係を持たないクライアントがレイヤー 0 を構成し、それ以外のクライアントは、依存先のうち最も高いレイヤーの 1 つ上に置かれます。各レイヤーは前のレイヤーの接続が完了してから開始されるため、クライアントが自身の依存先より先に接続されることはありません。`disconnect()` はレイヤーを逆順にたどります。
+
+```python
+import asyncio
+import logging
+
+from nuke_di import Client, Dependencies
+
+logging.basicConfig(level=logging.DEBUG, format="%(message)s")
+logging.getLogger("asyncio").setLevel(logging.WARNING)  # keep only the nuke_di records
+
+
+class Postgres(Client):
+    async def connect(self) -> None:
+        await asyncio.sleep(0.2)
+        print("  postgres ready")
+
+
+class Redis(Client):
+    async def connect(self) -> None:
+        await asyncio.sleep(0.1)
+        print("  redis ready")
+
+
+class Payments(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+class Checkout(Client):
+    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
+        self.pg, self.redis, self.payments = pg, redis, payments
+
+
+async def main() -> None:
+    deps = Dependencies()
+    deps.resolve(Checkout)
+    async with deps:
+        print("-- application is running --")
+
+
+asyncio.run(main())
+```
+
+`nuke_di` ロガーの `DEBUG` ログにレイヤーが表示されます。
+
+```text
+Resolving dependency "Checkout"
+Resolving dependency "Postgres"
+Resolving dependency "Redis"
+Resolving dependency "Payments"
+Connecting layer 0: Postgres, Redis
+Connecting client Postgres
+Connecting client Redis
+  redis ready
+Connected client Redis in 0.101s
+  postgres ready
+Connected client Postgres in 0.201s
+Connecting layer 1: Payments
+Connecting client Payments
+Connected client Payments in 0.000s
+Connecting layer 2: Checkout
+Connecting client Checkout
+Connected client Checkout in 0.000s
+Connected 4 clients in 3 layers in 0.20s (slowest: Postgres 0.20s, Redis 0.10s, Payments 0.00s)
+-- application is running --
+Disconnecting client Checkout
+Disconnected client Checkout in 0.000s
+Disconnecting client Payments
+Disconnected client Payments in 0.000s
+Disconnecting client Postgres
+Disconnected client Postgres in 0.000s
+Disconnecting client Redis
+Disconnected client Redis in 0.000s
+```
+
+```text
+Checkout(pg, redis, payments)    layer 2
+Payments(pg)                     layer 1
+Postgres, Redis                  layer 0  <- connect together, in 0.2s rather than 0.3s
+```
+
+順序が保証されるのは、`__init__` で宣言された依存関係だけです。あるクライアントより先に別のクライアントを接続しておく必要があるなら、それを依存関係として宣言してください。同時に接続するクライアントの数を制限するには、`CONNECT_CONCURRENCY` を設定します。
+
+## <a id="startup-timings"></a>起動時間
+
+コンテナはすべてのクライアントの `connect()` と `disconnect()` を計測するため、起動が遅いときに
+原因のクライアントがすぐわかります。`connect()` が成功すると `INFO` で要約を出力し、
+`CONNECT_TIMEOUT_SECONDS` の半分より長くかかったクライアントごとに `WARNING` を出力します。
+そのクライアントがタイムアウトで失敗し始めるよりずっと前に気づけます：
+
+```python
+# startup.py
+import asyncio
+import logging
+
+from nuke_di import Client, Dependencies, DependenciesSettings
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+
+class Postgres(Client):
+    async def connect(self) -> None:
+        await asyncio.sleep(0.2)
+
+
+class Kafka(Client):
+    async def connect(self) -> None:
+        await asyncio.sleep(1.6)
+
+    async def disconnect(self) -> None:
+        await asyncio.sleep(0.3)
+
+
+class Orders(Client):
+    def __init__(self, pg: Postgres, kafka: Kafka) -> None:
+        self.pg, self.kafka = pg, kafka
+
+
+async def main() -> None:
+    deps = Dependencies(settings=DependenciesSettings(connect_timeout=3))
+    deps.resolve(Orders)
+    async with deps:
+        print("-- application is running --")
+
+    for t in deps.timings:
+        print(
+            f"{t.name:<8} layer {t.layer}  connect {t.connect:.2f}s {t.connect_outcome:<3}  "
+            f"disconnect {t.disconnect:.2f}s {t.disconnect_outcome}"
+        )
+
+
+asyncio.run(main())
+```
+
+```console
+$ python startup.py
+INFO Connected 3 clients in 2 layers in 1.60s (slowest: Kafka 1.60s, Postgres 0.20s, Orders 0.00s)
+WARNING Client Kafka took 1.60s to connect, more than half of CONNECT_TIMEOUT_SECONDS (3s)
+-- application is running --
+Postgres layer 0  connect 0.20s ok   disconnect 0.00s ok
+Kafka    layer 0  connect 1.60s ok   disconnect 0.30s ok
+Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
+```
+
+`deps.timings` は直近の `connect()` のクライアントごとに `ClientTiming` を接続順に 1 つずつ保持します。
+`disconnect()` の後も残るので、コンテナの停止後にも読み取れます。FastAPI アプリでは、`FastAPI()` に渡した
+lifespan は接続済みのコンテナの内側で動くので、接続時間を参照できます。
+ワーカーやジョブは同じリストを [`Run.clients`](workers-and-jobs.md#startup-metrics-and-structured-logs) で受け取ります。
+
+| `ClientTiming` のフィールド | 値 |
+|-----------------------------|----|
+| `name`               | クライアントのクラス名 |
+| `layer`              | クライアントの[レイヤー](#layers) |
+| `connect`            | `connect()` にかかった秒数。`CONNECT_CONCURRENCY` の待ち時間は含みません。`connect()` が一度も実行されなかった場合は `None` |
+| `connect_outcome`    | `"ok"`、`"failed"`、`"timed_out"`、`"cancelled"`。`connect()` が始まらなかった場合は `None` |
+| `disconnect`、`disconnect_outcome` | `disconnect()` について同じもの。クライアントが切断されるまでは `None` |
+
+あるクライアントの接続が失敗すると、同じレイヤーでまだ接続中のクライアントは `"cancelled"` になり、
+上のレイヤーは `None` のままで、すでに接続していたクライアントはロールバックされて `disconnect_outcome`
+を持ちます。ライブラリは計測するだけです。時間をメトリクスやスパンとしてエクスポートするのはあなたのコードの役割です。
+
+## <a id="the-graph"></a>依存グラフ
+
+依存グラフは実行中のプロセスの中にしか存在しません。上の `DEBUG` ログだけが、エントリーポイントがどのクライアントを
+引き込み、それぞれがどのレイヤーで接続するかを示す場所です。`graph()` は同じ絵をデータとして返します。`connect()` の前でも
+後でも呼べます。以下は[レイヤー](#layers)の例のクライアントから `connect()` を外したものです。
+
+```python
+# graph.py
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    pass
+
+
+class Redis(Client):
+    pass
+
+
+class Payments(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+class Checkout(Client):
+    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
+        self.pg, self.redis, self.payments = pg, redis, payments
+
+
+deps = Dependencies()
+deps.resolve(Checkout)
+nodes = {node.name: node for node in deps.graph().nodes}
+for node in nodes.values():
+    print(f"{node.name:<8} layer {node.layer}  needs {list(node.dependencies)}")
+print("shared:", nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"])
+print(deps.graph().to_mermaid())
+```
+
+```console
+$ python graph.py
+Postgres layer 0  needs []
+Redis    layer 0  needs []
+Payments layer 1  needs ['pg']
+Checkout layer 2  needs ['pg', 'redis', 'payments']
+shared: True
+graph BT
+  subgraph layer0 [layer 0]
+    Postgres
+    Redis
+  end
+  subgraph layer1 [layer 1]
+    Payments
+  end
+  subgraph layer2 [layer 2]
+    Checkout
+  end
+  Postgres --> Payments
+  Postgres --> Checkout
+  Redis --> Checkout
+  Payments --> Checkout
+```
+
+GitHub は README、pull request、issue の中で Mermaid のテキストを描画するので、プロジェクトはプロセスを動かさずに
+アーキテクチャを見せられます。
+
+```mermaid
+graph BT
+  subgraph layer0 [layer 0]
+    Postgres
+    Redis
+  end
+  subgraph layer1 [layer 1]
+    Payments
+  end
+  subgraph layer2 [layer 2]
+    Checkout
+  end
+  Postgres --> Payments
+  Postgres --> Checkout
+  Redis --> Checkout
+  Payments --> Checkout
+```
+
+`Graph.nodes` は解決済みのクライアントごとに 1 つの `Node` を解決順に持つので、クライアントは自分の依存の後に来ます。
+これはスナップショットで、`flush()` で空になります。ただし、開いている `override()` ブロックの Replacement は残り、どの `flush()` にも
+耐えます。
+
+| `Node` のフィールド | 値 |
+|---------------------|----|
+| `name`              | クライアントのクラス名 |
+| `cls`               | 利用側が要求したクラス |
+| `singleton`         | `Client` なら `True`、`NotSingletonClient` なら `False` |
+| `layer`             | クライアントの[レイヤー](#layers)。Replacement は接続されないので `None` |
+| `replacement`       | `mock()` または `override()` で `cls` の代わりに登録されたオブジェクト。実際のクライアントは `None` |
+| `dependencies`      | `__init__` の各引数に対応するクライアント。引数名で引く |
+
+`NotSingletonClient` はインスタンスごとに 1 つのノードになり、名前はすべて同じです。`to_mermaid()` は 2 つ目から番号を
+付けます（`Session`、`Session_2`）。Replacement はレイヤーの外に破線の枠で描かれ、代わりに置かれたオブジェクトの名前が
+付きます：`Postgres: AsyncMock`。ノードは同一性で比較されるので、
+上の `shared: True` は `Checkout` と `Payments` が同じ `Postgres` を受け取ったことを示します。
+
+## <a id="when-a-client-fails-to-connect"></a>クライアントの接続に失敗した場合
+
+クライアントの接続に失敗すると、同じレイヤーの残りの接続はキャンセルされ、次のレイヤーは開始されません。すでに接続済みのクライアントはレイヤーの逆順に切断され、コンテナは切断済みの空の状態になります。
+
+```python
+import asyncio
+
+from nuke_di import Client, ConnectError, Dependencies
+
+
+class Postgres(Client):
+    async def connect(self) -> None:
+        print("postgres: connected")
+
+    async def disconnect(self) -> None:
+        print("postgres: disconnected")
+
+
+class Kafka(Client):
+    async def connect(self) -> None:
+        raise OSError("broker kafka-1:9092 is unreachable")
+
+
+class Orders(Client):
+    def __init__(self, pg: Postgres, kafka: Kafka) -> None:
+        self.pg, self.kafka = pg, kafka
+
+
+async def main() -> None:
+    deps = Dependencies()
+    deps.resolve(Orders)
+    try:
+        await deps.connect()
+    except ConnectError as exc:
+        print(f"{exc} <- {exc.__cause__!r}")
+    print("connected:", deps.connected)
+
+
+asyncio.run(main())
+```
+
+```text
+postgres: connected
+Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
+Traceback (most recent call last):
+  ...
+OSError: broker kafka-1:9092 is unreachable
+postgres: disconnected
+Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable <- OSError('broker kafka-1:9092 is unreachable')
+connected: False
+```
+
+`connect()` 自体がキャンセルされた場合も、同じクリーンアップが行われます。`ConnectError` は `SystemExit` を継承しているため、これを捕捉しないアプリケーションは停止します。依存先がダウンしているときは、たいていそれが望ましい動作です。モックしたクライアントは接続されず、レイヤーにも影響しません。
+
+## <a id="when-the-tree-cannot-be-built"></a>ツリーを構築できない場合
+
+解決時には、すべての `__init__` を呼び出す前に検査します。そのため、構築できないクライアントは何かが接続される前に失敗し、エラーには該当する引数の名前と、要求したクライアントからの経路が示されます。
+
+```python
+from typing import Protocol
+
+from nuke_di import Client, Dependencies, InvalidSignatureError
+
+
+class Postgres(Client):
+    pass
+
+
+class UserRepository(Protocol):
+    async def get(self, user_id: int) -> str: ...
+
+
+class Profiles(Client):
+    def __init__(self, pg: Postgres, users: UserRepository) -> None:
+        self.pg, self.users = pg, users
+
+
+class Checkout(Client):
+    def __init__(self, profiles: Profiles) -> None:
+        self.profiles = profiles
+
+
+class Orders(Client):
+    def __init__(self, payments: "Payments") -> None:
+        self.payments = payments
+
+
+class Payments(Client):
+    def __init__(self, orders: Orders) -> None:
+        self.orders = orders
+
+
+for root in (Checkout, Orders):
+    try:
+        Dependencies().resolve(root)
+    except InvalidSignatureError as exc:
+        print(f"{type(exc).__name__}: {exc}")
+
+try:
+    Dependencies().resolve(UserRepository)  # a type checker refuses this line, and so does the container
+except InvalidSignatureError as exc:
+    print(f"{type(exc).__name__}: {exc}")
+```
+
+```text
+InvalidSignatureError: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)
+CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
+InvalidSignatureError: UserRepository is not a client: subclass Client or NotSingletonClient
+```
+
+`__init__` の引数は、型ヒントがクライアントであればクライアントで埋められます。それ以外の引数にはデフォルト値が必要で、その値はそのまま使われます。次の場合は `InvalidSignatureError` で失敗します。
+
+| デフォルト値のない `__init__` 引数    | メッセージ                                        |
+|---------------------------------------|---------------------------------------------------|
+| 型ヒントがない                        | `has no type hint`                                |
+| クライアントではない型                | `is UserRepository, which is not a client`        |
+| `Client \| None`                      | `is Postgres \| None, a client cannot be optional` |
+| 位置専用（`/`）のクライアント         | `is positional-only, a client is passed by keyword` |
+
+そもそもクライアントではないクラスを `resolve()` で求めると、何かが構築される前に `UserRepository is not a client: subclass Client or NotSingletonClient` で失敗します。
+
+互いに循環して依存するクライアントは、`InvalidSignatureError` のサブクラスである `CircularDependencyError` で失敗します。評価できない型ヒント（関数の内部で定義されたクラスや、`TYPE_CHECKING` の下でインポートされたクラスなど）は、その旨を示す `InvalidSignatureError` で失敗します。エラーが `inject()` から発生した場合、経路は関数から始まります：`(resolving handler -> Checkout -> Profiles)`。[ワーカーやジョブ](workers-and-jobs.md)では、いずれの場合も何かが接続される前に、終了コード `1` で実行が失敗します。
