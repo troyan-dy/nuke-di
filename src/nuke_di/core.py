@@ -233,7 +233,11 @@ class Dependencies:
             error.__cause__ = exc
             raise _ClientConnectError(error) from exc
 
-        except Exception as exc:
+        except (Exception, asyncio.CancelledError) as exc:
+            # A CancelledError of the client's own fails the connect like an exception: its consumers would wait for
+            # it forever. A cancellation of connect() itself, or by the failure of another client, goes on.
+            if isinstance(exc, asyncio.CancelledError) and _cancelled_from_outside():
+                raise
             logger.exception(
                 "%s.connect() raised %s: %s", name, type(exc).__name__, exc, extra=_fields(timing, timing.connect)
             )
@@ -310,8 +314,7 @@ class Dependencies:
         except asyncio.CancelledError:
             # A CancelledError of the client's own, re-raised from a task it awaited, ends its disconnect() alone: its
             # dependencies still have to be stopped. A cancellation of disconnect() itself goes on.
-            task = asyncio.current_task()
-            if task is None or task.cancelling():
+            if _cancelled_from_outside():
                 raise
         except TimeoutError:
             logger.exception(
@@ -865,6 +868,15 @@ async def _in_order(
     async with asyncio.TaskGroup() as group:
         for client in clients:
             group.create_task(run(client))
+
+
+def _cancelled_from_outside() -> bool:
+    """
+    Whether the task is being cancelled, as opposed to a client raising a CancelledError of its own, e.g. re-raised
+    from a task it awaited.
+    """
+    task = asyncio.current_task()
+    return task is None or task.cancelling() > 0
 
 
 def _display_names(classes: Iterable[type]) -> dict[type, str]:

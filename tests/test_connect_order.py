@@ -370,3 +370,31 @@ async def test_progress_in_the_client_records(caplog: pytest.LogCaptureFixture) 
     assert messages[1].endswith("s (1/3 connected)")
     assert messages[5].endswith("s (3/3 connected)")
     assert messages[11].endswith("s (3/3 disconnected)")
+
+
+class CancelsItself(Client):
+    """
+    Ends its connect() in a CancelledError of its own, as a client re-raising the cancellation of a task it awaited.
+    """
+
+    async def connect(self) -> None:
+        raise asyncio.CancelledError
+
+
+class AfterCancelled(Tracked):
+    def __init__(self, dependency: CancelsItself) -> None:
+        self.dependency = dependency
+
+
+async def test_client_cancelling_its_own_connect_fails_the_connect() -> None:
+    # Its consumers would wait for it forever
+    dep = Dependencies()
+    dep.resolve(AfterCancelled)
+
+    async with asyncio.timeout(1):
+        with pytest.raises(ConnectError, match=r"CancelsItself\.connect\(\) raised CancelledError"):
+            await dep.connect()
+
+    assert probe.events == []
+    [timing] = [timing for timing in dep.timings if timing.name == "CancelsItself"]
+    assert timing.connect_outcome == "cancelled"

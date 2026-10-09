@@ -11,8 +11,8 @@
 为异步 Python 项目打造的最简单的依赖注入。
 
 依赖用普通的类型提示声明即可。`nuke-di` 会构建依赖树，每个客户端只创建一次，并驱动它的异步生命周期：
-启动时调用 `connect()`，关闭时调用 `disconnect()`。相互独立的客户端按层并发启动，
-从最深层的依赖开始逐层向上。
+启动时调用 `connect()`，关闭时调用 `disconnect()`。每个客户端在自己的依赖连接完成后立即启动，
+与其他所有已就绪的客户端并发进行。
 
 在此之上，只需一个装饰器就能把异步函数变成一个进程：只运行一次的 **job**，或一直运行到被停止的
 **worker**，并且自带命令行参数、收到 SIGTERM 时优雅关闭，以及含义明确的退出码。
@@ -22,7 +22,7 @@ FastAPI、Litestar 和 FastStream 的处理函数也以同样的方式通过类�
 
 - [安装](#installation)
 - [快速开始](#quick-start)
-- [客户端](#clients)：[单例](#client-and-notsingletonclient)、[生命周期](#connect-and-disconnect)、[dataclass](#dataclass-clients)、[层](#layers)、[启动耗时](#startup-timings)、[依赖图](#the-graph)、[连接失败](#when-a-client-fails-to-connect)、[解析错误](#when-the-tree-cannot-be-built)
+- [客户端](#clients)：[单例](#client-and-notsingletonclient)、[生命周期](#connect-and-disconnect)、[dataclass](#dataclass-clients)、[连接顺序](#connect-order)、[启动耗时](#startup-timings)、[依赖图](#the-graph)、[连接失败](#when-a-client-fails-to-connect)、[解析错误](#when-the-tree-cannot-be-built)
 - [容器](#the-container)
 - [worker 与 job](#workers-and-jobs)：[第一个 job](#your-first-job)、[参数](#parameters)、[第一个 worker](#your-first-worker)、[宽限期](#grace-period)、[后台任务](#background-tasks)、[退出码](#exit-codes)、[钩子](#hooks)、[Kubernetes](#running-in-kubernetes)
 - 框架：[FastAPI](#fastapi)、[Litestar](#litestar)、[FastStream](#faststream)
@@ -202,47 +202,72 @@ True
 
 它接受与 `dataclasses.dataclass` 相同的关键字参数。
 
-### <a id="layers"></a>层
+### <a id="connect-order"></a>连接顺序
 
-客户端按层并发连接。没有依赖的客户端构成第 0 层；其他客户端位于它最高的那个依赖所在层的上一层。
-前一层全部连接完成后，下一层才会开始，因此客户端绝不会先于自己的依赖连接。
-`disconnect()` 则按相反顺序遍历各层。
+客户端在自己的依赖连接完成后立即连接，与其他所有已就绪的客户端并发进行，因此一个慢的客户端只会拖住
+需要它的那些客户端。`disconnect()` 方向相反：依赖某个客户端的那些客户端断开后，它立即断开。
 
 ```python
+# connect_order.py
 import asyncio
 import logging
+import time
 
 from nuke_di import Client, Dependencies
 
-logging.basicConfig(level=logging.DEBUG, format="%(message)s")
-logging.getLogger("asyncio").setLevel(logging.WARNING)  # keep only the nuke_di records
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+started = time.perf_counter()
+
+
+async def connecting(name: str, seconds: float) -> None:
+    await asyncio.sleep(seconds)  # a real client opens its connection here
+    print(f"{time.perf_counter() - started:.2f}s  {name} connected")
 
 
 class Postgres(Client):
     async def connect(self) -> None:
-        await asyncio.sleep(0.2)
-        print("  postgres ready")
+        await connecting("Postgres", 0.3)
+
+
+class Kafka(Client):
+    async def connect(self) -> None:
+        await connecting("Kafka", 0.05)
 
 
 class Redis(Client):
     async def connect(self) -> None:
-        await asyncio.sleep(0.1)
-        print("  redis ready")
+        await connecting("Redis", 0.05)
 
 
-class Payments(Client):
+class Repository(Client):
     def __init__(self, pg: Postgres) -> None:
         self.pg = pg
 
 
-class Checkout(Client):
-    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
-        self.pg, self.redis, self.payments = pg, redis, payments
+class Consumer(Client):
+    def __init__(self, kafka: Kafka) -> None:
+        self.kafka = kafka
+
+    async def connect(self) -> None:
+        await connecting("Consumer", 0.3)
+
+
+class Http(Client):
+    def __init__(self, redis: Redis) -> None:
+        self.redis = redis
+
+    async def connect(self) -> None:
+        await connecting("Http", 0.2)
+
+
+class App(Client):
+    def __init__(self, repository: Repository, consumer: Consumer, http: Http) -> None:
+        self.repository, self.consumer, self.http = repository, consumer, http
 
 
 async def main() -> None:
     deps = Dependencies()
-    deps.resolve(Checkout)
+    deps.resolve(App)
     async with deps:
         print("-- application is running --")
 
@@ -250,46 +275,28 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`nuke_di` logger 的 `DEBUG` 日志展示了各层：
-
-```text
-Resolving dependency "Checkout"
-Resolving dependency "Postgres"
-Resolving dependency "Redis"
-Resolving dependency "Payments"
-Connecting layer 0: Postgres, Redis
-Connecting client Postgres
-Connecting client Redis
-  redis ready
-Connected client Redis in 0.101s
-  postgres ready
-Connected client Postgres in 0.201s
-Connecting layer 1: Payments
-Connecting client Payments
-Connected client Payments in 0.000s
-Connecting layer 2: Checkout
-Connecting client Checkout
-Connected client Checkout in 0.000s
-Connected 4 clients in 3 layers in 0.20s (slowest: Postgres 0.20s, Redis 0.10s, Payments 0.00s)
+```console
+$ python connect_order.py
+0.05s  Kafka connected
+0.05s  Redis connected
+0.25s  Http connected
+0.30s  Postgres connected
+0.35s  Consumer connected
+INFO Connected 7 clients in 0.35s (slowest: Postgres 0.30s, Consumer 0.30s, Http 0.20s)
 -- application is running --
-Disconnecting client Checkout
-Disconnected client Checkout in 0.000s
-Disconnecting client Payments
-Disconnected client Payments in 0.000s
-Disconnecting client Postgres
-Disconnected client Postgres in 0.000s
-Disconnecting client Redis
-Disconnected client Redis in 0.000s
 ```
 
-```text
-Checkout(pg, redis, payments)    layer 2
-Payments(pg)                     layer 1
-Postgres, Redis                  layer 0  <- connect together, in 0.2s rather than 0.3s
-```
+`Consumer` 只需要 `Kafka`，所以它在 0.05s 就开始连接，此时 `Postgres` 还在连接中；
+整个启动耗时等于最长的那条依赖链 `Kafka` → `Consumer`。在 1.11 及之前的版本中，客户端按层连接，
+每个客户端都要等待下面那一层中最慢的客户端，在这里需要 0.60s：
+
+![示例中的六个客户端：按层连接耗时 0.60s，按各自的依赖连接耗时 0.35s](../../docs/connect-order.svg)
+
+开启 `DEBUG` 后，`nuke_di` logger 会在每个客户端开始和完成时记下它的名字，以及目前已连接的数量：
+`Connecting client Consumer (2/7 connected)`，`disconnect()` 也是如此。
 
 只有在 `__init__` 中声明的依赖才参与排序。如果某个客户端需要另一个客户端先连接好，就把它声明为依赖。
-设置 `CONNECT_CONCURRENCY` 可以限制同时连接的客户端数量。
+设置 `CONNECT_CONCURRENCY` 可以限制同时连接的客户端数量；正在等待依赖的客户端不占用名额。
 
 ### <a id="startup-timings"></a>启动耗时
 
@@ -333,7 +340,7 @@ async def main() -> None:
 
     for t in deps.timings:
         print(
-            f"{t.name:<8} layer {t.layer}  connect {t.connect:.2f}s {t.connect_outcome:<3}  "
+            f"{t.name:<8} connect {t.connect:.2f}s {t.connect_outcome:<3}  "
             f"disconnect {t.disconnect:.2f}s {t.disconnect_outcome}"
         )
 
@@ -343,15 +350,16 @@ asyncio.run(main())
 
 ```console
 $ python startup.py
-INFO Connected 3 clients in 2 layers in 1.60s (slowest: Kafka 1.60s, Postgres 0.20s, Orders 0.00s)
+INFO Connected 3 clients in 1.60s (slowest: Kafka 1.60s, Postgres 0.20s, Orders 0.00s)
 WARNING Client Kafka took 1.60s to connect, more than half of CONNECT_TIMEOUT_SECONDS (3s)
 -- application is running --
-Postgres layer 0  connect 0.20s ok   disconnect 0.00s ok
-Kafka    layer 0  connect 1.60s ok   disconnect 0.30s ok
-Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
+Postgres connect 0.20s ok   disconnect 0.00s ok
+Kafka    connect 1.60s ok   disconnect 0.30s ok
+Orders   connect 0.00s ok   disconnect 0.00s ok
 ```
 
-`deps.timings` 按连接顺序为最近一次 `connect()` 的每个客户端保存一个 `ClientTiming`。
+`deps.timings` 按解析顺序为最近一次 `connect()` 的每个客户端保存一个 `ClientTiming`，
+因此客户端总是排在它的依赖之后。
 它在 `disconnect()` 之后依然保留，因此可以在容器停止后读取。在 FastAPI 应用中，传给 `FastAPI()`
 的 lifespan 运行在已连接的容器内部，因此能看到连接耗时。
 worker 或 job 会在 [`Run.clients`](#startup-metrics-and-structured-logs) 中得到同一个列表。
@@ -359,20 +367,18 @@ worker 或 job 会在 [`Run.clients`](#startup-metrics-and-structured-logs) 中�
 | `ClientTiming` 字段  | 值 |
 |----------------------|----|
 | `name`               | 客户端的类名 |
-| `layer`              | 客户端所在的[层](#layers) |
 | `connect`            | 在 `connect()` 中花费的秒数，不含等待 `CONNECT_CONCURRENCY` 的时间；`connect()` 从未运行时为 `None` |
 | `connect_outcome`    | `"ok"`、`"failed"`、`"timed_out"`、`"cancelled"`；`connect()` 从未开始时为 `None` |
 | `disconnect`、`disconnect_outcome` | `disconnect()` 的对应值；客户端断开之前为 `None` |
 
-当某个客户端连接失败时，同一层中仍在连接的客户端为 `"cancelled"`，更高的层保持 `None`，
+当某个客户端连接失败时，仍在连接的客户端为 `"cancelled"`，仍在等待依赖的客户端保持 `None`，
 已经连接的客户端会被回滚，因此会得到 `disconnect_outcome`。库只负责测量：把耗时导出为
 指标或 span 由你的代码完成。
 
 ### <a id="the-graph"></a>依赖图
 
-依赖图只存在于运行中的进程里：上面的 `DEBUG` 日志是唯一能看到一个入口点拉入哪些客户端、
-每个客户端在哪一层连接的地方。`graph()` 把同一幅图作为数据返回，在 `connect()` 之前或之后都可以。
-下面是[层](#layers)一节示例中的客户端，去掉了它们的 `connect()`：
+依赖图只存在于运行中的进程里：`DEBUG` 日志是唯一能看到一个入口点拉入哪些客户端、
+每个客户端在等待什么的地方。`graph()` 把同一幅图作为数据返回，在 `connect()` 之前或之后都可以：
 
 ```python
 # graph.py
@@ -401,29 +407,23 @@ deps = Dependencies()
 deps.resolve(Checkout)
 nodes = {node.name: node for node in deps.graph().nodes}
 for node in nodes.values():
-    print(f"{node.name:<8} layer {node.layer}  needs {list(node.dependencies)}")
+    print(f"{node.name:<8} needs {list(node.dependencies)}")
 print("shared:", nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"])
 print(deps.graph().to_mermaid())
 ```
 
 ```console
 $ python graph.py
-Postgres layer 0  needs []
-Redis    layer 0  needs []
-Payments layer 1  needs ['pg']
-Checkout layer 2  needs ['pg', 'redis', 'payments']
+Postgres needs []
+Redis    needs []
+Payments needs ['pg']
+Checkout needs ['pg', 'redis', 'payments']
 shared: True
 graph BT
-  subgraph layer0 [layer 0]
-    Postgres
-    Redis
-  end
-  subgraph layer1 [layer 1]
-    Payments
-  end
-  subgraph layer2 [layer 2]
-    Checkout
-  end
+  Postgres
+  Redis
+  Payments
+  Checkout
   Postgres --> Payments
   Postgres --> Checkout
   Redis --> Checkout
@@ -434,16 +434,10 @@ GitHub 会在 README、pull request 或 issue 中渲染 Mermaid 文本，所以�
 
 ```mermaid
 graph BT
-  subgraph layer0 [layer 0]
-    Postgres
-    Redis
-  end
-  subgraph layer1 [layer 1]
-    Payments
-  end
-  subgraph layer2 [layer 2]
-    Checkout
-  end
+  Postgres
+  Redis
+  Payments
+  Checkout
   Postgres --> Payments
   Postgres --> Checkout
   Redis --> Checkout
@@ -458,17 +452,17 @@ graph BT
 | `name`         | 客户端的类名 |
 | `cls`          | 使用方请求的类 |
 | `singleton`    | `Client` 为 `True`，`NotSingletonClient` 为 `False` |
-| `layer`        | 客户端的[层](#layers)；Replacement 为 `None`，它永远不会连接 |
 | `replacement`  | 通过 `mock()` 或 `override()` 注册、代替 `cls` 的对象；真实客户端为 `None` |
 | `dependencies` | `__init__` 各参数对应的客户端，按参数名索引 |
 
 `NotSingletonClient` 的每个实例各占一个节点，名字相同；`to_mermaid()` 从第二个开始编号
-（`Session`、`Session_2`）。Replacement 画在层之外，带虚线边框，并标出代替它的对象名：`Postgres: AsyncMock`。
+（`Session`、`Session_2`）。Replacement 带虚线边框，并标出代替它的对象名：`Postgres: AsyncMock`。
 节点按标识比较，因此上面的 `shared: True` 说明 `Checkout` 和 `Payments` 拿到的是同一个 `Postgres`。
 
 ### <a id="when-a-client-fails-to-connect"></a>客户端连接失败时
 
-如果某个客户端连接失败，同一层的其余客户端会被取消，后续各层也不会启动。已经连接的客户端会按层逆序断开连接，
+如果某个客户端连接失败，所有仍在连接的客户端都会被取消，等待它的客户端也不会启动。已经连接的客户端会断开连接，
+每个都在依赖它的客户端之后断开，
 容器最终处于未连接且为空的状态：
 
 ```python
@@ -520,7 +514,7 @@ connected: False
 ```
 
 `connect()` 本身被取消时也会执行同样的清理。`ConnectError` 继承自 `SystemExit`，因此不捕获它的应用会直接停止——
-当某个依赖不可用时，这通常正是你想要的。被 mock 的客户端不会被连接，也不影响分层。
+当某个依赖不可用时，这通常正是你想要的。被 mock 的客户端不会被连接，也没有客户端等待它们。
 
 ### <a id="when-the-tree-cannot-be-built"></a>依赖树无法构建时
 
@@ -606,14 +600,14 @@ InvalidSignatureError: UserRepository is not a client: subclass Client or NotSin
 |----------------------|-------------------------------------------------------------------------|
 | `resolve(cls)`       | 构建 `cls` 及其依赖树。对 `Client` 是幂等的。                           |
 | `inject(func)`       | 返回已绑定客户端参数的 `functools.partial(func, ...)`。除 `*args` / `**kwargs` 外，`func` 的每个参数都必须有类型提示。 |
-| `connect()`          | 逐层对每个已解析的客户端调用 `connect()`。                              |
-| `disconnect()`       | 逐层逆序调用 `disconnect()`，然后对容器执行 `flush()`。                 |
+| `connect()`          | 对每个已解析的客户端调用 `connect()`，每个都在其依赖之后。              |
+| `disconnect()`       | 对每个客户端调用 `disconnect()`，每个都在其使用方之后，然后对容器执行 `flush()`。 |
 | `async with`         | 进入时调用 `connect()`，退出时调用 `disconnect()`。                     |
 | `mock(cls, new=None)`| 为 `cls` 注册一个替换对象（默认为 autospec mock），有效期到下一次 `flush()` 为止。必须在 `cls` 被解析之前调用。 |
 | `override(cls, new=None)` | 仅在 `with` 块内有效的替换对象，块结束后执行 `flush()`；参见[测试](#testing)。 |
 | `flush()`            | 丢弃所有已解析的客户端。                                                |
 | `timings`            | 最近一次 `connect()` 的每个客户端一个 `ClientTiming`；见[启动耗时](#startup-timings)。 |
-| `graph()`            | 已解析客户端的 `Graph`，含依赖和层，带 `to_mermaid()`；见[依赖图](#the-graph)。 |
+| `graph()`            | 已解析客户端的 `Graph`，含依赖，带 `to_mermaid()`；见[依赖图](#the-graph)。 |
 
 `inject()` 的结果保留函数的返回类型，但其余参数不带类型：类型检查器无法从签名中减去客户端参数。
 
@@ -769,7 +763,7 @@ $ python -m app.jobs.sync
 INFO  nuke_di.run: Starting job app.jobs.sync.sync
 postgres: connected
 warehouse: connected
-INFO  nuke_di.core: Connected 4 clients in 1 layer in 0.00s (slowest: Warehouse 0.00s, Postgres 0.00s, Shutdown 0.00s)
+INFO  nuke_di.core: Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)
 postgres: upserted 3 rows into users
 postgres: upserted 3 rows into orders
 postgres: disconnected
@@ -1060,7 +1054,7 @@ queue: disconnected
 已经连接的客户端会被断开。
 
 最坏情况下，进程停止需要
-`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers`。在默认设置下，两层的依赖树就会
+`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × 最长依赖链的长度`。在默认设置下，由两个客户端组成的依赖链就会
 用完 Kubernetes 默认的 30 秒 `terminationGracePeriodSeconds`，
 因此对于更深的依赖树，请调低超时或调高宽限期。
 
@@ -1229,7 +1223,7 @@ from app.clients import Postgres, Warehouse
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        fields = {key: getattr(record, key) for key in ("run", "client", "layer", "duration") if hasattr(record, key)}
+        fields = {key: getattr(record, key) for key in ("run", "client", "duration") if hasattr(record, key)}
         return json.dumps({"level": record.levelname, "message": record.getMessage(), **fields})
 
 
@@ -1257,7 +1251,7 @@ $ python -m app.jobs.startup
 {"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
 postgres: connected
 warehouse: connected
-{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00015945796621963382}
+{"level": "INFO", "message": "Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00022179202642291784}
 startup: done
 postgres: disconnected
 warehouse: disconnected
@@ -1272,7 +1266,6 @@ metric: Warehouse connect=0.000s ok
 |------------|-------------------------------------------------------------------------------|
 | `run`      | 在 worker 或 job 内产生的每条记录，包括容器的记录：运行的名称                 |
 | `client`   | 关于单个客户端的每条记录：解析、连接、断开、失败                              |
-| `layer`    | 关于客户端连接或断开的每条记录，以及 `Connecting layer`                       |
 | `duration` | 秒数：已连接或已断开的客户端、启动汇总、已结束的运行                          |
 
 每次运行还会连接它自己的 `Shutdown` 和 `BackgroundTasks` 客户端，所以它们也会出现在
@@ -1314,7 +1307,7 @@ spec:
     metadata:
       labels: {app: consumer}
     spec:
-      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers
+      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × longest chain
       containers:
         - name: consumer
           image: registry.example.com/app:1.0
@@ -1430,7 +1423,7 @@ $ curl localhost:8000/me -H "X-User-Id: 7"
    并包装了应用的 lifespan。
 2. `@app.get` 看到 `users: UserService` 后只做了记录；导入时什么也没有构建。
 3. 启动时，lifespan 为应用所提供的路由（包括它自身的路由和它所包含的路由器中的路由）
-   解析客户端，并逐层连接它们。关闭时则断开它们的连接。
+   解析客户端，并连接它们，每个都在其依赖之后。关闭时则断开它们的连接。
 4. 对 `/users/42` 的请求拿到的是已连接的 `UserService`。`/me` 则经过依赖项
    `current_user`，后者以同样的方式接收 `db: Database`。
 
@@ -1918,7 +1911,7 @@ after the block: OrderedDict()
 - **每个类只能有一个替换对象。** 再次调用 `mock(cls)` 会返回已注册的替换对象；
   `mock(cls, other)` 和 `override(cls)` 会抛出 `ConnectError: Database already has a replacement`。
 - **替换对象不会被连接。** 它们的 `connect()` / `disconnect()` 永远不会被调用，
-  也不参与[按层连接](#layers)。
+  也不参与[连接顺序](#connect-order)。
 - **替换对象的有效期。** 由 `mock()` 注册的替换对象会在下一次 `flush()` 时被丢弃，包括
   `disconnect()` 末尾的那一次：需要多次连接容器的测试应使用
   `override()`，它的替换对象会在每次 `flush()` 后保留下来，直到代码块结束。代码块内的异常

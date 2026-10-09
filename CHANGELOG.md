@@ -21,6 +21,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - The first failure in `connect()` cancels every client still connecting, across the whole tree; the clients
   still waiting for their dependencies keep `None` in their `ClientTiming`, and the connected ones are rolled
   back as before.
+- A client whose `connect()` ends in a `CancelledError` of its own, e.g. re-raised from a task it awaited, fails
+  the connect with a `ConnectError` like an exception does; its consumers would otherwise wait for it forever. Up
+  to 1.11 it was skipped as not connected and the layers above it connected anyway.
 - `CONNECT_CONCURRENCY` counts only clients in `connect()` or `disconnect()`; a client waiting for its
   dependencies does not take a slot.
 - The `DEBUG` records of a client connecting or disconnecting say how many have finished so far:
