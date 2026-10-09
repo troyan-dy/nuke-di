@@ -372,6 +372,8 @@ def test_every_log_call_passes_structured_fields() -> None:
         and isinstance(node.func, ast.Attribute)
         and isinstance(node.func.value, ast.Name)
         and node.func.value.id == "logger"
+        # `isEnabledFor` asks the logger, it does not write a record
+        and node.func.attr != "isEnabledFor"
         and not any(keyword.arg == "extra" for keyword in node.keywords)
     ]
 

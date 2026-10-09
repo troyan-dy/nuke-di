@@ -270,3 +270,28 @@ def test_nested_inject_keeps_the_outer_path() -> None:
 
     with pytest.raises(InvalidSignatureError, match=r"\(resolving outer_handler -> Outer -> Retries\)$"):
         dep.inject(outer_handler)
+
+
+class Alpha(Client):
+    def __init__(self, beta: "Beta") -> None:
+        self.beta = beta
+
+
+class Beta(Client):
+    def __init__(self, gamma: "Gamma") -> None:
+        self.gamma = gamma
+
+
+class Gamma(Client):
+    def __init__(self, alpha: Alpha) -> None:
+        self.alpha = alpha
+
+
+def test_longer_cycle_names_the_whole_path() -> None:
+    dep = Dependencies()
+    with pytest.raises(CircularDependencyError, match=r"^Circular dependency: Alpha -> Beta -> Gamma -> Alpha$"):
+        dep.resolve(Alpha)
+
+    # The failed resolution left nothing behind: the next one reports its own path
+    with pytest.raises(CircularDependencyError, match=r"^Circular dependency: Beta -> Gamma -> Alpha -> Beta$"):
+        dep.resolve(Beta)

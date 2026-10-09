@@ -6,6 +6,25 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The arguments of a client's `__init__` are read once per class in the process instead of on every resolve of
+  every container: the result is kept on the class beside the `__init__` it was read from, so a subclass that
+  redefines `__init__` or a class whose `__init__` is replaced is read again, and a type hint that fails to
+  evaluate is not kept and fails again. A class without an `__init__` of its own takes no arguments and is
+  not inspected at all. The per-client debug records of `resolve()`, `connect()` and `disconnect()` are built
+  only when the `nuke_di.core` logger is enabled for `DEBUG`. Cold `resolve()` of a tree of 100 or 1000
+  clients on the second container of a process went from 7.8–9.4 µs to 1.4–1.7 µs per client on CPython 3.14
+  ([#29](https://github.com/troyan-dy/nuke-di/issues/29)).
+- The parameters of a plain `__init__` are read from its code object instead of `inspect.signature`, which
+  stays for a decorated `__init__` (`__wrapped__`), a declared `__signature__` and a C function; the type hints
+  still come from `get_type_hints`, so forward references and string annotations keep working. The first
+  container of a process resolves a tree of 100 clients in about 0.43 ms instead of 0.94 ms
+  ([#36](https://github.com/troyan-dy/nuke-di/issues/36)).
+- The cycle check of `resolve()` looks a class up in a set beside the path list instead of scanning the list,
+  which was as long as the depth of the resolution: a chain of 1000 clients resolves at 1.45 µs per client,
+  the same as a wide tree, instead of 12.2 µs ([#33](https://github.com/troyan-dy/nuke-di/issues/33)).
+
 ## [1.9.0] - 2026-10-09
 
 ### Added
