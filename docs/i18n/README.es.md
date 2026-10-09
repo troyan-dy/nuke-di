@@ -2146,37 +2146,37 @@ y una cifra por cliente:
 
 ```console
 $ uv run python benchmarks/run.py --only resolve --size 100
-nuke-di 1.11.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 6c2ae10 · N = 100 · 20 repeats
+nuke-di 1.12.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 3baafcc · N = 100 · 20 repeats
 
 | Scenario                                         | Shape          |   N |  Median |     p95 | Per client |
 |--------------------------------------------------|----------------|----:|--------:|--------:|-----------:|
-| resolve(), cold                                  | wide           | 100 |  416 µs |  496 µs |    4.16 µs |
-| resolve(), second container, classes seen before | wide           | 100 |  142 µs |  183 µs |    1.42 µs |
-| resolve(), warm                                  | wide           | 100 | 84.8 ns | 97.0 ns |            |
-| resolve(), cold                                  | deep           | 100 |  397 µs |  547 µs |    3.97 µs |
-| resolve(), second container, classes seen before | deep           | 100 |  129 µs |  150 µs |    1.29 µs |
-| resolve(), warm                                  | deep           | 100 | 87.5 ns | 90.3 ns |            |
-| resolve(), cold                                  | mixed          | 100 |  535 µs |  690 µs |    5.35 µs |
-| resolve(), second container, classes seen before | mixed          | 100 |  147 µs |  184 µs |    1.47 µs |
-| resolve(), warm                                  | mixed          | 100 | 92.0 ns | 93.9 ns |            |
-| resolve(), cold                                  | wide, strings  | 100 |  709 µs |  802 µs |    7.09 µs |
-| resolve(), second container, classes seen before | wide, strings  | 100 |  141 µs |  296 µs |    1.41 µs |
-| resolve(), cold                                  | deep, strings  | 100 |  737 µs | 1.18 ms |    7.37 µs |
-| resolve(), second container, classes seen before | deep, strings  | 100 |  134 µs |  152 µs |    1.34 µs |
-| resolve(), cold                                  | mixed, strings | 100 | 1.16 ms | 1.47 ms |    11.6 µs |
-| resolve(), second container, classes seen before | mixed, strings | 100 |  159 µs |  178 µs |    1.59 µs |
+| resolve(), cold                                  | wide           | 100 |  393 µs |  945 µs |    3.93 µs |
+| resolve(), second container, classes seen before | wide           | 100 |  109 µs |  441 µs |    1.09 µs |
+| resolve(), warm                                  | wide           | 100 | 93.7 ns |  112 ns |            |
+| resolve(), cold                                  | deep           | 100 |  374 µs |  414 µs |    3.74 µs |
+| resolve(), second container, classes seen before | deep           | 100 | 91.6 µs | 96.5 µs |     916 ns |
+| resolve(), warm                                  | deep           | 100 | 92.4 ns | 93.6 ns |            |
+| resolve(), cold                                  | mixed          | 100 |  451 µs |  474 µs |    4.51 µs |
+| resolve(), second container, classes seen before | mixed          | 100 | 94.8 µs |  105 µs |     948 ns |
+| resolve(), warm                                  | mixed          | 100 | 89.1 ns | 92.2 ns |            |
+| resolve(), cold                                  | wide, strings  | 100 |  662 µs |  695 µs |    6.62 µs |
+| resolve(), second container, classes seen before | wide, strings  | 100 | 94.1 µs |  123 µs |     941 ns |
+| resolve(), cold                                  | deep, strings  | 100 |  709 µs |  900 µs |    7.09 µs |
+| resolve(), second container, classes seen before | deep, strings  | 100 | 95.0 µs |  107 µs |     950 ns |
+| resolve(), cold                                  | mixed, strings | 100 | 1.10 ms | 1.71 ms |    11.0 µs |
+| resolve(), second container, classes seen before | mixed, strings | 100 |  101 µs |  109 µs |    1.01 µs |
 ```
 
 `--size N` y `--repeat K` fijan el tamaño del árbol y el número de repeticiones, `--only` elige un
 escenario (`resolve`, `connect`, `inject`, `not_singleton`, `overrides`, `fastapi`, `import`, `memory`) y
 `--json PATH` escribe las cifras con la versión de Python, la plataforma y el commit para compararlas más
 tarde. [docs/benchmarks.md](../benchmarks.md) explica cada escenario y registra la línea base en Python
-3.11–3.14, tomada en un Apple M2 Pro con `nuke-di` 1.11.1: `resolve()` cuesta 4–7 µs por cliente, así
-que un árbol de 1000 clientes se construye en menos de 6 ms; el segundo contenedor de un proceso, que es lo
-que paga cada prueba después de la primera, resuelve las mismas clases con la cifra en caché, 1,1–1,7 µs
-por cliente, anotaciones en cadena incluidas; `connect()` añade 9–15 µs por cliente en una capa y unos
-0,1 ms por capa; un handler de FastAPI que recibe un cliente a través de `nuke-di` cuesta lo mismo que uno
-con un `Depends()` normal; `import nuke_di` tarda 28–36 ms, la mayor parte en `asyncio`. CI ejecuta la
+3.11–3.14, tomada en un Apple M2 Pro con `nuke-di` 1.12.0: `resolve()` cuesta 3,5–6,3 µs por cliente, así
+que un árbol de 1000 clientes se construye en menos de 5,5 ms; el segundo contenedor de un proceso, que es lo
+que paga cada prueba después de la primera, resuelve las mismas clases con la cifra en caché, 0,75–1,4 µs
+por cliente, anotaciones en cadena incluidas; `connect()` añade 13–18 µs por cliente, y una cadena de
+1000 clientes se conecta y desconecta en 28–36 ms; un handler de FastAPI que recibe un cliente a través de `nuke-di` cuesta lo mismo que uno
+con un `Depends()` normal; `import nuke_di` tarda 28–39 ms, la mayor parte en `asyncio`. CI ejecuta la
 suite como
 prueba de humo, sin umbral: un runner de GitHub es demasiado ruidoso para bloquear con él.
 

@@ -2100,34 +2100,34 @@ Markdown 表格，包含各次重复的中位数、p95 以及每个客户端的�
 
 ```console
 $ uv run python benchmarks/run.py --only resolve --size 100
-nuke-di 1.11.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 6c2ae10 · N = 100 · 20 repeats
+nuke-di 1.12.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 3baafcc · N = 100 · 20 repeats
 
 | Scenario                                         | Shape          |   N |  Median |     p95 | Per client |
 |--------------------------------------------------|----------------|----:|--------:|--------:|-----------:|
-| resolve(), cold                                  | wide           | 100 |  416 µs |  496 µs |    4.16 µs |
-| resolve(), second container, classes seen before | wide           | 100 |  142 µs |  183 µs |    1.42 µs |
-| resolve(), warm                                  | wide           | 100 | 84.8 ns | 97.0 ns |            |
-| resolve(), cold                                  | deep           | 100 |  397 µs |  547 µs |    3.97 µs |
-| resolve(), second container, classes seen before | deep           | 100 |  129 µs |  150 µs |    1.29 µs |
-| resolve(), warm                                  | deep           | 100 | 87.5 ns | 90.3 ns |            |
-| resolve(), cold                                  | mixed          | 100 |  535 µs |  690 µs |    5.35 µs |
-| resolve(), second container, classes seen before | mixed          | 100 |  147 µs |  184 µs |    1.47 µs |
-| resolve(), warm                                  | mixed          | 100 | 92.0 ns | 93.9 ns |            |
-| resolve(), cold                                  | wide, strings  | 100 |  709 µs |  802 µs |    7.09 µs |
-| resolve(), second container, classes seen before | wide, strings  | 100 |  141 µs |  296 µs |    1.41 µs |
-| resolve(), cold                                  | deep, strings  | 100 |  737 µs | 1.18 ms |    7.37 µs |
-| resolve(), second container, classes seen before | deep, strings  | 100 |  134 µs |  152 µs |    1.34 µs |
-| resolve(), cold                                  | mixed, strings | 100 | 1.16 ms | 1.47 ms |    11.6 µs |
-| resolve(), second container, classes seen before | mixed, strings | 100 |  159 µs |  178 µs |    1.59 µs |
+| resolve(), cold                                  | wide           | 100 |  393 µs |  945 µs |    3.93 µs |
+| resolve(), second container, classes seen before | wide           | 100 |  109 µs |  441 µs |    1.09 µs |
+| resolve(), warm                                  | wide           | 100 | 93.7 ns |  112 ns |            |
+| resolve(), cold                                  | deep           | 100 |  374 µs |  414 µs |    3.74 µs |
+| resolve(), second container, classes seen before | deep           | 100 | 91.6 µs | 96.5 µs |     916 ns |
+| resolve(), warm                                  | deep           | 100 | 92.4 ns | 93.6 ns |            |
+| resolve(), cold                                  | mixed          | 100 |  451 µs |  474 µs |    4.51 µs |
+| resolve(), second container, classes seen before | mixed          | 100 | 94.8 µs |  105 µs |     948 ns |
+| resolve(), warm                                  | mixed          | 100 | 89.1 ns | 92.2 ns |            |
+| resolve(), cold                                  | wide, strings  | 100 |  662 µs |  695 µs |    6.62 µs |
+| resolve(), second container, classes seen before | wide, strings  | 100 | 94.1 µs |  123 µs |     941 ns |
+| resolve(), cold                                  | deep, strings  | 100 |  709 µs |  900 µs |    7.09 µs |
+| resolve(), second container, classes seen before | deep, strings  | 100 | 95.0 µs |  107 µs |     950 ns |
+| resolve(), cold                                  | mixed, strings | 100 | 1.10 ms | 1.71 ms |    11.0 µs |
+| resolve(), second container, classes seen before | mixed, strings | 100 |  101 µs |  109 µs |    1.01 µs |
 ```
 
 `--size N` 和 `--repeat K` 设置依赖树的大小和重复次数，`--only` 选择一个场景（`resolve`、`connect`、`inject`、
 `not_singleton`、`overrides`、`fastapi`、`import`、`memory`），`--json PATH` 把数据连同 Python 版本、平台和提交写成
-JSON，便于日后比较。[docs/benchmarks.md](../benchmarks.md) 解释每个场景，并记录在 Apple M2 Pro 上用 `nuke-di` 1.11.1
-测得的 Python 3.11–3.14 基线：`resolve()` 每个客户端耗时 4–7 µs，因此 1000 个客户端的依赖树在 6 ms 内建成；同一进程中的第二个
-容器（也就是第一个测试之后每个测试要付的开销）按缓存后的数字解析同样的类，每个客户端 1.1–1.7 µs，字符串注解也一样；`connect()`
-对同一层的每个客户端增加 9–15 µs，每层约增加 0.1 ms；通过 `nuke-di` 获取客户端的 FastAPI 处理函数与使用普通 `Depends()` 的开销
-相同；`import nuke_di` 耗时 28–36 ms，大部分来自 `asyncio`。CI 把这套基准作为冒烟测试运行，不设阈值：GitHub runner 的噪声太大，
+JSON，便于日后比较。[docs/benchmarks.md](../benchmarks.md) 解释每个场景，并记录在 Apple M2 Pro 上用 `nuke-di` 1.12.0
+测得的 Python 3.11–3.14 基线：`resolve()` 每个客户端耗时 3.5–6.3 µs，因此 1000 个客户端的依赖树在 5.5 ms 内建成；同一进程中的第二个
+容器（也就是第一个测试之后每个测试要付的开销）按缓存后的数字解析同样的类，每个客户端 0.75–1.4 µs，字符串注解也一样；`connect()`
+对每个客户端增加 13–18 µs，1000 个客户端的链在 28–36 ms 内完成连接和断开；通过 `nuke-di` 获取客户端的 FastAPI 处理函数与使用普通 `Depends()` 的开销
+相同；`import nuke_di` 耗时 28–39 ms，大部分来自 `asyncio`。CI 把这套基准作为冒烟测试运行，不设阈值：GitHub runner 的噪声太大，
 不适合作为门禁。
 
 `benchmarks/compare.py` 把同样的依赖树交给 dishka、wireup、dependency-injector 和 injector，各自按自己的方式注册同一组类：
