@@ -93,7 +93,7 @@ database: disconnected
 
 起動の流れを[クライアントのガイド](ja/clients.md#connect-order)の例で示します。`Consumer` が必要とするのは `Kafka` だけなので、遅い `Postgres` を待たず、起動にかかる時間は最も長い依存関係の連鎖の時間になります。
 
-![6 つのクライアントが自身の依存先に従って接続する様子：Kafka と Redis の接続が終わるとすぐに Consumer と Http が開始し、起動は 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/connect-now.svg)
+![6 つのクライアントが自身の依存先に従って接続する様子：Kafka と Redis の接続が終わるとすぐに Consumer と Http が開始し、起動は 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/66f74f76407da320cfc97ef22b761d85e298eddd/docs/connect-now.svg)
 
 ## <a id="performance"></a>パフォーマンス
 

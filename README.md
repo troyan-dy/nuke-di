@@ -115,7 +115,7 @@ How a startup goes, on the example of the
 only `Kafka`, so it does not wait for the slow `Postgres`, and the startup takes as long as its longest chain of
 dependencies.
 
-![Six clients connecting by their own dependencies: Consumer and Http start once Kafka and Redis have connected, the startup takes 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/connect-now.svg)
+![Six clients connecting by their own dependencies: Consumer and Http start once Kafka and Redis have connected, the startup takes 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/66f74f76407da320cfc97ef22b761d85e298eddd/docs/connect-now.svg)
 
 ## Performance
 

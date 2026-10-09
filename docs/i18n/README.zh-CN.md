@@ -105,7 +105,7 @@ database: disconnected
 启动过程是这样的，以[客户端指南](zh-CN/clients.md#connect-order)中的示例为例：`Consumer` 只需要 `Kafka`，
 所以它不会等待较慢的 `Postgres`，整个启动耗时等于最长的那条依赖链。
 
-![六个客户端按各自的依赖连接：Kafka 和 Redis 连接完成后 Consumer 和 Http 立即启动，启动耗时 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/connect-now.svg)
+![六个客户端按各自的依赖连接：Kafka 和 Redis 连接完成后 Consumer 和 Http 立即启动，启动耗时 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/66f74f76407da320cfc97ef22b761d85e298eddd/docs/connect-now.svg)
 
 ## <a id="performance"></a>性能
 

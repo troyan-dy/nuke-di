@@ -114,7 +114,7 @@ Así transcurre un arranque, con el ejemplo de la [guía de clientes](es/clients
 solo necesita `Kafka`, así que no espera al lento `Postgres`, y el arranque dura lo que su cadena de
 dependencias más larga.
 
-![Seis clientes que se conectan por sus propias dependencias: Consumer y Http arrancan en cuanto Kafka y Redis se han conectado, el arranque tarda 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/connect-now.svg)
+![Seis clientes que se conectan por sus propias dependencias: Consumer y Http arrancan en cuanto Kafka y Redis se han conectado, el arranque tarda 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/66f74f76407da320cfc97ef22b761d85e298eddd/docs/connect-now.svg)
 
 ## <a id="performance"></a>Rendimiento
 

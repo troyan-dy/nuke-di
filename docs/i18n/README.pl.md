@@ -113,7 +113,7 @@ Tak przebiega start, na przykładzie z [przewodnika po klientach](pl/clients.md#
 potrzebuje tylko `Kafka`, więc nie czeka na wolny `Postgres`, a start trwa tyle, ile najdłuższy łańcuch
 zależności.
 
-![Sześciu klientów łączących się według własnych zależności: Consumer i Http startują, gdy tylko połączą się Kafka i Redis, start trwa 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/connect-now.svg)
+![Sześciu klientów łączących się według własnych zależności: Consumer i Http startują, gdy tylko połączą się Kafka i Redis, start trwa 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/66f74f76407da320cfc97ef22b761d85e298eddd/docs/connect-now.svg)
 
 ## <a id="performance"></a>Wydajność
 

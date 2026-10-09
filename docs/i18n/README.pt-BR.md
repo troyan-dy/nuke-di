@@ -115,7 +115,7 @@ Assim é uma inicialização, com o exemplo do [guia de clientes](pt-BR/clients.
 precisa só do `Kafka`, então não espera o lento `Postgres`, e a inicialização leva o tempo da sua cadeia de
 dependências mais longa.
 
-![Seis clientes conectando pelas suas próprias dependências: Consumer e Http começam assim que Kafka e Redis conectam, a inicialização leva 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/connect-now.svg)
+![Seis clientes conectando pelas suas próprias dependências: Consumer e Http começam assim que Kafka e Redis conectam, a inicialização leva 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/66f74f76407da320cfc97ef22b761d85e298eddd/docs/connect-now.svg)
 
 ## <a id="performance"></a>Desempenho
 

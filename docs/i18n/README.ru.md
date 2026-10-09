@@ -115,7 +115,7 @@ database: disconnected
 `Kafka`, поэтому он не ждёт медленный `Postgres`, и старт длится столько, сколько самая длинная цепочка
 зависимостей.
 
-![Шесть клиентов подключаются по собственным зависимостям: Consumer и Http стартуют, как только подключились Kafka и Redis, старт занимает 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/connect-now.svg)
+![Шесть клиентов подключаются по собственным зависимостям: Consumer и Http стартуют, как только подключились Kafka и Redis, старт занимает 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/66f74f76407da320cfc97ef22b761d85e298eddd/docs/connect-now.svg)
 
 ## <a id="performance"></a>Производительность
 
