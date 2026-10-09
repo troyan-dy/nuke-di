@@ -17,6 +17,7 @@ from nuke_di.errors import (
     InitializeDependencyError,
     InvalidSignatureError,
 )
+from nuke_di.graph import Graph, Node
 from nuke_di.logs import fields
 from nuke_di.options import DependenciesSettings
 from nuke_di.timings import ClientTiming, Outcome
@@ -56,6 +57,8 @@ class Dependencies:
     _timings: dict[int, ClientTiming] = field(default_factory=dict, init=False)
     # Layer of every client in `connect_clients`, keyed by `id()`: dataclass clients may be unhashable
     _layers: dict[int, int] = field(default_factory=dict, init=False)
+    # The clients passed to `__init__` of every client in `connect_clients`, keyed by `id()`, for `graph()`
+    _dependencies: dict[int, dict[str, NotSingletonClient]] = field(default_factory=dict, init=False)
     # Replacements registered by `mock()` and `override()`, a subset of `clients`
     _replacements: dict[type[NotSingletonClient], NotSingletonClient] = field(default_factory=dict, init=False)
     # Replacements of the open `override()` blocks, outermost first; `flush()` keeps them
@@ -78,6 +81,7 @@ class Dependencies:
         self.clients = OrderedDict()
         self.connect_clients = []
         self._layers = {}
+        self._dependencies = {}
         self._timings = {}
         self._replacements = {}
         for cls, replacement in self._overrides:
@@ -261,8 +265,22 @@ class Dependencies:
 
         # One layer above the highest dependency; mocks are not connected, so they do not count
         self._layers[id(inst)] = 1 + max((self._layers.get(id(d), -1) for d in init.values()), default=-1)
+        self._dependencies[id(inst)] = init
         self.connect_clients.append(inst)
         return inst
+
+    def graph(self) -> Graph:
+        """
+        A snapshot of the resolved clients with their dependencies and Layers; empty after `flush()`.
+        """
+        nodes: dict[int, Node] = {}
+        for cls, replacement in self._replacements.items():
+            nodes[id(replacement)] = Node(cls, isclient(cls), None, replacement)
+        # Resolution order: a client's dependencies have a node before the client does
+        for client in self.connect_clients:
+            dependencies = {key: nodes[id(dep)] for key, dep in self._dependencies[id(client)].items()}
+            nodes[id(client)] = Node(type(client), isclient(type(client)), self._layer(client), None, dependencies)
+        return Graph(tuple(nodes.values()))
 
     def _client_arguments(self, cls: type[NotSingletonClient]) -> dict[str, type[NotSingletonClient]]:
         """

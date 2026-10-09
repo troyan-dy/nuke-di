@@ -25,7 +25,7 @@
 
 - [Установка](#installation)
 - [Быстрый старт](#quick-start)
-- [Клиенты](#clients): [синглтоны](#client-and-notsingletonclient), [жизненный цикл](#connect-and-disconnect), [датаклассы](#dataclass-clients), [слои](#layers), [время старта](#startup-timings), [ошибки подключения](#when-a-client-fails-to-connect), [ошибки разрешения](#when-the-tree-cannot-be-built)
+- [Клиенты](#clients): [синглтоны](#client-and-notsingletonclient), [жизненный цикл](#connect-and-disconnect), [датаклассы](#dataclass-clients), [слои](#layers), [время старта](#startup-timings), [граф](#the-graph), [ошибки подключения](#when-a-client-fails-to-connect), [ошибки разрешения](#when-the-tree-cannot-be-built)
 - [Контейнер](#the-container)
 - [Воркеры и джобы](#workers-and-jobs): [джоба](#your-first-job), [параметры](#parameters), [воркер](#your-first-worker), [grace period](#grace-period), [фоновые задачи](#background-tasks), [коды завершения](#exit-codes), [хуки](#hooks), [Kubernetes](#running-in-kubernetes)
 - Фреймворки: [FastAPI](#fastapi), [Litestar](#litestar), [FastStream](#faststream)
@@ -379,6 +379,83 @@ Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
 получают `disconnect_outcome`. Библиотека только замеряет: экспорт таймингов в метрики
 или спаны остаётся за вашим кодом.
 
+### <a id="the-graph"></a>Граф
+
+Граф зависимостей существует только внутри работающего процесса: лог `DEBUG` выше — единственное
+место, где видно, каких клиентов тянет entrypoint и в каком слое каждый из них подключается.
+`graph()` возвращает ту же картину данными, до `connect()` или после него, на клиентах из
+примера про [слои](#layers):
+
+```python
+deps = Dependencies()
+deps.resolve(Checkout)
+for node in deps.graph().nodes:
+    print(f"{node.name:<8} layer {node.layer}  needs {list(node.dependencies)}")
+print(deps.graph().to_mermaid())
+```
+
+```console
+$ python graph.py
+Postgres layer 0  needs []
+Redis    layer 0  needs []
+Payments layer 1  needs ['pg']
+Checkout layer 2  needs ['pg', 'redis', 'payments']
+graph BT
+  subgraph layer0 [layer 0]
+    Postgres
+    Redis
+  end
+  subgraph layer1 [layer 1]
+    Payments
+  end
+  subgraph layer2 [layer 2]
+    Checkout
+  end
+  Postgres --> Payments
+  Postgres --> Checkout
+  Redis --> Checkout
+  Payments --> Checkout
+```
+
+GitHub рисует текст Mermaid в README, pull request или issue, так что проект может показать
+свою архитектуру без запущенного процесса:
+
+```mermaid
+graph BT
+  subgraph layer0 [layer 0]
+    Postgres
+    Redis
+  end
+  subgraph layer1 [layer 1]
+    Payments
+  end
+  subgraph layer2 [layer 2]
+    Checkout
+  end
+  Postgres --> Payments
+  Postgres --> Checkout
+  Redis --> Checkout
+  Payments --> Checkout
+```
+
+`Graph.nodes` хранит по одному `Node` на разрешённый клиент в порядке разрешения, поэтому клиент
+идёт после своих зависимостей. Это снимок: `flush()` опустошает его.
+
+| Поле `Node`    | Значение |
+|----------------|----------|
+| `name`         | Имя класса клиента |
+| `cls`          | Класс, который запросили потребители |
+| `singleton`    | `True` для `Client`, `False` для `NotSingletonClient` |
+| `layer`        | [Слой](#layers) клиента; `None` для Replacement, который никогда не подключается |
+| `replacement`  | Объект, зарегистрированный через `mock()` или `override()` вместо `cls`; `None` для настоящего клиента |
+| `dependencies` | Клиенты аргументов `__init__` по имени аргумента |
+
+`NotSingletonClient` получает по узлу на экземпляр, все с одним именем; `to_mermaid()` нумерует их
+со второго (`Session`, `Session_2`). Replacement рисуется вне слоёв, с пунктирной рамкой и именем
+объекта на его месте: `Postgres: AsyncMock`. Узлы сравниваются по идентичности, поэтому
+`nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"]` говорит, что два
+потребителя делят один синглтон.
+
 ### <a id="when-a-client-fails-to-connect"></a>Если клиент не смог подключиться
 
 Если клиент не смог подключиться, остальная часть его слоя отменяется, а следующие слои так и не
@@ -521,6 +598,7 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 | `override(cls, new=None)` | Подмена на время блока `with`, затем `flush()`; см. [Тестирование](#testing). |
 | `flush()`            | Забыть все разрешённые клиенты.                                         |
 | `timings`            | По одному `ClientTiming` на клиент последнего `connect()`; см. [Время старта](#startup-timings). |
+| `graph()`            | `Graph` разрешённых клиентов с их зависимостями и слоями, включая `to_mermaid()`; см. [Граф](#the-graph). |
 
 `resolve`, `inject`, `mock`, `override` и `flush` работают, только пока контейнер отключён:
 всё дерево строится до старта.
@@ -1900,6 +1978,37 @@ async def test_sync_with_container() -> None:
 
     assert pg.upsert.await_args_list == [call("users", ["row"])]
 ```
+
+**Каждый entrypoint разрешается.** Импорт модуля не запускает его джобу или воркер, а `inject()`
+строит дерево, ничего не подключая, поэтому один тест проверяет проводку всех entrypoint-ов в CI:
+цикл, аргумент без аннотации, обязательный аргумент не-клиент или `__init__`, который бросает
+исключение, валят его с той же ошибкой, что напечатал бы реальный запуск, и база данных не нужна:
+
+```python
+# test_wiring.py
+from collections.abc import Callable
+
+import pytest
+
+from nuke_di import Dependencies
+
+from app.jobs import sync
+from app.workers import consumer
+
+
+@pytest.mark.parametrize("entrypoint", [sync.sync, consumer.consumer])
+def test_entrypoint_resolves(entrypoint: Callable[..., object]) -> None:
+    Dependencies().inject(entrypoint)  # runs every __init__, connects nothing
+```
+
+```console
+$ pytest -q test_wiring.py
+..                                                                       [100%]
+2 passed in 0.05s
+```
+
+Напечатайте `Dependencies().graph().to_mermaid()` после `inject()`, чтобы получить [граф](#the-graph)
+entrypoint-а для его README.
 
 **Воркер.** `Shutdown.set()` делает то же, что сделал бы SIGTERM:
 

@@ -18,7 +18,7 @@
 
 - [インストール](#installation)
 - [クイックスタート](#quick-start)
-- [クライアント](#clients)：[シングルトン](#client-and-notsingletonclient)、[ライフサイクル](#connect-and-disconnect)、[データクラス](#dataclass-clients)、[レイヤー](#layers)、[起動時間](#startup-timings)、[接続の失敗](#when-a-client-fails-to-connect)、[解決エラー](#when-the-tree-cannot-be-built)
+- [クライアント](#clients)：[シングルトン](#client-and-notsingletonclient)、[ライフサイクル](#connect-and-disconnect)、[データクラス](#dataclass-clients)、[レイヤー](#layers)、[起動時間](#startup-timings)、[依存グラフ](#the-graph)、[接続の失敗](#when-a-client-fails-to-connect)、[解決エラー](#when-the-tree-cannot-be-built)
 - [コンテナ](#the-container)
 - [ワーカーとジョブ](#workers-and-jobs)：[ジョブ](#your-first-job)、[パラメータ](#parameters)、[ワーカー](#your-first-worker)、[猶予期間](#grace-period)、[バックグラウンドタスク](#background-tasks)、[終了コード](#exit-codes)、[フック](#hooks)、[Kubernetes](#running-in-kubernetes)
 - フレームワーク：[FastAPI](#fastapi)、[Litestar](#litestar)、[FastStream](#faststream)
@@ -357,6 +357,82 @@ lifespan は接続済みのコンテナの内側で動くので、接続時間�
 上のレイヤーは `None` のままで、すでに接続していたクライアントはロールバックされて `disconnect_outcome`
 を持ちます。ライブラリは計測するだけです。時間をメトリクスやスパンとしてエクスポートするのはあなたのコードの役割です。
 
+### <a id="the-graph"></a>依存グラフ
+
+依存グラフは実行中のプロセスの中にしか存在しません。上の `DEBUG` ログだけが、エントリーポイントがどのクライアントを
+引き込み、それぞれがどのレイヤーで接続するかを示す場所です。`graph()` は同じ絵をデータとして返します。`connect()` の前でも
+後でも呼べます。ここでは[レイヤー](#layers)の例のクライアントを使います。
+
+```python
+deps = Dependencies()
+deps.resolve(Checkout)
+for node in deps.graph().nodes:
+    print(f"{node.name:<8} layer {node.layer}  needs {list(node.dependencies)}")
+print(deps.graph().to_mermaid())
+```
+
+```console
+$ python graph.py
+Postgres layer 0  needs []
+Redis    layer 0  needs []
+Payments layer 1  needs ['pg']
+Checkout layer 2  needs ['pg', 'redis', 'payments']
+graph BT
+  subgraph layer0 [layer 0]
+    Postgres
+    Redis
+  end
+  subgraph layer1 [layer 1]
+    Payments
+  end
+  subgraph layer2 [layer 2]
+    Checkout
+  end
+  Postgres --> Payments
+  Postgres --> Checkout
+  Redis --> Checkout
+  Payments --> Checkout
+```
+
+GitHub は README、pull request、issue の中で Mermaid のテキストを描画するので、プロジェクトはプロセスを動かさずに
+アーキテクチャを見せられます。
+
+```mermaid
+graph BT
+  subgraph layer0 [layer 0]
+    Postgres
+    Redis
+  end
+  subgraph layer1 [layer 1]
+    Payments
+  end
+  subgraph layer2 [layer 2]
+    Checkout
+  end
+  Postgres --> Payments
+  Postgres --> Checkout
+  Redis --> Checkout
+  Payments --> Checkout
+```
+
+`Graph.nodes` は解決済みのクライアントごとに 1 つの `Node` を解決順に持つので、クライアントは自分の依存の後に来ます。
+これはスナップショットで、`flush()` で空になります。
+
+| `Node` のフィールド | 値 |
+|---------------------|----|
+| `name`              | クライアントのクラス名 |
+| `cls`               | 利用側が要求したクラス |
+| `singleton`         | `Client` なら `True`、`NotSingletonClient` なら `False` |
+| `layer`             | クライアントの[レイヤー](#layers)。Replacement は接続されないので `None` |
+| `replacement`       | `mock()` または `override()` で `cls` の代わりに登録されたオブジェクト。実際のクライアントは `None` |
+| `dependencies`      | `__init__` の各引数に対応するクライアント。引数名で引く |
+
+`NotSingletonClient` はインスタンスごとに 1 つのノードになり、名前はすべて同じです。`to_mermaid()` は 2 つ目から番号を
+付けます（`Session`、`Session_2`）。Replacement はレイヤーの外に破線の枠で描かれ、代わりに置かれたオブジェクトの名前が
+付きます：`Postgres: AsyncMock`。ノードは同一性で比較されるので、
+`nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"]` は 2 つの利用側が同じシングルトンを
+共有していることを示します。
+
 ### <a id="when-a-client-fails-to-connect"></a>クライアントの接続に失敗した場合
 
 クライアントの接続に失敗すると、同じレイヤーの残りの接続はキャンセルされ、次のレイヤーは開始されません。すでに接続済みのクライアントはレイヤーの逆順に切断され、コンテナは切断済みの空の状態になります。
@@ -487,6 +563,7 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 | `override(cls, new=None)` | `with` ブロックの間だけ有効な差し替えを登録し、ブロックの終了後に `flush()` します。[テスト](#testing)を参照してください。 |
 | `flush()`            | 解決済みのクライアントをすべて破棄します。                              |
 | `timings`            | 直近の `connect()` のクライアントごとの `ClientTiming`。[起動時間](#startup-timings)を参照。 |
+| `graph()`            | 解決済みクライアントの `Graph`。依存とレイヤーを持ち、`to_mermaid()` 付き。[依存グラフ](#the-graph)を参照。 |
 
 `resolve`、`inject`、`mock`、`override`、`flush` は、コンテナが切断されている間しか使えません。ツリー全体は起動前に構築されます。
 
@@ -1735,6 +1812,37 @@ async def test_sync_with_container() -> None:
 
     assert pg.upsert.await_args_list == [call("users", ["row"])]
 ```
+
+**すべてのエントリーポイントが解決できる。** モジュールをインポートしてもジョブやワーカーは実行されず、`inject()` は何も接続
+せずにツリーを組み立てます。そのため、1 つのテストで CI 上ですべてのエントリーポイントの配線を確認できます。循環、型ヒントの
+ない引数、クライアントではない必須引数、例外を投げる `__init__` は、実際の実行が出すのと同じエラーでテストを失敗させ、
+データベースは不要です。
+
+```python
+# test_wiring.py
+from collections.abc import Callable
+
+import pytest
+
+from nuke_di import Dependencies
+
+from app.jobs import sync
+from app.workers import consumer
+
+
+@pytest.mark.parametrize("entrypoint", [sync.sync, consumer.consumer])
+def test_entrypoint_resolves(entrypoint: Callable[..., object]) -> None:
+    Dependencies().inject(entrypoint)  # runs every __init__, connects nothing
+```
+
+```console
+$ pytest -q test_wiring.py
+..                                                                       [100%]
+2 passed in 0.05s
+```
+
+`inject()` の後に `Dependencies().graph().to_mermaid()` を出力すると、そのエントリーポイントの[依存グラフ](#the-graph)が
+README 用に得られます。
 
 **ワーカーをテストする。** `Shutdown.set()` は SIGTERM と同じ働きをします。
 

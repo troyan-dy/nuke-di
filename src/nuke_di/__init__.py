@@ -10,6 +10,7 @@ from nuke_di.errors import (
     InvalidSignatureError,
     UsageError,
 )
+from nuke_di.graph import Graph, Node
 from nuke_di.options import DependenciesSettings, Option
 from nuke_di.run import Run, RunHook
 from nuke_di.timings import ClientTiming
@@ -25,8 +26,10 @@ __all__ = (
     "ConnectTimeoutError",
     "Dependencies",
     "DependenciesSettings",
+    "Graph",
     "InitializeDependencyError",
     "InvalidSignatureError",
+    "Node",
     "NotSingletonClient",
     "Option",
     "Run",

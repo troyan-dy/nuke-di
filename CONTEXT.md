@@ -24,6 +24,10 @@ _Avoid_: Instantiation, wiring
 A set of client instances with the same height in the dependency graph: clients with no dependencies form layer 0, every other client sits one layer above its highest dependency. All clients of one layer connect concurrently.
 _Avoid_: Level, tier, depth
 
+**Graph**:
+Every client the container has resolved so far, with who depends on whom and the Layer of each. A snapshot: empty after a flush. Resolution of one root builds that root's tree; the container holds the graph, because singletons are shared between trees.
+_Avoid_: Tree (for the whole container), DAG, node, edge
+
 **Client timing**:
 How long one client's `connect()` and `disconnect()` took in the last connect of its container, and how each ended: ok, failed, timed out or cancelled. The container only measures; exporting timings is left to hooks.
 _Avoid_: Stat, span (a metric or a span is what a hook exports from timings)
