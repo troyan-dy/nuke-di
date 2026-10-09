@@ -510,12 +510,12 @@ asyncio.run(main())
 
 ```text
 postgres: connected
-Error occurred connecting client Kafka
+Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 Traceback (most recent call last):
   ...
 OSError: broker kafka-1:9092 is unreachable
 postgres: disconnected
-Error occurred connecting client Kafka <- OSError('broker kafka-1:9092 is unreachable')
+Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable <- OSError('broker kafka-1:9092 is unreachable')
 connected: False
 ```
 
@@ -566,11 +566,17 @@ for root in (Checkout, Orders):
         Dependencies().resolve(root)
     except InvalidSignatureError as exc:
         print(f"{type(exc).__name__}: {exc}")
+
+try:
+    Dependencies().resolve(UserRepository)  # a type checker refuses this line, and so does the container
+except InvalidSignatureError as exc:
+    print(f"{type(exc).__name__}: {exc}")
 ```
 
 ```text
 InvalidSignatureError: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)
 CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
+InvalidSignatureError: UserRepository is not a client: subclass Client or NotSingletonClient
 ```
 
 当 `__init__` 参数的类型提示是客户端时，它会被填入客户端。其他参数都必须有默认值，并且保持原样不动。
@@ -582,6 +588,8 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 | 类型不是客户端                        | `is UserRepository, which is not a client`        |
 | `Client \| None`                      | `is Postgres \| None, a client cannot be optional` |
 | 仅限位置（`/`）的客户端参数           | `is positional-only, a client is passed by keyword` |
+
+根本不是客户端的类，通过 `resolve()` 请求时，会在构建任何东西之前以 `UserRepository is not a client: subclass Client or NotSingletonClient` 失败。
 
 相互循环依赖的客户端会以 `CircularDependencyError`（`InvalidSignatureError` 的子类）失败；无法求值的类型提示，
 例如在函数内部定义的类或在 `TYPE_CHECKING` 下导入的类，则会引发一个说明此情况的 `InvalidSignatureError`。
@@ -618,7 +626,7 @@ async def main() -> None:
     injected = deps.inject(handler)  # build the tree
     async with deps:  # connect
         await injected(42)
-        deps.resolve(Cache)  # ConnectError: already connected
+        deps.resolve(Cache)  # ConnectError: resolve(Cache): the container is already connected; ...
 ```
 
 容器可以安全地从多个线程解析：每个容器一把锁串行化 `resolve`、`inject`、`mock`、`override` 和 `flush`，因此两个线程同时请求的单例只构建一次。`connect()` 和 `disconnect()` 属于同一个事件循环。
@@ -1550,19 +1558,19 @@ async def publish(kafka: Kafka) -> None: ...
 $ uvicorn app.broken:app
 INFO:     Started server process [81379]
 INFO:     Waiting for application startup.
-Error occurred connecting client Kafka
+Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 Traceback (most recent call last):
   ...
 OSError: broker kafka-1:9092 is unreachable
 ERROR:    Traceback (most recent call last):
   ...
-nuke_di.errors.ConnectError: Error occurred connecting client Kafka
+nuke_di.errors.ConnectError: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
   ...
-RuntimeError: nuke-di clients failed to start: Error occurred connecting client Kafka
+RuntimeError: nuke-di clients failed to start: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 
 ERROR:    Application startup failed. Exiting.
 $ echo $?
@@ -2079,7 +2087,7 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 | `InitializeDependencyError` | 客户端的 `__init__` 抛出了异常                            |
 | `ConnectError`              | 客户端的 `connect()` 抛出了异常，或容器状态不正确（例如在连接后解析、mock 一个已解析的客户端、对已有已解析客户端的容器调用 override） |
 | `ConnectTimeoutError`       | 客户端的 `connect()` 超过了 `CONNECT_TIMEOUT_SECONDS`     |
-| `InvalidSignatureError`     | 客户端的 `__init__` 有一个不是客户端的必需参数，`inject()` 收到的函数有参数缺少类型提示，或入口点参数的类型不受支持、选项名与已有选项冲突；参见[依赖树无法构建时](#when-the-tree-cannot-be-built) |
+| `InvalidSignatureError`     | 客户端的 `__init__` 有一个不是客户端的必需参数，`inject()` 收到的函数有参数缺少类型提示，`resolve()` 收到了不是客户端的类，或入口点参数的类型不受支持、选项名与已有选项冲突；参见[依赖树无法构建时](#when-the-tree-cannot-be-built) |
 | `CircularDependencyError`   | 客户端之间存在循环依赖；是 `InvalidSignatureError` 的子类 |
 | `UsageError`                | worker 或 job 的命令行与其参数不匹配；记录为 `Run.error`，退出码为 `2` |
 

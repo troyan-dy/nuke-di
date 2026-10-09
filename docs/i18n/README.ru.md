@@ -528,12 +528,12 @@ asyncio.run(main())
 
 ```text
 postgres: connected
-Error occurred connecting client Kafka
+Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 Traceback (most recent call last):
   ...
 OSError: broker kafka-1:9092 is unreachable
 postgres: disconnected
-Error occurred connecting client Kafka <- OSError('broker kafka-1:9092 is unreachable')
+Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable <- OSError('broker kafka-1:9092 is unreachable')
 connected: False
 ```
 
@@ -585,11 +585,17 @@ for root in (Checkout, Orders):
         Dependencies().resolve(root)
     except InvalidSignatureError as exc:
         print(f"{type(exc).__name__}: {exc}")
+
+try:
+    Dependencies().resolve(UserRepository)  # a type checker refuses this line, and so does the container
+except InvalidSignatureError as exc:
+    print(f"{type(exc).__name__}: {exc}")
 ```
 
 ```text
 InvalidSignatureError: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)
 CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
+InvalidSignatureError: UserRepository is not a client: subclass Client or NotSingletonClient
 ```
 
 Аргумент `__init__` заполняется клиентом, если его аннотация типа — клиент. Любому другому
@@ -601,6 +607,8 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 | тип, который не является клиентом             | `is UserRepository, which is not a client`        |
 | `Client \| None`                              | `is Postgres \| None, a client cannot be optional` |
 | клиент, только позиционный (`/`)              | `is positional-only, a client is passed by keyword` |
+
+Класс, который вообще не является клиентом, запрошенный через `resolve()`, падает с `UserRepository is not a client: subclass Client or NotSingletonClient` до того, как что-либо будет построено.
 
 Клиенты, циклически зависящие друг от друга, падают с `CircularDependencyError` — подклассом
 `InvalidSignatureError`, а аннотация типа, которую не удаётся вычислить (например, класс, определённый
@@ -639,7 +647,7 @@ async def main() -> None:
     injected = deps.inject(handler)  # build the tree
     async with deps:  # connect
         await injected(42)
-        deps.resolve(Cache)  # ConnectError: already connected
+        deps.resolve(Cache)  # ConnectError: resolve(Cache): the container is already connected; ...
 ```
 
 Контейнер безопасно использовать из нескольких потоков: один замок на контейнер сериализует `resolve`,
@@ -1580,19 +1588,19 @@ async def publish(kafka: Kafka) -> None: ...
 $ uvicorn app.broken:app
 INFO:     Started server process [81379]
 INFO:     Waiting for application startup.
-Error occurred connecting client Kafka
+Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 Traceback (most recent call last):
   ...
 OSError: broker kafka-1:9092 is unreachable
 ERROR:    Traceback (most recent call last):
   ...
-nuke_di.errors.ConnectError: Error occurred connecting client Kafka
+nuke_di.errors.ConnectError: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
   ...
-RuntimeError: nuke-di clients failed to start: Error occurred connecting client Kafka
+RuntimeError: nuke-di clients failed to start: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 
 ERROR:    Application startup failed. Exiting.
 $ echo $?
@@ -2121,7 +2129,7 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 | `InitializeDependencyError` | `__init__` клиента выбросил исключение                    |
 | `ConnectError`              | `connect()` клиента выбросил исключение или контейнер в неподходящем состоянии (например, разрешение после подключения, мок уже разрешённого клиента, `override()` контейнера с разрешёнными клиентами) |
 | `ConnectTimeoutError`       | `connect()` клиента не уложился в `CONNECT_TIMEOUT_SECONDS` |
-| `InvalidSignatureError`     | В `__init__` клиента есть обязательный аргумент, который не является клиентом, в `inject()` передана функция с аргументом без аннотации типа, или у параметра точки входа неподдерживаемый тип либо конфликтующий флаг; см. [Если дерево не удаётся построить](#when-the-tree-cannot-be-built) |
+| `InvalidSignatureError`     | В `__init__` клиента есть обязательный аргумент, который не является клиентом, в `inject()` передана функция с аргументом без аннотации типа, в `resolve()` передан класс, который не является клиентом, или у параметра точки входа неподдерживаемый тип либо конфликтующий флаг; см. [Если дерево не удаётся построить](#when-the-tree-cannot-be-built) |
 | `CircularDependencyError`   | Клиенты циклически зависят друг от друга; подкласс `InvalidSignatureError` |
 | `UsageError`                | Командная строка воркера или джобы не соответствует её параметрам; записывается в `Run.error`, код завершения `2` |
 

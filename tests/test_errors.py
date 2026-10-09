@@ -125,7 +125,7 @@ async def test_disconnect_timeout(caplog: pytest.LogCaptureFixture) -> None:
         pass
 
     assert TrackedClient.disconnected
-    assert "Timeout occurred disconnecting client HangingDisconnectClient" in caplog.text
+    assert "HangingDisconnectClient did not disconnect within 0.01s (DISCONNECT_TIMEOUT_SECONDS)" in caplog.text
 
 
 def test_disconnect_timeout_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
