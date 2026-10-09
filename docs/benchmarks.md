@@ -113,8 +113,8 @@ Python 3.11.7, 3.12.5, 3.13.14 and 3.14.6, each in a fresh `uv` environment from
   string on every cold `resolve()`, and the `annotationlib` of 3.14 does more per string. Most code bases
   have `from __future__ import annotations`, so this is the figure they pay, not the one above.
 - **A second container costs the same as the first**: `resolve()` of classes seen before is within
-  20% of the cold figure at `N = 10` and within 10% at `N = 1000`, with both kinds of hints; nothing is
-  kept per class, so every container reads the signatures again. This is the row a per-class cache
+  20% of the cold figure, mostly a few percent below it, with both kinds of hints; nothing is kept per
+  class, so every container reads the signatures again. This is the row a per-class cache
   ([#29](https://github.com/troyan-dy/nuke-di/issues/29)) would move. The cold figure is a few percent
   above it, most likely the first attribute lookups on fresh classes, which fill the type caches of the
   interpreter.
