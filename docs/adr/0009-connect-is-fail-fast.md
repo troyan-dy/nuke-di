@@ -1,0 +1,8 @@
+# connect() is fail-fast: no retries, restarting is the orchestrator's job
+
+A client whose `connect()` raises or times out stops the startup: the clients already connected are disconnected and `ConnectError`, a `SystemExit`, ends the process. Issue #11 proposed retrying a failed `connect()` with exponential backoff and jitter (`CONNECT_RETRIES`, `CONNECT_RETRY_BACKOFF_SECONDS`, per-client `connect_retries` and `retry_on`), for a database or a sidecar that is not reachable yet when a pod starts. It was rejected on 2026-10-08. The process that starts is not the right place to wait for the network: Kubernetes, systemd or any other supervisor already restarts a process with backoff, counts the restarts, shows them (`CrashLoopBackOff`) and keeps the pod out of traffic until it is ready. Retries inside the process would hide the same outage behind a slower startup and need a rule for which exceptions are transient, which only the client library knows. A library that has its own reconnect logic keeps it inside its `connect()`, under `CONNECT_TIMEOUT_SECONDS` like any other `connect()`. The same line is drawn for workers: restarting a worker in-process is a non-goal of `docs/specs/workers-and-jobs.md`.
+
+## Considered Options
+
+- **Retries with backoff, opt-in through environment variables** (#11, default `0`): one more policy to configure per deployment, duplicating the supervisor's, and a startup whose length depends on the retry budget instead of the dependencies.
+- **Per-client retry settings** (`connect_retries: ClassVar[int]`, `retry_on: ClassVar[tuple[type[Exception], ...]]`): moves the transient-error decision into every client class, where a hand-written loop inside `connect()` already serves the clients that need one.

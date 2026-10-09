@@ -6,6 +6,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-10-09
+
+### Documentation
+
+- ADRs for the designs rejected so far that had none: ADR-0008, a client depends on concrete clients, with no
+  binding of a Protocol or an ABC to an implementation and no qualifiers or multibinding (#9); ADR-0009,
+  `connect()` is fail-fast and restarting is the orchestrator's job (#11); ADR-0010, the library stays pure
+  Python, a Rust or compiled core was measured and is not worth it (#89, #16). AGENTS.md points to them.
+
 ## [1.12.0] - 2026-10-09
 
 ### Added
@@ -494,6 +503,7 @@ First public release, extracted from the `nuke.di` package of the nuke framework
 - Clients no longer get a per-class `_logger` attribute.
 
 [Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.12.0...HEAD
+[1.12.1]: https://github.com/troyan-dy/nuke-di/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/troyan-dy/nuke-di/compare/v1.11.5...v1.12.0
 [1.11.5]: https://github.com/troyan-dy/nuke-di/compare/v1.11.4...v1.11.5
 [1.11.4]: https://github.com/troyan-dy/nuke-di/compare/v1.11.3...v1.11.4
