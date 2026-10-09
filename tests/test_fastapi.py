@@ -6,7 +6,7 @@ import copy
 import gc
 import inspect
 import weakref
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -18,7 +18,8 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from nuke_di import DI, BackgroundTasks, Client, ConnectError, Dependencies, NotSingletonClient, Shutdown
-from nuke_di.fastapi import ClientRoute, ClientRouter, setup
+from nuke_di.fastapi import _FASTAPI, ClientRoute, ClientRouter, setup
+from nuke_di.integration.testing import check
 
 if TYPE_CHECKING:
     from decimal import Decimal
@@ -835,3 +836,25 @@ def test_websocket_on_plain_router_explains() -> None:
 
     with pytest.raises(TypeError, match=r"UserService is a nuke-di client, not a pydantic type"):
         router.websocket("/chat")(plain_chat)
+
+
+# --- the contract ----------------------------------------------------------------------------------------
+
+
+def contract_app(container: Dependencies, handler: Callable[..., Any]) -> FastAPI:
+    app = make_app(container)
+    app.get("/")(handler)
+    return app
+
+
+@asynccontextmanager
+async def contract_run(app: FastAPI, lifespan: bool) -> AsyncIterator[Callable[[], object]]:
+    if lifespan:
+        with TestClient(app) as client:
+            yield lambda: client.get("/")
+    else:
+        yield lambda: TestClient(app).get("/")
+
+
+async def test_keeps_the_integration_contract() -> None:
+    await check(_FASTAPI, contract_app, contract_run)

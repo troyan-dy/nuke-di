@@ -32,6 +32,10 @@ _Avoid_: Tree (for the whole container), DAG, node, edge
 How long one client's `connect()` and `disconnect()` took in the last connect of its container, and how each ended: ok, failed, timed out or cancelled. The container only measures; exporting timings is left to hooks.
 _Avoid_: Stat, span (a metric or a span is what a hook exports from timings)
 
+**Integration**:
+The glue between nuke-di and a framework: the framework's handlers take clients by type hint through its own dependency injection, and the container connects when the app starts and disconnects when it stops. Built on the public `nuke_di.integration` kit, and checked with `nuke_di.integration.testing.check()`.
+_Avoid_: Plugin, adapter, extension (except where a framework names its own hook so, like Litestar's `ClientPlugin`)
+
 **Replacement**:
 An object registered in the container in place of a client class, before that class is resolved; every consumer receives it instead of the client. A Replacement is never connected. Registered with `mock()` it lasts until the next flush; registered with `override()` it lasts until the end of the `with` block.
 _Avoid_: Fake, stub, double (for the concept; `mock()` is only the method name)

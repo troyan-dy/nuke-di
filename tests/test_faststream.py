@@ -1,7 +1,7 @@
 # String annotations on purpose: every handler below goes through evaluating them
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
@@ -14,7 +14,8 @@ from faststream.nats import NatsBroker, NatsRouter, TestNatsBroker
 
 from nuke_di import DI, BackgroundTasks, Client, Dependencies, NotSingletonClient, Shutdown
 from nuke_di.fastapi import setup as fastapi_setup
-from nuke_di.faststream import setup
+from nuke_di.faststream import _FASTSTREAM, setup
+from nuke_di.integration.testing import check
 
 events: list[str] = []
 
@@ -439,3 +440,27 @@ def test_setup_twice() -> None:
 
     with pytest.raises(TypeError, match=r"setup\(\) was already called for this app"):
         setup(app)
+
+
+# --- the contract ----------------------------------------------------------------------------------------
+
+
+def contract_app(container: Dependencies, handler: Callable[..., Any]) -> FastStream:
+    app = make_app(container)
+    broker_of(app).subscriber("check")(handler)
+    return app
+
+
+@asynccontextmanager
+async def contract_run(app: FastStream, lifespan: bool) -> AsyncIterator[Callable[[], object]]:
+    # Explicit: FastStream guesses it from whether the calling code mentions TestApp, which this one does
+    async with TestNatsBroker(broker_of(app), connect_only=lifespan) as broker:
+        if lifespan:
+            async with TestApp(app):
+                yield lambda: broker.publish(None, "check")
+        else:
+            yield lambda: broker.publish(None, "check")
+
+
+async def test_keeps_the_integration_contract() -> None:
+    await check(_FASTSTREAM, contract_app, contract_run)

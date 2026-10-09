@@ -6,6 +6,28 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-10-09
+
+### Added
+
+- The integration kit is public: `nuke_di.integration` (#66), with `Framework`, `DependsFramework`, `Binding`,
+  `bind()`, `client_of()`, `running()`, `wrap_lifespan()` and `unique()`. The FastAPI, FastStream and Litestar
+  integrations are built on it, so an integration with another framework can live in its own package.
+- `nuke_di.integration.testing.check(framework, make_app, run)`: the contract every integration keeps, as one
+  call for the integration's own tests. It brings its own clients and handlers and checks that a handler and a
+  dependency take clients by type hint, that `override()` before startup applies, that a handler called
+  without the app's lifespan raises the framework's "not connected" error, and that a failed `connect()` fails
+  the startup with a `RuntimeError` and leaves the container flushed. Failed cases come back as one
+  `ExceptionGroup`, each with a note naming its case. The FastAPI, FastStream and Litestar integrations run it.
+- A guide page, "Writing an integration" (`docs/guide/integrations.md`), mirrored in the six translations: the
+  kit, the FastStream integration written on it as the worked example, what `per_container` means, frameworks
+  without `Depends`, and `check()` with its real output. The README "Documentation" section links to it.
+
+### Deprecated
+
+- `nuke_di._integration` imports with a `DeprecationWarning` and is removed in 1.15.0; import from
+  `nuke_di.integration`.
+
 ## [1.12.1] - 2026-10-09
 
 ### Documentation
@@ -502,7 +524,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/troyan-dy/nuke-di/compare/v1.13.0...v1.14.0
 [1.12.1]: https://github.com/troyan-dy/nuke-di/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/troyan-dy/nuke-di/compare/v1.11.5...v1.12.0
 [1.11.5]: https://github.com/troyan-dy/nuke-di/compare/v1.11.4...v1.11.5
