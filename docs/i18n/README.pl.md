@@ -30,6 +30,7 @@ i nie ma żadnych zależności w czasie działania.
 - [Workery i joby](#workers-and-jobs): [job](#your-first-job), [parametry](#parameters), [worker](#your-first-worker), [okres karencji](#grace-period), [zadania w tle](#background-tasks), [kody wyjścia](#exit-codes), [hooki](#hooks), [Kubernetes](#running-in-kubernetes)
 - Frameworki: [FastAPI](#fastapi), [Litestar](#litestar), [FastStream](#faststream)
 - [Testowanie](#testing)
+- [Przykłady](../../examples/README.md): gotowe do uruchomienia scenariusze ze skryptami, jobami, workerami kolejek, FastAPI, Litestar, Starlette, FastStream i testami
 - [Konfiguracja](#configuration) · [Błędy](#errors) · [Wydajność](#performance) · [Rozwój](#development)
 
 ## <a id="installation"></a>Instalacja

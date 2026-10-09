@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "1.11.2"
+version = "1.11.3"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
@@ -96,7 +96,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "docs/i18n", "CHANGELOG.md", "README.md", "LICENSE"]
+include = ["src", "tests", "examples", "docs/i18n", "CHANGELOG.md", "README.md", "LICENSE"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nuke_di"]
@@ -110,13 +110,16 @@ select = ["E", "W", "F", "I", "N", "B", "A", "UP", "ASYNC", "S", "RUF"]
 ignore = ["S101"]
 
 [tool.mypy]
-files = ["src", "tests", "scripts", "benchmarks"]
+files = ["src", "tests", "scripts", "benchmarks", "examples"]
+# Every example is a package run from examples/, which is where its imports start
+mypy_path = "examples"
 strict = true
 disallow_any_generics = false
 
 [tool.pyright]
 # Run from uvx, outside the project environment, so it is pointed at the venv of `uv sync`
-include = ["src", "tests"]
+include = ["src", "tests", "examples"]
+extraPaths = ["examples"]
 pythonVersion = "3.11"
 typeCheckingMode = "standard"
 venvPath = "."

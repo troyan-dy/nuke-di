@@ -23,6 +23,7 @@
 - [ワーカーとジョブ](#workers-and-jobs)：[ジョブ](#your-first-job)、[パラメータ](#parameters)、[ワーカー](#your-first-worker)、[猶予期間](#grace-period)、[バックグラウンドタスク](#background-tasks)、[終了コード](#exit-codes)、[フック](#hooks)、[Kubernetes](#running-in-kubernetes)
 - フレームワーク：[FastAPI](#fastapi)、[Litestar](#litestar)、[FastStream](#faststream)
 - [テスト](#testing)
+- [サンプル](../../examples/README.md): スクリプト、job、キューの worker、FastAPI、Litestar、Starlette、FastStream、テストのすぐに動かせるシナリオ
 - [設定](#configuration) · [エラー](#errors) · [パフォーマンス](#performance) · [開発](#development)
 
 ## <a id="installation"></a>インストール

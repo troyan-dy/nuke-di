@@ -30,6 +30,7 @@ e não tem dependências em tempo de execução.
 - [Workers e jobs](#workers-and-jobs): [um job](#your-first-job), [parâmetros](#parameters), [um worker](#your-first-worker), [período de tolerância](#grace-period), [tarefas em segundo plano](#background-tasks), [códigos de saída](#exit-codes), [hooks](#hooks), [Kubernetes](#running-in-kubernetes)
 - Frameworks: [FastAPI](#fastapi), [Litestar](#litestar), [FastStream](#faststream)
 - [Testes](#testing)
+- [Exemplos](../../examples/README.md): cenários prontos para executar com scripts, jobs, workers de filas, FastAPI, Litestar, Starlette, FastStream e testes
 - [Configuração](#configuration) · [Erros](#errors) · [Desempenho](#performance) · [Desenvolvimento](#development)
 
 ## <a id="installation"></a>Instalação

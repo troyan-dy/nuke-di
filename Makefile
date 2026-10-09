@@ -37,6 +37,10 @@ test: ## Run tests
 cov: ## Run tests with coverage report
 	uv run pytest --cov --cov-report=term --cov-report=html
 
+.PHONY: examples
+examples: ## Run the tests of the examples in examples/
+	cd examples && uv run pytest
+
 .PHONY: test-all
 test-all: ## Run tests on every supported Python version
 	@for v in $(PY_VERSIONS); do \
@@ -48,7 +52,7 @@ test-all: ## Run tests on every supported Python version
 test-free-threaded: ## Run the tests that need no framework on free-threaded Python 3.14t with the GIL off, as CI does
 	PYTHON_GIL=0 uv run --python 3.14t --isolated --no-default-groups --with pytest --with pytest-asyncio pytest -p no:cacheprovider \
 		--ignore=tests/test_fastapi.py --ignore=tests/test_litestar.py --ignore=tests/test_faststream.py \
-		--ignore=tests/test_benchmarks.py --ignore=tests/test_typing.py
+		--ignore=tests/test_benchmarks.py --ignore=tests/test_typing.py --ignore=tests/test_examples.py
 
 .PHONY: test-fastapi-min
 test-fastapi-min: ## Run the FastAPI tests on the lowest supported FastAPI

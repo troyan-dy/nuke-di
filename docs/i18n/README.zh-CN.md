@@ -27,6 +27,7 @@ FastAPI、Litestar 和 FastStream 的处理函数也以同样的方式通过类�
 - [worker 与 job](#workers-and-jobs)：[第一个 job](#your-first-job)、[参数](#parameters)、[第一个 worker](#your-first-worker)、[宽限期](#grace-period)、[后台任务](#background-tasks)、[退出码](#exit-codes)、[钩子](#hooks)、[Kubernetes](#running-in-kubernetes)
 - 框架：[FastAPI](#fastapi)、[Litestar](#litestar)、[FastStream](#faststream)
 - [测试](#testing)
+- [示例](../../examples/README.md)：可直接运行的场景——脚本、job、队列 worker、FastAPI、Litestar、Starlette、FastStream 和测试
 - [配置](#configuration) · [错误](#errors) · [性能](#performance) · [开发](#development)
 
 ## <a id="installation"></a>安装

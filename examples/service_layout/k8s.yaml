@@ -1,0 +1,106 @@
+# One image, three processes: the API and the outbox worker are Deployments, the cleanup job is a CronJob.
+# SQLite keeps the example self-contained, so all three mount one volume; a real service points
+# Database at Postgres, drops the volume and scales the API and the worker independently.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: service-layout
+data:
+  SERVICE_DB: /data/orders.db
+  OUTBOX_POLL_SECONDS: "1"
+  DISCONNECT_TIMEOUT_SECONDS: "5"
+  SHUTDOWN_GRACE_SECONDS: "10"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: service-layout-data
+spec:
+  accessModes: [ReadWriteMany]  # mounted by the pods of all three processes
+  resources:
+    requests: {storage: 1Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-layout-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: service-layout-api}
+  template:
+    metadata:
+      labels: {app: service-layout-api}
+    spec:
+      # uvicorn drains requests for up to 5s, then the lifespan disconnects 4 layers
+      # (Settings, Database, Outbox, Orders): 5 + DISCONNECT_TIMEOUT_SECONDS 5 x 4 layers = 25 <= 30
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: api
+          image: registry.example.com/service-layout:1.0
+          command: ["uvicorn", "service_layout.api:app", "--host", "0.0.0.0", "--port", "8000",
+                    "--timeout-graceful-shutdown", "5"]
+          envFrom:
+            - configMapRef: {name: service-layout}
+          ports:
+            - {name: http, containerPort: 8000}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: service-layout-data}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-layout-outbox
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: service-layout-outbox}
+  template:
+    metadata:
+      labels: {app: service-layout-outbox}
+    spec:
+      # SIGTERM sets Shutdown: the worker finishes its batch within SHUTDOWN_GRACE_SECONDS 10, then 3 layers
+      # (Settings + Broker + Shutdown, Database, Outbox) disconnect: 10 + 5 x 3 = 25 <= 30
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: outbox
+          image: registry.example.com/service-layout:1.0
+          command: ["python", "-m", "service_layout.workers.outbox"]
+          envFrom:
+            - configMapRef: {name: service-layout}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: service-layout-data}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: service-layout-cleanup
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 0  # a failed cleanup (exit code 1 or 2) waits for the next schedule
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: cleanup
+              image: registry.example.com/service-layout:1.0
+              command: ["python", "-m", "service_layout.jobs.cleanup"]
+              args: ["--older-than-days", "7"]
+              envFrom:
+                - configMapRef: {name: service-layout}
+              volumeMounts:
+                - {name: data, mountPath: /data}
+          volumes:
+            - name: data
+              persistentVolumeClaim: {claimName: service-layout-data}

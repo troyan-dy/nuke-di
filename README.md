@@ -30,6 +30,7 @@ and has no runtime dependencies.
 - [Workers and jobs](#workers-and-jobs): [a job](#your-first-job), [parameters](#parameters), [a worker](#your-first-worker), [grace period](#grace-period), [background tasks](#background-tasks), [exit codes](#exit-codes), [hooks](#hooks), [Kubernetes](#running-in-kubernetes)
 - Frameworks: [FastAPI](#fastapi), [Litestar](#litestar), [FastStream](#faststream)
 - [Testing](#testing)
+- [Examples](examples/README.md): runnable scenarios for scripts, jobs, queue workers, FastAPI, Litestar, Starlette, FastStream and tests
 - [Configuration](#configuration) · [Errors](#errors) · [Performance](#performance) · [Development](#development)
 
 ## Installation

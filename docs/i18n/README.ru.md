@@ -30,6 +30,7 @@
 - [Воркеры и джобы](#workers-and-jobs): [джоба](#your-first-job), [параметры](#parameters), [воркер](#your-first-worker), [grace period](#grace-period), [фоновые задачи](#background-tasks), [коды завершения](#exit-codes), [хуки](#hooks), [Kubernetes](#running-in-kubernetes)
 - Фреймворки: [FastAPI](#fastapi), [Litestar](#litestar), [FastStream](#faststream)
 - [Тестирование](#testing)
+- [Примеры](../../examples/README.md): готовые к запуску сценарии — скрипты, джобы, воркеры очередей, FastAPI, Litestar, Starlette, FastStream и тесты
 - [Настройка](#configuration) · [Ошибки](#errors) · [Производительность](#performance) · [Разработка](#development)
 
 ## <a id="installation"></a>Установка
