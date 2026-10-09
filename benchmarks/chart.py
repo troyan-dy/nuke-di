@@ -13,7 +13,7 @@ from pathlib import Path
 
 import matplotlib
 import matplotlib.pyplot as plt
-from compare import LIBRARIES, summary_figures
+from compare import FIGURES, LIBRARIES, summary_figures
 from run import Result, fmt
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,7 +47,7 @@ def load(path: Path) -> tuple[dict[str, object], list[Result]]:
 
 def draw(data: dict[str, object], results: list[Result]) -> matplotlib.figure.Figure:
     sizes: list[int] = data["sizes"]  # type: ignore[assignment]
-    figures = summary_figures(results, sizes)
+    figures = summary_figures(results, sizes, [figure for figure in FIGURES if figure.chart])
     matplotlib.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10})
     figure, axes = plt.subplots(1, len(figures), figsize=(14, 4.6), facecolor=SURFACE)
     figure.subplots_adjust(left=0.135, right=0.975, top=0.70, bottom=0.14, wspace=0.95)

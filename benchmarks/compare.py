@@ -15,7 +15,7 @@ The libraries are the `compare` dependency group: `uv sync --group compare`.
 import argparse
 import asyncio
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, fields
 from functools import partial
 from importlib.metadata import version
@@ -42,6 +42,7 @@ from run import (
     fmt,
     measure,
     request_samples,
+    shape_label,
     summary,
     table,
     to_json,
@@ -54,6 +55,8 @@ from nuke_di.fastapi import setup as nuke_di_setup
 
 # Registering and resolving: `cold(tree)` builds a container and gets the root; `warm(tree)` builds one,
 # gets the root and returns a function that gets it again
+
+COLD_START = "cold: container, registration, root"
 
 
 @dataclass(frozen=True)
@@ -116,13 +119,19 @@ def dependency_injector_root(tree: Tree) -> Any:
     A `Singleton` provider per class on a `DynamicContainer`, wired by the names of the `__init__` arguments.
     """
     container = containers.DynamicContainer()
-    made: dict[Any, Any] = {}
+    made: dict[str, Any] = {}
     for cls in tree.clients:
-        dependencies = {field.name: made[field.type] for field in fields(cls)}  # type: ignore[arg-type]
+        # The library reads no annotation: the user names the provider of every argument. The type of a field
+        # is the class, or its name when the annotations are strings, and the providers are keyed by name
+        dependencies = {field.name: made[name(field.type)] for field in fields(cls)}  # type: ignore[arg-type]
         provider = providers.Singleton(cls, **dependencies)
         setattr(container, cls.__name__, provider)
-        made[cls] = provider
-    return made[tree.root]
+        made[cls.__name__] = provider
+    return made[tree.root.__name__]
+
+
+def name(hint: Any) -> str:
+    return hint if isinstance(hint, str) else str(hint.__name__)
 
 
 def dependency_injector_cold(tree: Tree) -> object:
@@ -178,22 +187,23 @@ def attempt(result: Result, sample: Callable[[], float], repeat: int) -> Result:
     return result
 
 
-def trees(sizes: list[int]) -> Iterator[tuple[str, int, Tree]]:
+def trees(sizes: list[int], strings: bool = False) -> Iterator[tuple[str, int, Tree]]:
     for shape, build in SHAPES.items():
         for n in sizes:
-            tree = build(n)
+            tree = build(n, strings)
             for library in LIBRARIES:
                 library.prepare(tree)
-            yield shape, n, tree
+            yield shape_label(shape, strings), n, tree
+            tree.discard()
 
 
 def cold_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
-    for shape, n, tree in trees(sizes):
-        for library in LIBRARIES:
-            sample = partial(measure, library.cold, 1, tree)
-            yield attempt(
-                Result("cold: container, registration, root", shape, n, [], library=library.name), sample, repeat
-            )
+    # The string-annotation trees as well: most code bases have `from __future__ import annotations`
+    for strings in (False, True):
+        for shape, n, tree in trees(sizes, strings):
+            for library in LIBRARIES:
+                sample = partial(measure, library.cold, 1, tree)
+                yield attempt(Result(COLD_START, shape, n, [], library=library.name), sample, repeat)
 
 
 def warm_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
@@ -297,10 +307,13 @@ class Figure:
     shape: str
     # None: not a tree figure; "N": the summary size
     n: int | str | None
+    # Whether benchmarks/chart.py draws it: the chart keeps to the three figures that answer "which one is faster"
+    chart: bool = True
 
 
 FIGURES = [
-    Figure("Cold start: a container and a tree of N clients", "cold: container, registration, root", "mixed", "N"),
+    Figure("Cold start: a container and a tree of N clients", COLD_START, "mixed", "N"),
+    Figure("Cold start: the same N clients with string annotations", COLD_START, "mixed, strings", "N", chart=False),
     Figure("A cached root", "warm: the root again", "mixed", "N"),
     Figure("A FastAPI request with a client", "one request, a client in the handler", "FastAPI", None),
 ]
@@ -311,13 +324,15 @@ def summary_size(sizes: list[int]) -> int:
     return 100 if 100 in sizes else max(sizes)
 
 
-def summary_figures(results: list[Result], sizes: list[int]) -> list[tuple[str, str, dict[str, float | None]]]:
+def summary_figures(
+    results: list[Result], sizes: list[int], wanted_figures: Sequence[Figure] = FIGURES
+) -> list[tuple[str, str, dict[str, float | None]]]:
     """
     For every figure: its label, its unit and the median per library, `None` where the library failed.
     """
     n = summary_size(sizes)
     figures = []
-    for figure in FIGURES:
+    for figure in wanted_figures:
         wanted = n if figure.n == "N" else figure.n
         label = figure.label.replace(" N ", f" {n} ")
         medians: dict[str, float | None] = {}

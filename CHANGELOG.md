@@ -20,6 +20,22 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - CI runs the tests that need no framework on free-threaded CPython 3.14t with `PYTHON_GIL=0`, as
   `make test-free-threaded` does ([#32](https://github.com/troyan-dy/nuke-di/issues/32)).
 
+## [1.10.1] - 2026-10-09
+
+### Added
+
+- The benchmark suite measures what real code pays: `resolve(), cold` of the wide, deep and mixed trees with
+  string annotations (`wide, strings` and so on), the classes `from __future__ import annotations` produces,
+  which cost about twice the real-type figure (`resolve(), cold` now builds its classes afresh for every
+  sample, so a per-class cache cannot serve it); `resolve(), second container, classes seen before`, a fresh
+  `Dependencies()` for classes resolved earlier in the process, what every test of a session pays and the
+  row a per-class cache would change; and an `application` connect shape of 8 clients whose `connect()` and
+  `disconnect()` sleep for 1–60 ms, with the wall time of the container against the critical path of the
+  same coroutines, so the time lost at the layer barriers shows. `benchmarks/compare.py` runs the
+  string-annotation trees through every library as an extra row of the cold-start summary; the baseline
+  and the comparison in `docs/benchmarks.md` are retaken
+  ([#38](https://github.com/troyan-dy/nuke-di/issues/38)).
+
 ## [1.10.0] - 2026-10-09
 
 ### Changed
@@ -333,7 +349,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.10.1...HEAD
+[1.10.1]: https://github.com/troyan-dy/nuke-di/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/troyan-dy/nuke-di/compare/v1.9.2...v1.10.0
 [1.9.2]: https://github.com/troyan-dy/nuke-di/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/troyan-dy/nuke-di/compare/v1.9.0...v1.9.1
