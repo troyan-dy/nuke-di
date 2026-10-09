@@ -193,7 +193,7 @@ INFO Connected 7 clients in 0.35s (slowest: Postgres 0.30s, Consumer 0.30s, Http
 -- application is running --
 ```
 
-`Consumer` が必要とするのは `Kafka` だけなので、`Postgres` がまだ接続中の 0.05s の時点で開始します。起動にかかる時間は、最も長い依存関係の連鎖である `Kafka` → `Consumer` の時間になります。1.11 までは、クライアントはレイヤー単位で接続され、各レイヤーが下のレイヤーで最も遅いクライアントを待っていたため、この例では 0.60s かかっていました。
+`Consumer` が必要とするのは `Kafka` だけなので、`Postgres` がまだ接続中の 0.05s の時点で開始します。起動にかかる時間は、最も長い依存関係の連鎖である `Kafka` → `Consumer` の時間になります。1.12 までは、クライアントはレイヤー単位で接続され、各レイヤーが下のレイヤーで最も遅いクライアントを待っていたため、この例では 0.60s かかっていました。
 
 ![この例の 6 つのクライアントを、レイヤー単位で接続すると 0.60s、自身の依存先に従って接続すると 0.35s](../../connect-order.svg)
 
@@ -488,3 +488,77 @@ InvalidSignatureError: UserRepository is not a client: subclass Client or NotSin
 そもそもクライアントではないクラスを `resolve()` で求めると、何かが構築される前に `UserRepository is not a client: subclass Client or NotSingletonClient` で失敗します。
 
 互いに循環して依存するクライアントは、`InvalidSignatureError` のサブクラスである `CircularDependencyError` で失敗します。評価できない型ヒント（関数の内部で定義されたクラスや、`TYPE_CHECKING` の下でインポートされたクラスなど）は、その旨を示す `InvalidSignatureError` で失敗します。エラーが `inject()` から発生した場合、経路は関数から始まります：`(resolving handler -> Checkout -> Profiles)`。[ワーカーやジョブ](workers-and-jobs.md)では、いずれの場合も何かが接続される前に、終了コード `1` で実行が失敗します。
+
+## <a id="checking-the-tree-with-mypy"></a>mypy によるツリーのチェック
+
+`nuke_di.mypy` は mypy のプラグインで、mypy が型をチェックする段階で、プロセスやテストが実行される前にこれらのエラーを見つけます。`pyproject.toml` で有効にします：
+
+```toml
+[tool.mypy]
+plugins = ["nuke_di.mypy"]
+```
+
+`resolve()`、`inject()`、`@job`、`@worker` のそれぞれで、プラグインはコンテナと同じように、その呼び出しが構築するすべてのクライアントの `__init__` をたどり、コンテナが送出するはずのエラーを同じメッセージで報告します：
+
+```python
+# tree.py
+from typing import Protocol, reveal_type
+
+from nuke_di import DI, Client, job
+
+
+class Postgres(Client):
+    pass
+
+
+class UserRepository(Protocol):
+    async def get(self, user_id: int) -> str: ...
+
+
+class Profiles(Client):
+    def __init__(self, pg: Postgres, users: UserRepository) -> None:
+        self.pg, self.users = pg, users
+
+
+class Checkout(Client):
+    def __init__(self, profiles: Profiles) -> None:
+        self.profiles = profiles
+
+
+class Orders(Client):
+    def __init__(self, payments: "Payments") -> None:
+        self.payments = payments
+
+
+class Payments(Client):
+    def __init__(self, orders: Orders) -> None:
+        self.orders = orders
+
+
+async def greet(user_id: int, pg: Postgres) -> str:
+    return f"Hello, user-{user_id}!"
+
+
+DI.resolve(Checkout)
+reveal_type(DI.inject(greet))
+
+
+@job
+async def settle(orders: Orders) -> None:
+    pass
+```
+
+```console
+$ mypy tree.py
+tree.py:39: error: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)  [nuke-di]
+tree.py:40: note: Revealed type is "def (user_id: int) -> typing.Coroutine[Any, Any, str]"
+tree.py:43: error: Circular dependency: settle -> Orders -> Payments -> Orders  [nuke-di]
+Found 2 errors in 1 file (checked 1 source file)
+```
+
+- 上の表のすべての行がチェックされ、循環もチェックされます。`inject()`、`@job`、`@worker` に渡された関数の、型ヒントのない引数も同様です。エラーはそれを送出するはずの呼び出しの位置に、その呼び出しからの経路とともに報告されます。複数のエラーを持つツリーでは、コンテナが最初のエラーで止まるのに対し、プラグインはそのすべてを報告します。
+- `inject()` は、それが構築する `partial` の型として、クライアント引数を除いた関数を返します。上の例では `Callable[..., Coroutine[Any, Any, str]]` ではなく `def (user_id: int) -> Coroutine[Any, Any, str]` になります。クライアント引数より後ろにある引数はキーワード専用になります。位置引数として渡した値はクライアントの位置に入ってしまうからです。
+- コンテナに任されるもの：実行時に評価できない型ヒント（mypy はそれでも評価します）、`type[...]` 型の変数に入ったクラス（別の `__init__` を持つサブクラスが入っているかもしれません）、デコレートされた、またはオーバーロードされた `__init__`、クラスに対する `inject()`、FastAPI・Litestar・FastStream との統合のルートとハンドラー、mypy が知らない型（型ヒントのないライブラリのクラスなど）。
+- 意図したエラーは、そのエラーのテストの中で `# type: ignore[nuke-di]` によって抑制します。
+- mypy 1.13 以降で動作し、キャッシュの有無にかかわらず同じように機能します。ツリーの深いところにあるクライアントを変更すると、そのツリーの呼び出しが再びチェックされます。mypy のデーモン `dmypy` は、再起動するまでこのような変更を見逃すことがあります。
+- Pyright にはプラグイン API がありません。Pyright では、[すべてのエントリーポイントを注入するテスト](testing.md)が同じエラーを見つけます。

@@ -214,6 +214,9 @@ $ pytest -q test_wiring.py
 2 passed in 0.05s
 ```
 
+The [mypy plugin](clients.md#checking-the-tree-with-mypy) reports the same signature errors and
+cycles without running anything; the test runs every `__init__` too, so it also catches one that raises.
+
 Keep the container to get [the graph](clients.md#the-graph) of an entrypoint for its README:
 `deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`.
 

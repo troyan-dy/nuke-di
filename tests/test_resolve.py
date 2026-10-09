@@ -182,7 +182,7 @@ def test_failure_deep_in_a_chain_closes_every_frame(
     assert len(dep.connect_clients) == 1500
     assert dep._resolving == []
     with pytest.raises(CircularDependencyError, match=r"^Circular dependency: Loop -> LoopLink -> Loop$"):
-        dep.resolve(Loop)
+        dep.resolve(Loop)  # type: ignore[nuke-di]
 
 
 def test_failed_resolve_inside_an_init_closes_only_its_own_frames() -> None:
@@ -225,4 +225,4 @@ def test_failed_resolve_inside_an_init_closes_only_its_own_frames() -> None:
     assert dep.clients[Top] is top
 
     with pytest.raises(CircularDependencyError, match=r"^Circular dependency: Loop -> LoopLink -> Loop$"):
-        dep.resolve(Loop)
+        dep.resolve(Loop)  # type: ignore[nuke-di]

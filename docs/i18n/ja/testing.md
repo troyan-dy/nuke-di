@@ -187,6 +187,9 @@ $ pytest -q test_wiring.py
 2 passed in 0.05s
 ```
 
+[mypy プラグイン](clients.md#checking-the-tree-with-mypy)は、何も実行せずに同じシグネチャのエラーと循環を報告します。このテストは
+すべての `__init__` も実行するので、例外を投げる `__init__` も検出します。
+
 コンテナを保持すれば、そのエントリーポイントの[依存グラフ](clients.md#the-graph)が README 用に得られます：
 `deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`。
 

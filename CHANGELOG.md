@@ -6,7 +6,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.12.0] - 2026-10-09
+## [1.13.0] - 2026-10-09
 
 ### Changed
 
@@ -23,7 +23,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   back as before.
 - A client whose `connect()` ends in a `CancelledError` of its own, e.g. re-raised from a task it awaited, fails
   the connect with a `ConnectError` like an exception does; its consumers would otherwise wait for it forever. Up
-  to 1.11 it was skipped as not connected and the layers above it connected anyway.
+  to 1.12 it was skipped as not connected and the layers above it connected anyway.
 - `CONNECT_CONCURRENCY` counts only clients in `connect()` or `disconnect()`; a client waiting for its
   dependencies does not take a slot.
 - The `DEBUG` records of a client connecting or disconnecting say how many have finished so far:
@@ -41,6 +41,42 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   public fields in a minor release departs from semantic versioning on purpose: the fields described a schedule
   that no longer exists (ADR-0007).
 
+
+## [1.12.1] - 2026-10-09
+
+### Documentation
+
+- ADRs for the designs rejected so far that had none: ADR-0008, a client depends on concrete clients, with no
+  binding of a Protocol or an ABC to an implementation and no qualifiers or multibinding (#9); ADR-0009,
+  `connect()` is fail-fast and restarting is the orchestrator's job (#11); ADR-0010, the library stays pure
+  Python, a Rust or compiled core was measured and is not worth it (#89, #16). AGENTS.md points to them.
+
+## [1.12.0] - 2026-10-09
+
+### Added
+
+- A mypy plugin, `plugins = ["nuke_di.mypy"]` (#52). At every `resolve()`, `inject()`, `@job` and `@worker` it
+  walks the `__init__` of every client the call would build and reports what the container would raise, with the
+  same message: an argument without a type hint, a type that is not a client, an optional client, a positional-only
+  client and a cycle, with the path from the call (`resolving settle -> Orders -> Payments -> Orders`), all the
+  errors of a tree at once, under the error code `nuke-di`. It also types the result of `inject()` as the function
+  without its client arguments, `def (user_id: int) -> Coroutine[Any, Any, str]` instead of
+  `Callable[..., Coroutine[Any, Any, str]]`; an argument after a client becomes keyword-only, as with the `partial`
+  that `inject()` returns. The plugin reads only what mypy keeps in its cache, so a warm cache reports the same as a
+  cold one, and a change to a client deep in a tree checks the calls of that tree again (the
+  `get_additional_indirect_deps` hook of mypy 2.4, the checker's module references before; the `dmypy` daemon
+  may miss such a change until it restarts). Works with mypy 1.13 and later; Pyright has no plugin API. A client
+  whose type mypy sees differently from the container is read as the container reads it: a generic client with its
+  parameters, `Repository[int]`, and an alias of a `type` statement are no client, a `__db` argument is not
+  positional-only. See "Checking the tree with mypy" in `docs/guide/clients.md`.
+- The repository's own `mypy` runs with the plugin: it reports exactly the intended errors of the error tests and
+  of the `startup_failures` and `testing` examples, which carry `# type: ignore[nuke-di]`, and nothing else.
+
+### Changed
+
+- `job(hooks=...)` and `worker(hooks=...)` are typed as returning `EntrypointDecorator`, a protocol whose
+  `__call__` keeps the type of the decorated function as `Callable[[F], F]` did: applying it is a call the plugin
+  sees.
 ## [1.11.5] - 2026-10-09
 
 ### Documentation
@@ -502,7 +538,9 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.13.0...HEAD
+[1.13.0]: https://github.com/troyan-dy/nuke-di/compare/v1.12.1...v1.13.0
+[1.12.1]: https://github.com/troyan-dy/nuke-di/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/troyan-dy/nuke-di/compare/v1.11.5...v1.12.0
 [1.11.5]: https://github.com/troyan-dy/nuke-di/compare/v1.11.4...v1.11.5
 [1.11.4]: https://github.com/troyan-dy/nuke-di/compare/v1.11.3...v1.11.4

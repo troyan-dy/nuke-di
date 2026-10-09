@@ -211,6 +211,9 @@ $ pytest -q test_wiring.py
 2 passed in 0.05s
 ```
 
+[mypy 插件](clients.md#checking-the-tree-with-mypy)无需运行任何东西就能报告同样的签名错误和循环依赖；
+而这个测试还会真正运行每个 `__init__`，因此也能发现会抛出异常的 `__init__`。
+
 保留容器，就能得到该入口点的[依赖图](clients.md#the-graph)，放进它的 README：
 `deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`。
 

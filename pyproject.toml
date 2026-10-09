@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "1.12.0"
+version = "1.13.0"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
@@ -115,6 +115,8 @@ files = ["src", "tests", "scripts", "benchmarks", "examples"]
 mypy_path = "examples"
 strict = true
 disallow_any_generics = false
+# The plugin of this package; a test of an error of a tree silences it with `# type: ignore[nuke-di]`
+plugins = ["nuke_di.mypy"]
 
 [tool.pyright]
 # Run from uvx, outside the project environment, so it is pointed at the venv of `uv sync`

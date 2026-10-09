@@ -101,8 +101,10 @@ Qué pasó:
   lento solo retrasa a los clientes que lo necesitan. Se desconectan en orden inverso, y un
   `disconnect()` que falla no detiene a los demás.
 - **Fallar pronto.** Un árbol que no se puede construir falla antes de que se conecte nada, indicando el
-  argumento y la ruta hasta él. Un cliente que no logra conectarse detiene la aplicación una vez que se
-  desconectan los que ya se habían conectado. No hay reintentos: reiniciar es tarea del orquestador.
+  argumento y la ruta hasta él, y `mypy` con el [plugin](es/clients.md#checking-the-tree-with-mypy)
+  informa del mismo error antes de que arranque el proceso. Un cliente que no logra conectarse detiene
+  la aplicación una vez que se desconectan los que ya se habían conectado. No hay reintentos: reiniciar
+  es tarea del orquestador.
 - **Las pruebas reemplazan, no recablean.** `mock()` y `override()` ponen un objeto falso en lugar de un
   cliente durante una prueba; el código bajo prueba no cambia.
 - **Sin dependencias en tiempo de ejecución.** El núcleo usa solo la biblioteca estándar; las

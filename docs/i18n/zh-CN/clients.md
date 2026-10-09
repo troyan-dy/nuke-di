@@ -201,7 +201,7 @@ INFO Connected 7 clients in 0.35s (slowest: Postgres 0.30s, Consumer 0.30s, Http
 ```
 
 `Consumer` 只需要 `Kafka`，所以它在 0.05s 就开始连接，此时 `Postgres` 还在连接中；
-整个启动耗时等于最长的那条依赖链 `Kafka` → `Consumer`。在 1.11 及之前的版本中，客户端按层连接，
+整个启动耗时等于最长的那条依赖链 `Kafka` → `Consumer`。在 1.12 及之前的版本中，客户端按层连接，
 每个客户端都要等待下面那一层中最慢的客户端，在这里需要 0.60s：
 
 ![示例中的六个客户端：按层连接耗时 0.60s，按各自的依赖连接耗时 0.35s](../../connect-order.svg)
@@ -504,3 +504,86 @@ InvalidSignatureError: UserRepository is not a client: subclass Client or NotSin
 如果错误来自 `inject()`，路径从函数开始：
 `(resolving handler -> Checkout -> Profiles)`。在 [worker 或 job](workers-and-jobs.md) 中，
 上述任一错误都会让这次运行在任何连接发生之前以退出码 `1` 失败。
+
+## <a id="checking-the-tree-with-mypy"></a>用 mypy 检查依赖树
+
+`nuke_di.mypy` 是一个 mypy 插件，它在 mypy 检查类型时就能发现上述错误，早于任何进程或测试的运行。
+在 `pyproject.toml` 中启用它：
+
+```toml
+[tool.mypy]
+plugins = ["nuke_di.mypy"]
+```
+
+在每一处 `resolve()`、`inject()`、`@job` 和 `@worker`，插件都会像容器那样，遍历该调用将要构建的每个客户端的 `__init__`，
+并报告容器会引发的错误，消息也完全相同：
+
+```python
+# tree.py
+from typing import Protocol, reveal_type
+
+from nuke_di import DI, Client, job
+
+
+class Postgres(Client):
+    pass
+
+
+class UserRepository(Protocol):
+    async def get(self, user_id: int) -> str: ...
+
+
+class Profiles(Client):
+    def __init__(self, pg: Postgres, users: UserRepository) -> None:
+        self.pg, self.users = pg, users
+
+
+class Checkout(Client):
+    def __init__(self, profiles: Profiles) -> None:
+        self.profiles = profiles
+
+
+class Orders(Client):
+    def __init__(self, payments: "Payments") -> None:
+        self.payments = payments
+
+
+class Payments(Client):
+    def __init__(self, orders: Orders) -> None:
+        self.orders = orders
+
+
+async def greet(user_id: int, pg: Postgres) -> str:
+    return f"Hello, user-{user_id}!"
+
+
+DI.resolve(Checkout)
+reveal_type(DI.inject(greet))
+
+
+@job
+async def settle(orders: Orders) -> None:
+    pass
+```
+
+```console
+$ mypy tree.py
+tree.py:39: error: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)  [nuke-di]
+tree.py:40: note: Revealed type is "def (user_id: int) -> typing.Coroutine[Any, Any, str]"
+tree.py:43: error: Circular dependency: settle -> Orders -> Payments -> Orders  [nuke-di]
+Found 2 errors in 1 file (checked 1 source file)
+```
+
+- 上表中的每一行都会被检查，循环依赖也一样；传给 `inject()`、`@job` 或 `@worker` 的函数中
+  没有类型提示的参数同样会被检查。错误会报告在会引发它的那个调用处，并附上从该调用出发的路径；
+  依赖树中有多个错误时，插件会全部报告，而容器在遇到第一个错误时就会停止。
+- `inject()` 返回的是去掉了客户端参数的函数，即它所构建的 `partial` 的类型：上例中是
+  `def (user_id: int) -> Coroutine[Any, Any, str]`，而不是 `Callable[..., Coroutine[Any, Any, str]]`。
+  位于客户端参数之后的参数会变为仅限关键字参数，因为按位置传入的值会落到客户端的位置上。
+- 留给容器处理的情况：运行时无法求值的类型提示（mypy 仍会对它求值）；存放在 `type[...]` 类型变量中的类，
+  它可能持有带有另一个 `__init__` 的子类；被装饰或被重载的 `__init__`；对类调用 `inject()`；
+  FastAPI、Litestar 和 FastStream 集成中的路由与处理函数；mypy 不认识的类型，例如没有类型提示的库中的类。
+- 有意为之的错误（例如在测试该错误的测试中）用 `# type: ignore[nuke-di]` 屏蔽。
+- 它支持 mypy 1.13 及更高版本，无论是否使用缓存都能工作：修改依赖树深处的某个客户端后，
+  该依赖树的所有调用都会被重新检查。mypy 的守护进程 `dmypy` 在重启之前可能察觉不到这类修改。
+- Pyright 没有插件 API。使用 Pyright 时，[注入每个入口点的测试](testing.md)能发现同样的错误。

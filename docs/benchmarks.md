@@ -99,9 +99,9 @@ The application tree, with the `connect()` / `disconnect()` sleep of every clien
 `Settings` 1 / 0; `Postgres(Settings)` 30 / 5, `Redis(Settings)` 20 / 2 and `Kafka(Settings)` 60 / 10;
 `Repository(Postgres)` 15 / 1; `Users(Repository, Redis)` 10 / 1; `Consumer(Kafka)` 5 / 5;
 `Api(Users, Consumer)` 2 / 1. The critical path is `Settings` → `Kafka` → `Consumer` → `Api`, 68 ms, and
-`Api` → `Consumer` → `Kafka` back, 16 ms: 84 ms, which is what the container takes since 1.12.0, where every
+`Api` → `Consumer` → `Kafka` back, 16 ms: 84 ms, which is what the container takes since 1.13.0, where every
 client connects as soon as its own dependencies have ([#28](https://github.com/troyan-dy/nuke-di/issues/28)).
-Up to 1.11 it connected in five layers, each waiting for its slowest client, 1 + 60 + 15 + 10 + 2 = 88 ms,
+Up to 1.12 it connected in five layers, each waiting for its slowest client, 1 + 60 + 15 + 10 + 2 = 88 ms,
 and disconnected in reverse in 1 + 1 + 5 + 10 = 17 ms, 105 ms in all: `Repository` and `Users` waited at
 the layer barriers for `Kafka` while `Postgres` was long connected.
 
@@ -126,9 +126,10 @@ the layer barriers for `Kafka` while `Postgres` was long connected.
 
 ## Findings
 
-The baseline was taken on an Apple M2 Pro, macOS 26.6.2 (arm64), `nuke-di` 1.12.0 at commit `59883af`,
+The baseline was taken on an Apple M2 Pro, macOS 26.6.2 (arm64), at commit `59883af` of what became `nuke-di`
+1.13.0, which still called itself 1.12.0 there: the version in the tables and the JSON,
 Python 3.11.7, 3.12.5, 3.13.14 and 3.14.6, each in a fresh `uv` environment from `uv.lock`, with
-`N = 10, 100, 1000` and 20 repeats. It is the state after the connect by dependency of 1.12.0
+`N = 10, 100, 1000` and 20 repeats. It is the state after the connect by dependency of 1.13.0
 ([#28](https://github.com/troyan-dy/nuke-di/issues/28)); the "before" figures are the 1.11.1 baseline at commit
 `bd9241f`, in the git history of `docs/benchmarks/`, taken after the performance changes of 1.9.1–1.11.1
 ([#29](https://github.com/troyan-dy/nuke-di/issues/29), [#30](https://github.com/troyan-dy/nuke-di/issues/30),

@@ -35,7 +35,7 @@ def test_inject_rejects_argument_without_type_hint() -> None:
         pass
 
     with pytest.raises(InvalidSignatureError, match='"a"'):
-        Dependencies().inject(func)
+        Dependencies().inject(func)  # type: ignore[nuke-di]
 
 
 def test_inject_allows_untyped_var_arguments() -> None:

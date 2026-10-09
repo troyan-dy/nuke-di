@@ -101,8 +101,9 @@ Co się stało:
   tylko tych klientów, którzy go potrzebują. Rozłączają się w odwrotnej kolejności,
   a `disconnect()`, który zakończy się błędem, nie zatrzymuje pozostałych.
 - **Szybka porażka (fail fast).** Drzewo, którego nie da się zbudować, zgłasza błąd, zanim cokolwiek się połączy,
-  z nazwą argumentu i ścieżką do niego. Klient, który nie może się połączyć, zatrzymuje aplikację, gdy tylko
-  połączeni już klienci zostaną rozłączeni. Nie ma ponownych prób: restart to zadanie orkiestratora.
+  z nazwą argumentu i ścieżką do niego, a `mypy` z [wtyczką](pl/clients.md#checking-the-tree-with-mypy)
+  zgłasza ten sam błąd, zanim proces wystartuje. Klient, który nie może się połączyć, zatrzymuje aplikację,
+  gdy tylko połączeni już klienci zostaną rozłączeni. Nie ma ponownych prób: restart to zadanie orkiestratora.
 - **Testy podmieniają, a nie przepinają.** `mock()` i `override()` wstawiają atrapę w miejsce klienta
   na czas jednego testu; testowany kod się nie zmienia.
 - **Brak zależności w czasie działania.** Rdzeń korzysta wyłącznie z biblioteki standardowej; integracje

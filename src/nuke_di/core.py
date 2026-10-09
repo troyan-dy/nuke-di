@@ -612,7 +612,8 @@ class Dependencies:
         Bind the dependencies from the signature of `func`.
 
         note: `func` may be a function or a class. The result keeps the return type of `func`; its remaining
-        arguments are not typed, a type checker cannot subtract the client arguments from a signature.
+        arguments are typed by the mypy plugin of nuke_di only, a type checker cannot subtract the client arguments
+        from a signature on its own.
         """
         with self._lock:
             if self.connected is True:

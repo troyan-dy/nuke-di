@@ -101,8 +101,11 @@ O que aconteceu:
   lento segura apenas os clientes que precisam dele. Eles se desconectam na ordem inversa, e um
   `disconnect()` que falha não impede os demais.
 - **Falhar cedo.** Uma árvore que não pode ser construída falha antes de qualquer conexão, com o nome do argumento e
-  o caminho até ele. Um cliente que não consegue se conectar para a aplicação depois que os já conectados são
-  desconectados. Não há novas tentativas: reiniciar é tarefa do orquestrador.
+  o caminho até ele, e o `mypy` com o
+  [plugin](pt-BR/clients.md#checking-the-tree-with-mypy)
+  aponta o mesmo erro antes de o processo iniciar. Um cliente que não consegue se conectar para a
+  aplicação depois que os já conectados são desconectados. Não há novas tentativas: reiniciar é tarefa
+  do orquestrador.
 - **Os testes substituem, não religam.** `mock()` e `override()` colocam um falso no lugar de um cliente
   durante um teste; o código testado não muda.
 - **Sem dependências em tempo de execução.** O núcleo usa só a biblioteca padrão; as integrações com

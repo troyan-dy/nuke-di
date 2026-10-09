@@ -26,7 +26,7 @@ async def audited(audit: Audit) -> None: ...
 def test_wiring_catches_a_broken_init() -> None:
     """The same inject() fails on a broken __init__ with the error a real run would print."""
     with pytest.raises(InvalidSignatureError, match=r'Argument "table" of "Audit.__init__" is str'):
-        Dependencies().inject(audited)
+        Dependencies().inject(audited)  # type: ignore[nuke-di]
 
 
 def test_graph() -> None:

@@ -86,7 +86,7 @@ rect.bar, rect.wait { transform-box: fill-box; transform-origin: left center; }
 </defs>
 <rect class="bg" x="0.5" y="0.5" width="759" height="491" rx="8"/>
 <text class="heading" x="16" y="26">The same six clients, connected two ways</text>
-<text class="title" x="16" y="60">By layer, up to 1.11</text>
+<text class="title" x="16" y="60">By layer, up to 1.12</text>
 <line class="grid" x1="204.0" y1="70" x2="204.0" y2="218"/>
 <line class="grid" x1="286.0" y1="70" x2="286.0" y2="218"/>
 <line class="grid" x1="368.0" y1="70" x2="368.0" y2="218"/>
@@ -112,7 +112,7 @@ rect.bar, rect.wait { transform-box: fill-box; transform-origin: left center; }
 <rect class="bar g10" x="450.0" y="194" width="164.0" height="14" rx="3"/>
 <line class="total a11" x1="696.0" y1="48" x2="696.0" y2="220"/>
 <text class="total-label a12" x="701.0" y="60">0.60 s</text>
-<text class="title" x="16" y="264">By own dependencies, from 1.12</text>
+<text class="title" x="16" y="264">By own dependencies, from 1.13</text>
 <line class="grid" x1="204.0" y1="274" x2="204.0" y2="422"/>
 <line class="grid" x1="286.0" y1="274" x2="286.0" y2="422"/>
 <line class="grid" x1="368.0" y1="274" x2="368.0" y2="422"/>

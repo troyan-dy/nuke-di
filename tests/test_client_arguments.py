@@ -174,7 +174,7 @@ def test_failed_signature_is_not_cached() -> None:
 
     for _ in range(2):
         with pytest.raises(InvalidSignatureError, match=r"has no type hint"):
-            Dependencies().resolve(NoHint)
+            Dependencies().resolve(NoHint)  # type: ignore[nuke-di]
 
     assert ENTRY not in vars(NoHint)
 

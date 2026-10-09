@@ -213,6 +213,10 @@ $ pytest -q test_wiring.py
 2 passed in 0.05s
 ```
 
+[Плагин для mypy](clients.md#checking-the-tree-with-mypy) находит те же ошибки сигнатур и циклы,
+ничего не запуская; тест же выполняет и каждый `__init__`, поэтому ловит ещё и тот, что бросает
+исключение.
+
 Сохраните контейнер, чтобы получить [граф](clients.md#the-graph) entrypoint-а для его README:
 `deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`.
 

@@ -214,6 +214,9 @@ $ pytest -q test_wiring.py
 2 passed in 0.05s
 ```
 
+[Wtyczka mypy](clients.md#checking-the-tree-with-mypy) zgłasza te same błędy sygnatur i cykle, niczego
+nie uruchamiając; test dodatkowo wywołuje każde `__init__`, więc wyłapuje też takie, które rzuca wyjątek.
+
 Zachowaj kontener, aby dostać [graf](clients.md#the-graph) punktu wejścia do jego README:
 `deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`.
 

@@ -208,7 +208,7 @@ INFO Connected 7 clients in 0.35s (slowest: Postgres 0.30s, Consumer 0.30s, Http
 
 `Consumer` needs only `Kafka`, so it starts at 0.05s while `Postgres` is still connecting, and
 the startup takes as long as its longest chain of dependencies, `Kafka` → `Consumer`. Up to
-1.11 the clients connected in layers, each waiting for the slowest client of the layer below,
+1.12 the clients connected in layers, each waiting for the slowest client of the layer below,
 which took 0.60s here:
 
 ![The six clients of the example connected by layer in 0.60s and by their own dependencies in 0.35s](../connect-order.svg)
@@ -521,3 +521,93 @@ function or imported under `TYPE_CHECKING`, with an `InvalidSignatureError` that
 error comes from `inject()`, the path starts at the function:
 `(resolving handler -> Checkout -> Profiles)`. In a [worker or a job](workers-and-jobs.md)
 each of these fails the run with exit code `1` before anything connects.
+
+## Checking the tree with mypy
+
+`nuke_di.mypy` is a mypy plugin that finds these errors while mypy checks the types, before a
+process or a test runs. Enable it in `pyproject.toml`:
+
+```toml
+[tool.mypy]
+plugins = ["nuke_di.mypy"]
+```
+
+At every `resolve()`, `inject()`, `@job` and `@worker` the plugin walks the `__init__` of every
+client the call would build, as the container does, and reports what the container would raise,
+with the same message:
+
+```python
+# tree.py
+from typing import Protocol, reveal_type
+
+from nuke_di import DI, Client, job
+
+
+class Postgres(Client):
+    pass
+
+
+class UserRepository(Protocol):
+    async def get(self, user_id: int) -> str: ...
+
+
+class Profiles(Client):
+    def __init__(self, pg: Postgres, users: UserRepository) -> None:
+        self.pg, self.users = pg, users
+
+
+class Checkout(Client):
+    def __init__(self, profiles: Profiles) -> None:
+        self.profiles = profiles
+
+
+class Orders(Client):
+    def __init__(self, payments: "Payments") -> None:
+        self.payments = payments
+
+
+class Payments(Client):
+    def __init__(self, orders: Orders) -> None:
+        self.orders = orders
+
+
+async def greet(user_id: int, pg: Postgres) -> str:
+    return f"Hello, user-{user_id}!"
+
+
+DI.resolve(Checkout)
+reveal_type(DI.inject(greet))
+
+
+@job
+async def settle(orders: Orders) -> None:
+    pass
+```
+
+```console
+$ mypy tree.py
+tree.py:39: error: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)  [nuke-di]
+tree.py:40: note: Revealed type is "def (user_id: int) -> typing.Coroutine[Any, Any, str]"
+tree.py:43: error: Circular dependency: settle -> Orders -> Payments -> Orders  [nuke-di]
+Found 2 errors in 1 file (checked 1 source file)
+```
+
+- Every row of the table above is checked, cycles too, and so is an argument without a type hint
+  in the function given to `inject()`, `@job` or `@worker`. An error is reported at the call that
+  would raise it, with the path from that call; a tree with several errors reports them all, where
+  the container stops at the first.
+- `inject()` returns the function without its client arguments, the type of the `partial` it
+  builds: `def (user_id: int) -> Coroutine[Any, Any, str]` above, instead of
+  `Callable[..., Coroutine[Any, Any, str]]`. An argument after a client one becomes keyword-only,
+  since a positional value would land on the client's place.
+- Left to the container: a type hint that cannot be evaluated at runtime, which mypy evaluates
+  anyway; a class in a variable of type `type[...]`, which may hold a subclass with another
+  `__init__`; a decorated or overloaded `__init__`; `inject()` of a class; the routes and handlers
+  of the FastAPI, Litestar and FastStream integrations; a type mypy does not know, such as a class
+  of a library without type hints.
+- An intended error, in a test of that error, is silenced with `# type: ignore[nuke-di]`.
+- It works with mypy 1.13 and later, with the cache as without it: a change to a client deep in a
+  tree checks the calls of that tree again. The mypy daemon, `dmypy`, may miss such a change until
+  it restarts.
+- Pyright has no plugin API. With Pyright, [a test that injects every entrypoint](testing.md)
+  finds the same errors.
