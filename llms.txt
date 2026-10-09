@@ -1,0 +1,32 @@
+# nuke-di
+
+> The simplest dependency injection for async Python projects.
+
+Before writing code with nuke-di, know what it deliberately lacks. A dependency is a `Client` subclass with a
+type-hinted `__init__` and async `connect()` / `disconnect()`; the type hint is the only registration. There are no
+provider or factory functions (ADR-0005), no binding of a Protocol to an implementation, qualifiers or multibinding
+(ADR-0008), no per-request or per-message scopes (ADR-0006) and no retries in `connect()` (ADR-0009): the
+recipes in the guide reach the same results with plain clients, `mock()` and `override()`.
+
+## Docs
+
+- [README](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/README.md): the pitch, the Quick start, the principles and two examples
+- [Clients](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/clients.md): `Client` and `NotSingletonClient`, the lifecycle, dataclass clients, connect order, startup timings, the dependency graph, connect and resolution errors
+- [The container](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/container.md): `Dependencies` and the global `DI`, `resolve()`, `inject()`, `mock()`, `override()`
+- [Workers and jobs](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/workers-and-jobs.md): `@job` and `@worker`, command-line parameters, `Shutdown`, the grace period, background tasks, exit codes, hooks, Kubernetes
+- [FastAPI](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/fastapi.md)
+- [Litestar](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/litestar.md)
+- [FastStream](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/faststream.md)
+- [Writing an integration](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/integrations.md)
+- [Testing](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/testing.md): `mock()`, `override()`, the pytest fixtures, checking the wiring
+- [Configuration](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/configuration.md): timeouts, concurrency and the grace period
+- [Errors](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/errors.md): every exception and when it is raised
+- [Coding agents](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/agents.md): the Agent Skill, a block for `AGENTS.md`, `llms.txt`, Context7, the graph as JSON
+- [Development](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/development.md): the checks, coverage and releases
+
+## Optional
+
+- [The whole documentation in one file](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt): the README and the guide above, concatenated
+- [Agent Skill](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/skills/nuke-di/SKILL.md): the model, the recipes and what not to write, on one page
+- [Examples](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/examples/README.md): runnable applications, each with its output and tests
+- [Changelog](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/CHANGELOG.md)

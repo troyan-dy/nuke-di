@@ -375,6 +375,8 @@ $ pytest -q tests/test_api.py
   до FastAPI, Litestar, FastStream, Starlette и целого сервиса, каждый с выводом и тестами
 - [Бенчмарки](../benchmarks.md): каждый сценарий, базовые замеры на Python 3.11–3.14 и сравнение
   с другими библиотеками
+- [Агенты для написания кода](ru/agents.md): Agent Skill, блок для `AGENTS.md`,
+  [`llms.txt`](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms.txt), Context7, граф в JSON
 - [Разработка](ru/development.md): проверки, покрытие и релизы
 
 ## <a id="license"></a>Лицензия

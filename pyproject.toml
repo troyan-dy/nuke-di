@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "1.14.0"
+version = "1.14.1"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
@@ -111,6 +111,8 @@ ignore = ["S101"]
 
 [tool.mypy]
 files = ["src", "tests", "scripts", "benchmarks", "examples"]
+# The solutions an agent eval grades are projects of their own, with module names of the examples
+exclude = ["^benchmarks/agents/reference/"]
 # Every example is a package run from examples/, which is where its imports start
 mypy_path = "examples"
 strict = true

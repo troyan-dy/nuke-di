@@ -1,0 +1,28 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "nuke-di",
+  "description": "Type-hint based dependency injection for async Python: a dependency is a Client class with connect() / disconnect(); jobs, workers, FastAPI, Litestar and FastStream integrations, pytest fixtures.",
+  "folders": [
+    "docs/guide",
+    "examples"
+  ],
+  "excludeFolders": [
+    "docs/i18n"
+  ],
+  "excludeFiles": [
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "llms.txt",
+    "llms-full.txt"
+  ],
+  "rules": [
+    "A dependency is a nuke_di.Client subclass whose __init__ takes its dependencies as type-hinted arguments; the type hint is the only registration.",
+    "Do I/O in async connect() and release it in async disconnect(); __init__ only stores its arguments.",
+    "Wrap a third-party object (an httpx client, a database pool) in a Client that creates it in connect(); there are no provider or factory functions.",
+    "Depend on concrete client classes: there is no bind(Protocol, Impl), no qualifiers and no multibinding; tests swap a client with DI.mock() or DI.override().",
+    "A client lives as long as its container: there are no request or message scopes; open per-request state through a method of a client, and do not build new code on NotSingletonClient.",
+    "Never retry or wait in connect(): it fails fast and the orchestrator restarts the process.",
+    "Use @job or @worker for a process, nuke_di.fastapi.setup(app), nuke_di.litestar.ClientPlugin or nuke_di.faststream.setup(app) for a framework; handlers take clients by type hint.",
+    "Register mock() or override() before anything is resolved; check the wiring with mypy and plugins = [\"nuke_di.mypy\"]."
+  ]
+}
