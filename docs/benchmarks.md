@@ -85,9 +85,11 @@ Python 3.11.7, 3.12.5, 3.13.14 and 3.14.6, each in a fresh `uv` environment from
   The "200 clients in about 2 ms" of [#16](https://github.com/troyan-dy/nuke-di/issues/16) holds.
 - **`connect()` and `disconnect()` cost 12–18 µs per client in a layer and 0.1–0.2 ms per layer**,
   all of it scheduling: the clients' own coroutines take 0.2 µs each. A layer is cheapest on 3.14 and
-  most expensive on 3.11, where `asyncio.wait_for()` still creates a task per call, which doubles the
-  cost of a chain. Not a hot spot: a real `connect()` takes milliseconds, a hundred to a thousand times
-  more than its scheduling.
+  most expensive on 3.11, where `asyncio.wait_for()` created a task per call, which doubled the cost of
+  a chain; [#30](https://github.com/troyan-dy/nuke-di/issues/30) replaced it with `asyncio.timeout()`
+  after these figures were taken, which brought the chain of 1000 clients on 3.11 from 184 ms to 104 ms.
+  Not a hot spot: a real `connect()` takes milliseconds, a hundred to a thousand times more than its
+  scheduling.
 - **`inject()` takes 8–10 µs** to bind a function with two clients. The `partial` it returns adds
   40–80 ns to a call that takes 40 ns without it.
 - **A `NotSingletonClient` costs 5–7 µs more per consumer** than the shared instance of a `Client`.

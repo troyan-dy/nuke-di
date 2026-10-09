@@ -6,6 +6,28 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.9.2] - 2026-10-09
+
+### Changed
+
+- `connect()` and `disconnect()` await each client's coroutine under `asyncio.timeout()` instead of
+  `asyncio.wait_for()`, in the connecting task itself. On Python 3.11 `wait_for()` ran every call in a task
+  of its own, about 40 µs per client per phase: a chain of 1000 clients takes 104 ms instead of 184 ms, a
+  layer of 1000 clients 14.2 ms instead of 17.7 ms; 3.12 and later already ran the coroutine in the caller's
+  task and are unchanged. Outcomes, errors and logs are the same, and a timeout of `0` still expires before
+  the client's coroutine starts ([#30](https://github.com/troyan-dy/nuke-di/issues/30)).
+
+### Fixed
+
+- A `disconnect()` cancelled from outside (an ASGI server tearing down the lifespan, a second signal) left
+  the container with `connected=False` but its clients, layers and timings still registered, so the next
+  `connect()` would have reconnected the half-disconnected instances and `resolve()` would have handed them
+  out. The container is now flushed whichever way `disconnect()` ends. A client whose `disconnect()` raises
+  `CancelledError` of its own, re-raising the cancellation of a task it awaited for instance, no longer stops
+  `disconnect()` there: the rest of its layer and the layers below are still disconnected, and the client is
+  recorded as `cancelled`. The rollback of a failed `connect()` behaves the same
+  ([#37](https://github.com/troyan-dy/nuke-di/issues/37)).
+
 ## [1.9.1] - 2026-10-09
 
 ### Changed
@@ -269,7 +291,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.9.1...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.9.2...HEAD
+[1.9.2]: https://github.com/troyan-dy/nuke-di/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/troyan-dy/nuke-di/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/troyan-dy/nuke-di/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/troyan-dy/nuke-di/compare/v1.7.1...v1.8.0

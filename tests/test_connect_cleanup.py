@@ -57,6 +57,36 @@ class Top(Recorded):
         self.broken = broken
 
 
+class SelfCancelling(Recorded):
+    """
+    Ends its disconnect() in a CancelledError of its own, as a client re-raising the cancellation of a task it awaited.
+    """
+
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+    async def disconnect(self) -> None:
+        raise asyncio.CancelledError
+
+
+class Interrupted(Recorded):
+    """
+    Records that its disconnect() saw the cancellation and got to finish it.
+    """
+
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+    async def disconnect(self) -> None:
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            # A cleanup that still needs the event loop
+            await asyncio.sleep(0)
+            recorder.disconnected.append("Interrupted: cancelled")
+            raise
+
+
 async def test_failure_disconnects_connected_layers() -> None:
     dep = Dependencies()
     dep.resolve(Top)
@@ -118,3 +148,65 @@ async def test_cancellation_disconnects_connected_layers() -> None:
     assert sorted(recorder.disconnected) == ["Postgres", "Redis"]
     assert dep.connected is False
     assert dep.connect_clients == []
+
+
+async def test_cancelled_disconnect_waits_for_the_layer_and_flushes() -> None:
+    dep = Dependencies()
+    dep.resolve(Interrupted)
+    dep.resolve(Sibling)
+    await dep.connect()
+
+    task = asyncio.create_task(dep.disconnect())
+    await asyncio.sleep(0.01)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # The clients of the layer finished their cancellation before disconnect() gave up; the layer below was not reached
+    assert recorder.disconnected == ["Sibling", "Interrupted: cancelled"]
+    assert dep.connected is False
+    assert dep.connect_clients == []
+    assert dep.clients == {}
+
+    # The next connect() starts from a fresh graph, not from the half-disconnected clients
+    dep.resolve(Redis)
+    async with dep:
+        assert [type(client) for client in dep.connect_clients] == [Redis]
+    assert recorder.disconnected == ["Sibling", "Interrupted: cancelled", "Redis"]
+
+
+async def test_cancelled_rollback_flushes() -> None:
+    dep = Dependencies()
+    # Interrupted connects before Broken fails, so the rollback disconnects it and hangs there
+    dep.resolve(Interrupted)
+    dep.resolve(Broken)
+
+    task = asyncio.create_task(dep.connect())
+    await asyncio.sleep(0.01)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert recorder.disconnected == ["Interrupted: cancelled"]
+    assert dep.connected is False
+    assert dep.connect_clients == []
+    assert dep.clients == {}
+
+
+async def test_client_cancelling_itself_does_not_stop_disconnect() -> None:
+    dep = Dependencies()
+    dep.resolve(SelfCancelling)
+    dep.resolve(Sibling)
+    await dep.connect()
+
+    # Returns normally: the rest of the layer and the layer below are still disconnected
+    await dep.disconnect()
+
+    assert recorder.disconnected == ["Sibling", "Postgres"]
+    assert dep.connected is False
+    assert dep.connect_clients == []
+    assert dep.clients == {}
+    [timing] = [timing for timing in dep.timings if timing.name == "SelfCancelling"]
+    assert timing.disconnect_outcome == "cancelled"
