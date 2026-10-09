@@ -160,7 +160,8 @@ def test_init_error_of_a_root_has_no_path() -> None:
 
 
 @pytest.mark.parametrize(
-    ("cls", "name"), [(Settings, "Settings"), (int, "int"), (type(None), "None"), ("Database", "'Database'")]
+    ("cls", "name"),
+    [(Settings, "Settings"), (int, "int"), (type(None), "None"), ("Database", "'Database'"), ({}, r"\{\}")],
 )
 def test_resolve_refuses_what_is_not_a_client(cls: Any, name: str) -> None:
     with pytest.raises(

@@ -322,19 +322,26 @@ class Dependencies:
         """
         Idempotent operation.
         """
-        # A plain class would be built and appended, and the process would die at connect() with an
-        # AttributeError on `connect`; a type checker sees the bound, `Any` and `# type: ignore` do not
-        if not isnotsingleton(cls):
-            raise InvalidSignatureError(f"{_type_name(cls)} is not a client: subclass Client or NotSingletonClient")
         if self.connected is True:
             raise self._state_error(f"resolve({qualname(cls)})")
 
         # A resolved singleton is handed out without the lock: it is complete once it is in `clients`, and a lookup
         # in a dict is safe next to a writer on every build of CPython. The cold path takes the lock once for the
         # whole tree, so a tree of a thousand clients pays for one acquire, not a thousand.
-        inst = self.clients.get(cls)
+        try:
+            inst = self.clients.get(cls)
+        except TypeError:
+            # An unhashable argument, `resolve({})`, is no client either: it gets the message below, not a bare
+            # TypeError from the lookup
+            inst = None
         if inst is not None:
             return cast(CT, inst)
+
+        # A plain class would be built and appended, and the process would die at connect() with an
+        # AttributeError on `connect`; a type checker sees the bound, `Any` and `# type: ignore` do not. Checked
+        # after the lookup, which never finds a non-client: the check costs about 60 ns, a warm hit must not pay it
+        if not isnotsingleton(cls):
+            raise InvalidSignatureError(f"{_type_name(cls)} is not a client: subclass Client or NotSingletonClient")
 
         with self._lock:
             # Checked again under the lock, where connect() flips it
