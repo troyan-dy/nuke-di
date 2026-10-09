@@ -1392,7 +1392,7 @@ wheels = [
 
 [[package]]
 name = "nuke-di"
-version = "1.9.0"
+version = "1.9.2"
 source = { editable = "." }
 
 [package.optional-dependencies]

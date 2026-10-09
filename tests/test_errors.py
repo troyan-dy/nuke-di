@@ -43,8 +43,10 @@ async def test_connect_timeout() -> None:
     dep = Dependencies(settings=DependenciesSettings(connect_timeout=0.01))
     dep.resolve(SlowClient)
 
-    with pytest.raises(ConnectTimeoutError):
+    with pytest.raises(ConnectTimeoutError) as exc_info:
         await dep.connect()
+
+    assert isinstance(exc_info.value.__cause__, TimeoutError)
 
 
 async def test_connect_error() -> None:

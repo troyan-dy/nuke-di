@@ -10,7 +10,16 @@ from typing import Any
 import pytest
 
 import nuke_di
-from nuke_di import BackgroundTasks, Client, ClientTiming, ConnectError, Dependencies, DependenciesSettings, Run
+from nuke_di import (
+    BackgroundTasks,
+    Client,
+    ClientTiming,
+    ConnectError,
+    ConnectTimeoutError,
+    Dependencies,
+    DependenciesSettings,
+    Run,
+)
 from nuke_di.run import RunSettings, run_entrypoint
 
 
@@ -65,6 +74,20 @@ class FailsToDisconnect(Client):
 class BrokenInit(Client):
     def __init__(self) -> None:
         raise RuntimeError("boom")
+
+
+class Untouched(Client):
+    """
+    A client whose connect() and disconnect() are expected never to run.
+    """
+
+    touched = False
+
+    async def connect(self) -> None:
+        Untouched.touched = True
+
+    async def disconnect(self) -> None:
+        Untouched.touched = True
 
 
 class Sleepy(Client):
@@ -156,6 +179,42 @@ async def test_timeouts_and_disconnect_failure() -> None:
     timings = by_name(dep.timings)
     assert timings["HangsOnDisconnect"].disconnect_outcome == "timed_out"
     assert timings["FailsToDisconnect"].disconnect_outcome == "failed"
+
+
+async def test_zero_timeout_expires_before_the_client_runs(caplog: pytest.LogCaptureFixture) -> None:
+    # As `asyncio.wait_for(..., timeout=0)` did: the client's coroutine is not even started
+    Untouched.touched = False
+    dep = Dependencies(settings=DependenciesSettings(connect_timeout=0))
+    dep.resolve(Untouched)
+    with pytest.raises(ConnectTimeoutError) as exc_info:
+        await dep.connect()
+    assert isinstance(exc_info.value.__cause__, TimeoutError)
+    assert dep.timings[0].connect_outcome == "timed_out"
+    assert "Timeout occurred connecting client Untouched" in caplog.text
+    assert not Untouched.touched
+
+    dep = Dependencies(settings=DependenciesSettings(disconnect_timeout=0))
+    dep.resolve(Untouched)
+    await dep.connect()
+    Untouched.touched = False
+    await dep.disconnect()
+    assert dep.timings[0].disconnect_outcome == "timed_out"
+    assert "Timeout occurred disconnecting client Untouched" in caplog.text
+    assert not Untouched.touched
+
+
+async def test_cancelled_connect_is_recorded() -> None:
+    dep = Dependencies()
+    dep.resolve(Hanging)
+
+    task = asyncio.create_task(dep.connect())
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # Cancelled from outside, well within its timeout: not a timeout
+    assert dep.timings[0].connect_outcome == "cancelled"
 
 
 async def test_cancelled_disconnect_is_recorded() -> None:
@@ -372,6 +431,8 @@ def test_every_log_call_passes_structured_fields() -> None:
         and isinstance(node.func, ast.Attribute)
         and isinstance(node.func.value, ast.Name)
         and node.func.value.id == "logger"
+        # `isEnabledFor` asks the logger, it does not write a record
+        and node.func.attr != "isEnabledFor"
         and not any(keyword.arg == "extra" for keyword in node.keywords)
     ]
 
