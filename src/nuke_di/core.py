@@ -9,7 +9,7 @@ from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass, field
 from functools import partial
 from types import MappingProxyType
-from typing import Any, Literal, NamedTuple, TypeVar, Union, cast, get_args, get_origin, get_type_hints
+from typing import Any, Literal, NamedTuple, TypeVar, Union, cast, get_args, get_origin, get_type_hints, overload
 
 from nuke_di.errors import (
     CircularDependencyError,
@@ -30,6 +30,7 @@ isclient = isa(Client)
 isnotsingleton = isa(NotSingletonClient)
 
 CT = TypeVar("CT", bound=NotSingletonClient)
+R = TypeVar("R")
 
 Limiter = asyncio.Semaphore | contextlib.nullcontext[None]
 
@@ -402,11 +403,12 @@ class Dependencies:
     def _path_suffix(self) -> str:
         return f" (resolving {self._path()})" if self._injecting is not None or self._resolving else ""
 
-    def inject(self, func: Callable) -> Callable:
+    def inject(self, func: Callable[..., R]) -> Callable[..., R]:
         """
         Bind the dependencies from the signature of `func`.
 
-        note: `func` may be a function or a class.
+        note: `func` may be a function or a class. The result keeps the return type of `func`; its remaining
+        arguments are not typed, a type checker cannot subtract the client arguments from a signature.
         """
         if self.connected is True:
             raise ConnectError("already connected")
@@ -414,7 +416,16 @@ class Dependencies:
         signature = self._inspect(func)
         return partial(func, **signature)
 
-    def mock(self, cls: type[CT], new: CT | None = None) -> CT:
+    # Typed like `unittest.mock.create_autospec`: an autospec mock is `Any`, so a test reaches its
+    # `return_value` and `assert_awaited_once_with` under a strict type checker; a Replacement of your own
+    # keeps its type
+    @overload
+    def mock(self, cls: type[CT], new: None = None) -> Any: ...
+
+    @overload
+    def mock(self, cls: type[CT], new: CT) -> CT: ...
+
+    def mock(self, cls: type[CT], new: CT | None = None) -> Any:
         """
         Register a Replacement for `cls`, an autospec mock by default; `flush()` drops it.
         """
@@ -426,7 +437,7 @@ class Dependencies:
         if current is not None:
             if new is not None and new is not current:
                 raise ConnectError(f"{name} already has a replacement")
-            return cast(CT, current)
+            return current
         # Consumers resolved before would keep the real client while the caller holds the Replacement
         if self._is_resolved(cls):
             raise ConnectError(f"{name} is already resolved, call mock() before resolve() or inject()")
@@ -435,12 +446,21 @@ class Dependencies:
             # unittest costs every process a few milliseconds at import, and only tests mock
             from unittest.mock import create_autospec
 
-            new = create_autospec(cls)
-        self._register_replacement(cls, new)
-        return cast(CT, self._replacements[cls])
+            # A Replacement stands in for an instance: calling it is a TypeError, not another mock
+            replacement = create_autospec(cls, instance=True)
+        else:
+            replacement = new
+        self._register_replacement(cls, replacement)
+        return self._replacements[cls]
+
+    @overload
+    def override(self, cls: type[CT], new: None = None) -> contextlib.AbstractContextManager[Any]: ...
+
+    @overload
+    def override(self, cls: type[CT], new: CT) -> contextlib.AbstractContextManager[CT]: ...
 
     @contextlib.contextmanager
-    def override(self, cls: type[CT], new: CT | None = None) -> Iterator[CT]:
+    def override(self, cls: type[CT], new: CT | None = None) -> Iterator[Any]:
         """
         Register a Replacement for `cls` that lasts until the end of the block, `flush()` included.
 

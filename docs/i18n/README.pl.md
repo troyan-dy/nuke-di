@@ -176,7 +176,9 @@ Każde `connect()` jest ograniczone przez `CONNECT_TIMEOUT_SECONDS` (domyślnie 
 ### <a id="dataclass-clients"></a>Klienci jako dataclass
 
 `client_dataclass` zamienia klasę jednocześnie w `Client` i w dataclass, więc jej pola
-stają się wstrzykiwanymi zależnościami:
+stają się wstrzykiwanymi zależnościami. Dziedzicz też po `Client`: dekorator jest typowany jako
+tożsamość, więc to klasa bazowa mówi mypy i pyrightowi, że `Checkout` jest klientem; bez niej klasa
+jest klientem tylko w czasie wykonania:
 
 ```python
 from nuke_di import Client, Dependencies, client_dataclass
@@ -191,7 +193,7 @@ class Payments(Client):
 
 
 @client_dataclass(frozen=True)
-class Checkout:
+class Checkout(Client):
     pg: Postgres
     payments: Payments
 
@@ -624,6 +626,9 @@ gdy potrzebujesz izolacji, np. w testach.
 | `flush()`            | Zapomina wszystkich rozwiązanych klientów.                              |
 | `timings`            | Po jednym `ClientTiming` na klienta ostatniego `connect()`; zob. [Czasy startu](#startup-timings). |
 | `graph()`            | `Graph` rozwiązanych klientów z ich zależnościami i warstwami, wraz z `to_mermaid()`; zob. [Graf](#the-graph). |
+
+Wynik `inject()` zachowuje typ zwracany funkcji, a jej pozostałe argumenty pozostają bez typów:
+sprawdzacz typów nie potrafi odjąć argumentów-klientów od sygnatury.
 
 `resolve`, `inject`, `mock`, `override` i `flush` działają tylko wtedy, gdy kontener jest rozłączony:
 całe drzewo buduje się przed startem.
@@ -2151,7 +2156,7 @@ Cythonie, o około 70 ns, czego żadna aplikacja nie zauważy. Pełna tabela z m
 
 ```bash
 make install   # uv sync --locked
-make check     # ruff, mypy and tests, as in CI
+make check     # ruff, mypy, pyright and tests, as in CI
 make cov       # tests with a coverage report (terminal + htmlcov/)
 make test-all  # tests on Python 3.11-3.14
 ```

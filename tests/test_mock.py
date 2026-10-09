@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
-from unittest.mock import call
+from typing import Any
+from unittest.mock import NonCallableMock, call
 
 import pytest
 
@@ -28,7 +29,7 @@ async def test_cached_client() -> None:
     async with dep:
         await client_1.add(1, 2)
 
-    assert mocked_client.add.await_args_list == [call(1, 2)]  # type: ignore
+    assert mocked_client.add.await_args_list == [call(1, 2)]
 
 
 @pytest.fixture()
@@ -39,7 +40,7 @@ async def app_like_fixture() -> AsyncGenerator[Dependencies, None]:
 
 
 @pytest.fixture
-async def mock_client() -> PublicClient:
+async def mock_client() -> Any:
     """
     Example of a fixture that mocks a dependency.
 
@@ -49,12 +50,35 @@ async def mock_client() -> PublicClient:
     return DI.mock(PublicClient)
 
 
-async def test_with_fixture(mock_client: PublicClient, app_like_fixture: Dependencies) -> None:
-    cli: PublicClient = app_like_fixture.clients[PublicClient]  # type: ignore
+async def test_with_fixture(mock_client: Any, app_like_fixture: Dependencies) -> None:
+    cli = app_like_fixture.clients[PublicClient]
+    assert isinstance(cli, PublicClient)
 
     await cli.add(1, 2)
 
-    assert mock_client.add.await_args_list == [call(1, 2)]  # type: ignore
+    assert mock_client.add.await_args_list == [call(1, 2)]
+
+
+def test_mock_is_an_instance_of_the_class() -> None:
+    dep = Dependencies()
+
+    mocked = dep.mock(PublicClient)
+
+    # A Replacement stands in for an instance, so a call is a mistake rather than another mock
+    with pytest.raises(TypeError, match="'NonCallableMagicMock' object is not callable"):
+        mocked()
+    assert isinstance(mocked, NonCallableMock)
+    assert isinstance(mocked, PublicClient)
+
+
+async def test_mock_keeps_async_methods_awaitable() -> None:
+    dep = Dependencies()
+
+    mocked = dep.mock(PublicClient)
+    mocked.add.return_value = 3
+
+    assert await mocked.add(1, 2) == 3
+    mocked.add.assert_awaited_once_with(1, 2)
 
 
 class Session(NotSingletonClient):

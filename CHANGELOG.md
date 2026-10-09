@@ -6,6 +6,34 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-10-09
+
+### Changed
+
+- The autospec Replacement of `mock(cls)` and `override(cls)` is created with `instance=True`: it stands in
+  for an instance, so calling it raises `TypeError` instead of returning another mock, and the graph labels
+  it `NonCallableMagicMock`. It is still an instance of `cls`, and its async methods are still `AsyncMock`s
+  ([#53](https://github.com/troyan-dy/nuke-di/issues/53)).
+- pyright runs in `make lint` and in CI next to mypy, from `uvx` with a pinned version, over `src/` and
+  `tests/`; `[tool.pyright]` in pyproject.toml holds its settings
+  ([#60](https://github.com/troyan-dy/nuke-di/issues/60)).
+
+### Fixed
+
+- `Dependencies.mock(cls)` and `override(cls)` without a Replacement of your own are typed `Any`, as
+  `unittest.mock.create_autospec` is, so `db.fetch_user.return_value = ...` and
+  `db.fetch_user.assert_awaited_once_with(...)` from the README "Testing" examples pass `mypy --strict` and
+  pyright; `mock(cls, new)` and `override(cls, new)` keep the type of the class. `tests/test_typing.py` runs
+  `mypy --strict` over the Python blocks of the README "Testing" section, laid out as the files they name, so
+  a README edit that breaks them fails CI ([#53](https://github.com/troyan-dy/nuke-di/issues/53)).
+- `Dependencies.inject(func)` keeps the return type of `func`: `await injected(42)` is a `str` for a handler
+  that returns one, not `Any`. The arguments of the result stay untyped, a type checker cannot subtract the
+  client arguments from a signature ([#62](https://github.com/troyan-dy/nuke-di/issues/62)).
+- `client_dataclass` is typed as an identity decorator, so `resolve(Checkout)` type-checks for a decorated
+  class that subclasses `Client`; a class without the base is a client at runtime only, and the README
+  recommends `@client_dataclass(frozen=True) class Checkout(Client):`
+  ([#60](https://github.com/troyan-dy/nuke-di/issues/60)).
+
 ## [1.9.2] - 2026-10-09
 
 ### Changed
@@ -291,7 +319,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.9.2...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/troyan-dy/nuke-di/compare/v1.9.2...v1.10.0
 [1.9.2]: https://github.com/troyan-dy/nuke-di/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/troyan-dy/nuke-di/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/troyan-dy/nuke-di/compare/v1.8.0...v1.9.0

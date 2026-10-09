@@ -166,7 +166,7 @@ def test_mermaid_names_the_mock_class_of_an_autospec_replacement() -> None:
     deps.mock(Postgres)
     deps.resolve(Payments)
 
-    assert '  Postgres["Postgres: MagicMock"]\n' in deps.graph().to_mermaid()
+    assert '  Postgres["Postgres: NonCallableMagicMock"]\n' in deps.graph().to_mermaid()
 
 
 def test_mermaid_numbers_the_instances_of_a_not_singleton_client() -> None:

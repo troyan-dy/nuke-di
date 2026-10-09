@@ -69,15 +69,17 @@ def execute(func: Callable[..., Coroutine[Any, Any, Any]], *, kind: Kind, hooks:
 
     try:
         parser = build_parser(func, prog=entrypoint_prog())
-        params = parse_parameters(parser, sys.argv[1:])
+        try:
+            params = parse_parameters(parser, sys.argv[1:])
+        except UsageError as exc:
+            # Only parsing raises it, so the parser exists here; the Run still fails below
+            sys.stderr.write(f"{exc.usage}{parser.prog}: error: {exc}\n")
+            raise
     except HelpRequested:
         # Printing the help is not a Run: no hook sees it
         return 0
-    except UsageError as exc:
-        sys.stderr.write(f"{exc.usage}{parser.prog}: error: {exc}\n")
-        error = exc
     except Exception as exc:
-        # A broken signature fails the Run, so that hooks see it
+        # A broken signature or command line fails the Run, so that hooks see it
         error = exc
 
     run = asyncio.run(
