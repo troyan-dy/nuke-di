@@ -1,6 +1,8 @@
 .DEFAULT_GOAL := help
 
 PY_VERSIONS := 3.11 3.12 3.13 3.14
+# Not a dev dependency: uvx keeps it out of uv.lock; the same pin is in .github/workflows/ci.yml
+PYRIGHT := pyright@1.1.414
 
 .PHONY: help
 help: ## Show available targets
@@ -11,10 +13,11 @@ install: ## Install the package and dev dependencies
 	uv sync --locked
 
 .PHONY: lint
-lint: ## Run ruff (lint + format check) and mypy
+lint: ## Run ruff (lint + format check), mypy and pyright
 	uv run ruff check .
 	uv run ruff format --check .
 	uv run mypy
+	uvx $(PYRIGHT)
 
 .PHONY: format
 format: ## Autofix lint issues and format the code
@@ -22,8 +25,9 @@ format: ## Autofix lint issues and format the code
 	uv run ruff format .
 
 .PHONY: typecheck
-typecheck: ## Run mypy only
+typecheck: ## Run mypy and pyright only
 	uv run mypy
+	uvx $(PYRIGHT)
 
 .PHONY: test
 test: ## Run tests

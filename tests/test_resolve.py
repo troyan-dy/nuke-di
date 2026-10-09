@@ -1,24 +1,25 @@
+from typing import Any
 from unittest.mock import AsyncMock, call
 
 from nuke_di import Client, Dependencies, NotSingletonClient
 
 
 class InnerDeps(NotSingletonClient):
-    connect = AsyncMock()
-    disconnect = AsyncMock()
+    connect: Any = AsyncMock()
+    disconnect: Any = AsyncMock()
 
 
 class PublicClient(Client):
-    connect = AsyncMock()
-    disconnect = AsyncMock()
+    connect: Any = AsyncMock()
+    disconnect: Any = AsyncMock()
 
     def __init__(self, inner: InnerDeps):
         self.inner = inner
 
 
 class NewPublicClient(PublicClient):
-    connect = AsyncMock()
-    disconnect = AsyncMock()
+    connect: Any = AsyncMock()
+    disconnect: Any = AsyncMock()
 
 
 async def test_connecting() -> None:
@@ -63,8 +64,8 @@ async def test_connecting() -> None:
 
 
 class TypedSelfClient(Client):
-    connect = AsyncMock()
-    disconnect = AsyncMock()
+    connect: Any = AsyncMock()
+    disconnect: Any = AsyncMock()
 
     def __init__(self: "TypedSelfClient") -> None:
         pass

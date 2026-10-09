@@ -176,7 +176,9 @@ Each `connect()` is bounded by `CONNECT_TIMEOUT_SECONDS` (default `30`) and each
 ### Dataclass clients
 
 `client_dataclass` turns a class into a `Client` and a dataclass at once, so the fields
-become the injected dependencies:
+become the injected dependencies. Subclass `Client` as well: the decorator is typed as an
+identity, so the base class is what tells mypy and pyright that `Checkout` is a client; without
+it the class is a client at runtime only:
 
 ```python
 from nuke_di import Client, Dependencies, client_dataclass
@@ -191,7 +193,7 @@ class Payments(Client):
 
 
 @client_dataclass(frozen=True)
-class Checkout:
+class Checkout(Client):
     pg: Postgres
     payments: Payments
 
@@ -624,6 +626,9 @@ when you need isolation, e.g. in tests.
 | `flush()`            | Forget every resolved client.                                           |
 | `timings`            | One `ClientTiming` per client of the last `connect()`; see [Startup timings](#startup-timings). |
 | `graph()`            | A `Graph` of the resolved clients with their dependencies and layers, `to_mermaid()` included; see [The graph](#the-graph). |
+
+The result of `inject()` keeps the return type of the function, while its remaining arguments are
+untyped: a type checker cannot subtract the client arguments from a signature.
 
 `resolve`, `inject`, `mock`, `override` and `flush` only work while the container is disconnected:
 the whole tree is built before startup.
@@ -2148,7 +2153,7 @@ method, is in [docs/benchmarks.md](docs/benchmarks.md#comparison-with-other-libr
 
 ```bash
 make install   # uv sync --locked
-make check     # ruff, mypy and tests, as in CI
+make check     # ruff, mypy, pyright and tests, as in CI
 make cov       # tests with a coverage report (terminal + htmlcov/)
 make test-all  # tests on Python 3.11-3.14
 ```

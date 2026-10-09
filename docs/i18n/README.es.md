@@ -176,7 +176,9 @@ o se cuelga queda registrado en el log, y el resto de los clientes se apaga igua
 ### <a id="dataclass-clients"></a>Clientes como dataclass
 
 `client_dataclass` convierte una clase en `Client` y en dataclass a la vez, de modo que sus campos
-pasan a ser las dependencias inyectadas:
+pasan a ser las dependencias inyectadas. Hereda también de `Client`: el decorador está tipado como
+identidad, así que es la clase base la que le dice a mypy y a pyright que `Checkout` es un cliente;
+sin ella, la clase es un cliente solo en tiempo de ejecución:
 
 ```python
 from nuke_di import Client, Dependencies, client_dataclass
@@ -191,7 +193,7 @@ class Payments(Client):
 
 
 @client_dataclass(frozen=True)
-class Checkout:
+class Checkout(Client):
     pg: Postgres
     payments: Payments
 
@@ -625,6 +627,9 @@ cuando necesites aislamiento, por ejemplo en las pruebas.
 | `flush()`            | Olvida todos los clientes resueltos.                                    |
 | `timings`            | Un `ClientTiming` por cliente del último `connect()`; ver [Tiempos de arranque](#startup-timings). |
 | `graph()`            | Un `Graph` de los clientes resueltos con sus dependencias y capas, `to_mermaid()` incluido; ver [El grafo](#the-graph). |
+
+El resultado de `inject()` conserva el tipo de retorno de la función, mientras que sus argumentos
+restantes quedan sin tipar: un verificador de tipos no puede restar los argumentos cliente de una firma.
 
 `resolve`, `inject`, `mock`, `override` y `flush` solo funcionan mientras el contenedor está
 desconectado: todo el árbol se construye antes del arranque.
@@ -2154,7 +2159,7 @@ el doble por petición. En una raíz en caché gana el `get()` en Cython de depe
 
 ```bash
 make install   # uv sync --locked
-make check     # ruff, mypy and tests, as in CI
+make check     # ruff, mypy, pyright and tests, as in CI
 make cov       # tests with a coverage report (terminal + htmlcov/)
 make test-all  # tests on Python 3.11-3.14
 ```

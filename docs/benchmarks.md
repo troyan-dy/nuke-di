@@ -126,9 +126,11 @@ of 1.9.1 ([#29](https://github.com/troyan-dy/nuke-di/issues/29),
   likely for the first attribute lookups on fresh classes, which fill the type caches of the interpreter.
 - **`connect()` and `disconnect()` cost 12–23 µs per client in a layer and 0.1–0.24 ms per layer**,
   all of it scheduling: the clients' own coroutines take 0.2 µs each. A layer is cheapest on 3.14 and
-  most expensive on 3.11, where `asyncio.wait_for()` still creates a task per call, which doubles the
-  cost of a chain. Not a hot spot: a real `connect()` takes milliseconds, a hundred to a thousand times
-  more than its scheduling.
+  most expensive on 3.11, where `asyncio.wait_for()` created a task per call, which doubled the cost of
+  a chain; [#30](https://github.com/troyan-dy/nuke-di/issues/30) replaced it with `asyncio.timeout()`
+  after these figures were taken, which brought the chain of 1000 clients on 3.11 from 184 ms to 104 ms.
+  Not a hot spot: a real `connect()` takes milliseconds, a hundred to a thousand times more than its
+  scheduling.
 - **The application connects and disconnects in 114–116 ms of wall time against a critical path of
   89–90 ms**: 25–26 ms, 22%, is lost at the layer barriers, where `Repository` and `Users` wait for
   `Kafka` although `Postgres` connected 30 ms earlier. The figure is the same on every version, because

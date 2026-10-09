@@ -176,7 +176,9 @@ class Redis(Client):
 ### <a id="dataclass-clients"></a>Клиенты-датаклассы
 
 `client_dataclass` делает класс одновременно `Client` и датаклассом, так что его поля
-становятся внедряемыми зависимостями:
+становятся внедряемыми зависимостями. Наследуйте и от `Client`: декоратор типизирован как
+тождественный, и именно базовый класс сообщает mypy и pyright, что `Checkout` — клиент; без него
+класс является клиентом только во время выполнения:
 
 ```python
 from nuke_di import Client, Dependencies, client_dataclass
@@ -191,7 +193,7 @@ class Payments(Client):
 
 
 @client_dataclass(frozen=True)
-class Checkout:
+class Checkout(Client):
     pg: Postgres
     payments: Payments
 
@@ -624,6 +626,9 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 | `flush()`            | Забыть все разрешённые клиенты.                                         |
 | `timings`            | По одному `ClientTiming` на клиент последнего `connect()`; см. [Время старта](#startup-timings). |
 | `graph()`            | `Graph` разрешённых клиентов с их зависимостями и слоями, включая `to_mermaid()`; см. [Граф](#the-graph). |
+
+Результат `inject()` сохраняет тип возвращаемого значения функции, а его оставшиеся аргументы
+не типизированы: тайпчекер не умеет вычитать аргументы-клиенты из сигнатуры.
 
 `resolve`, `inject`, `mock`, `override` и `flush` работают, только пока контейнер отключён:
 всё дерево строится до старта.
@@ -2154,7 +2159,7 @@ dependency-injector на Cython, примерно на 70 ns: разницу, к
 
 ```bash
 make install   # uv sync --locked
-make check     # ruff, mypy and tests, as in CI
+make check     # ruff, mypy, pyright and tests, as in CI
 make cov       # tests with a coverage report (terminal + htmlcov/)
 make test-all  # tests on Python 3.11-3.14
 ```

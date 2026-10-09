@@ -19,7 +19,7 @@ class C(NotSingletonClient):
 
 
 @client_dataclass(frozen=True)
-class MyClient:
+class MyClient(Client):
     b: B
     c: C
     a: A
@@ -37,7 +37,7 @@ class MyClient:
 @pytest.fixture
 def my_client() -> MyClient:
     di = Dependencies()
-    return di.resolve(MyClient)  # type: ignore[type-var]
+    return di.resolve(MyClient)
 
 
 def test_methods(my_client: MyClient) -> None:
@@ -72,6 +72,6 @@ class AlreadyClient(Client):
 
 def test_already_client_keeps_class() -> None:
     assert AlreadyClient.__bases__ == (Client,)
-    assert is_dataclass(AlreadyClient)
-    client: AlreadyClient = Dependencies().resolve(AlreadyClient)  # type: ignore[type-var,assignment]
+    client: AlreadyClient = Dependencies().resolve(AlreadyClient)
     assert type(client.b) is B
+    assert is_dataclass(client)

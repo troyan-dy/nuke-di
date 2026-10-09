@@ -5,11 +5,11 @@ import logging
 import time
 import types
 from collections import OrderedDict, defaultdict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass, field
 from functools import partial
 from types import MappingProxyType
-from typing import Any, Literal, NamedTuple, TypeVar, Union, cast, get_args, get_origin, get_type_hints
+from typing import Any, Literal, NamedTuple, TypeVar, Union, cast, get_args, get_origin, get_type_hints, overload
 
 from nuke_di.errors import (
     CircularDependencyError,
@@ -30,6 +30,7 @@ isclient = isa(Client)
 isnotsingleton = isa(NotSingletonClient)
 
 CT = TypeVar("CT", bound=NotSingletonClient)
+R = TypeVar("R")
 
 Limiter = asyncio.Semaphore | contextlib.nullcontext[None]
 
@@ -177,7 +178,7 @@ class Dependencies:
                 if debug:
                     logger.debug("Connecting client %s", name, extra=_fields(timing))
                 with _measure(timing, "connect"):
-                    await asyncio.wait_for(client.connect(), timeout=self.settings.connect_timeout)
+                    await _within(self.settings.connect_timeout, client.connect())
             connected.append(client)
             if debug:
                 logger.debug(
@@ -210,10 +211,17 @@ class Dependencies:
         self.connected = False
         limiter = self._limiter()
 
-        for layer in reversed(self._group_by_layer(clients)):
-            await asyncio.gather(*(self._disconnect_client(client, limiter) for client in layer))
-
-        self.flush()
+        try:
+            for layer in reversed(self._group_by_layer(clients)):
+                # A client whose disconnect() ends in a CancelledError of its own made gather() raise it out of here,
+                # skipping the rest; a TaskGroup ignores a cancelled child and finishes the layer. A client that fails
+                # with an Exception is logged by _disconnect_client, so only a cancellation ends the group early
+                async with asyncio.TaskGroup() as group:
+                    for client in layer:
+                        group.create_task(self._disconnect_client(client, limiter))
+        finally:
+            # Cancelled or not, the container keeps no half-disconnected client for the next connect() to reuse
+            self.flush()
 
     async def _disconnect_client(self, client: NotSingletonClient, limiter: Limiter) -> None:
         timing = self._timings[id(client)]
@@ -224,7 +232,7 @@ class Dependencies:
                 if debug:
                     logger.debug("Disconnecting client %s", name, extra=_fields(timing))
                 with _measure(timing, "disconnect"):
-                    await asyncio.wait_for(client.disconnect(), timeout=self.settings.disconnect_timeout)
+                    await _within(self.settings.disconnect_timeout, client.disconnect())
             if debug:
                 logger.debug(
                     "Disconnected client %s in %.3fs",
@@ -395,11 +403,12 @@ class Dependencies:
     def _path_suffix(self) -> str:
         return f" (resolving {self._path()})" if self._injecting is not None or self._resolving else ""
 
-    def inject(self, func: Callable) -> Callable:
+    def inject(self, func: Callable[..., R]) -> Callable[..., R]:
         """
         Bind the dependencies from the signature of `func`.
 
-        note: `func` may be a function or a class.
+        note: `func` may be a function or a class. The result keeps the return type of `func`; its remaining
+        arguments are not typed, a type checker cannot subtract the client arguments from a signature.
         """
         if self.connected is True:
             raise ConnectError("already connected")
@@ -407,7 +416,16 @@ class Dependencies:
         signature = self._inspect(func)
         return partial(func, **signature)
 
-    def mock(self, cls: type[CT], new: CT | None = None) -> CT:
+    # Typed like `unittest.mock.create_autospec`: an autospec mock is `Any`, so a test reaches its
+    # `return_value` and `assert_awaited_once_with` under a strict type checker; a Replacement of your own
+    # keeps its type
+    @overload
+    def mock(self, cls: type[CT], new: None = None) -> Any: ...
+
+    @overload
+    def mock(self, cls: type[CT], new: CT) -> CT: ...
+
+    def mock(self, cls: type[CT], new: CT | None = None) -> Any:
         """
         Register a Replacement for `cls`, an autospec mock by default; `flush()` drops it.
         """
@@ -419,7 +437,7 @@ class Dependencies:
         if current is not None:
             if new is not None and new is not current:
                 raise ConnectError(f"{name} already has a replacement")
-            return cast(CT, current)
+            return current
         # Consumers resolved before would keep the real client while the caller holds the Replacement
         if self._is_resolved(cls):
             raise ConnectError(f"{name} is already resolved, call mock() before resolve() or inject()")
@@ -428,12 +446,21 @@ class Dependencies:
             # unittest costs every process a few milliseconds at import, and only tests mock
             from unittest.mock import create_autospec
 
-            new = create_autospec(cls)
-        self._register_replacement(cls, new)
-        return cast(CT, self._replacements[cls])
+            # A Replacement stands in for an instance: calling it is a TypeError, not another mock
+            replacement = create_autospec(cls, instance=True)
+        else:
+            replacement = new
+        self._register_replacement(cls, replacement)
+        return self._replacements[cls]
+
+    @overload
+    def override(self, cls: type[CT], new: None = None) -> contextlib.AbstractContextManager[Any]: ...
+
+    @overload
+    def override(self, cls: type[CT], new: CT) -> contextlib.AbstractContextManager[CT]: ...
 
     @contextlib.contextmanager
-    def override(self, cls: type[CT], new: CT | None = None) -> Iterator[CT]:
+    def override(self, cls: type[CT], new: CT | None = None) -> Iterator[Any]:
         """
         Register a Replacement for `cls` that lasts until the end of the block, `flush()` included.
 
@@ -572,6 +599,21 @@ def _measure(timing: ClientTiming, phase: Literal["connect", "disconnect"]) -> I
     finally:
         setattr(timing, phase, time.perf_counter() - started)
         setattr(timing, f"{phase}_outcome", outcome)
+
+
+async def _within(seconds: float, coro: Coroutine[Any, Any, None]) -> None:
+    """
+    Await a client's coroutine with a timeout, in the task of the caller.
+
+    `asyncio.wait_for()` runs the coroutine in a task of its own on 3.11, about 40 µs per call, and in the caller's
+    task only from 3.12. A timeout of zero or less expires before the coroutine starts, as `wait_for()` does;
+    `asyncio.timeout(0)` alone would let it run up to its first suspension.
+    """
+    if seconds <= 0:
+        coro.close()
+        raise TimeoutError
+    async with asyncio.timeout(seconds):
+        await coro
 
 
 def _count(number: int, noun: str) -> str:

@@ -10,7 +10,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 - The benchmark suite measures what real code pays: `resolve(), cold` of the wide, deep and mixed trees with
   string annotations (`wide, strings` and so on), the classes `from __future__ import annotations` produces,
-  which cost about twice the real-type figure; `resolve(), second container, classes seen before`, a fresh
+  which cost about twice the real-type figure (`resolve(), cold` now builds its classes afresh for every
+  sample, so a per-class cache cannot serve it); `resolve(), second container, classes seen before`, a fresh
   `Dependencies()` for classes resolved earlier in the process, what every test of a session pays and the
   row a per-class cache would change; and an `application` connect shape of 8 clients whose `connect()` and
   `disconnect()` sleep for 1–60 ms, with the wall time of the container against the critical path of the
@@ -18,6 +19,56 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   string-annotation trees through every library as an extra row of the cold-start summary; the baseline
   and the comparison in `docs/benchmarks.md` are retaken
   ([#38](https://github.com/troyan-dy/nuke-di/issues/38)).
+
+## [1.10.0] - 2026-10-09
+
+### Changed
+
+- The autospec Replacement of `mock(cls)` and `override(cls)` is created with `instance=True`: it stands in
+  for an instance, so calling it raises `TypeError` instead of returning another mock, and the graph labels
+  it `NonCallableMagicMock`. It is still an instance of `cls`, and its async methods are still `AsyncMock`s
+  ([#53](https://github.com/troyan-dy/nuke-di/issues/53)).
+- pyright runs in `make lint` and in CI next to mypy, from `uvx` with a pinned version, over `src/` and
+  `tests/`; `[tool.pyright]` in pyproject.toml holds its settings
+  ([#60](https://github.com/troyan-dy/nuke-di/issues/60)).
+
+### Fixed
+
+- `Dependencies.mock(cls)` and `override(cls)` without a Replacement of your own are typed `Any`, as
+  `unittest.mock.create_autospec` is, so `db.fetch_user.return_value = ...` and
+  `db.fetch_user.assert_awaited_once_with(...)` from the README "Testing" examples pass `mypy --strict` and
+  pyright; `mock(cls, new)` and `override(cls, new)` keep the type of the class. `tests/test_typing.py` runs
+  `mypy --strict` over the Python blocks of the README "Testing" section, laid out as the files they name, so
+  a README edit that breaks them fails CI ([#53](https://github.com/troyan-dy/nuke-di/issues/53)).
+- `Dependencies.inject(func)` keeps the return type of `func`: `await injected(42)` is a `str` for a handler
+  that returns one, not `Any`. The arguments of the result stay untyped, a type checker cannot subtract the
+  client arguments from a signature ([#62](https://github.com/troyan-dy/nuke-di/issues/62)).
+- `client_dataclass` is typed as an identity decorator, so `resolve(Checkout)` type-checks for a decorated
+  class that subclasses `Client`; a class without the base is a client at runtime only, and the README
+  recommends `@client_dataclass(frozen=True) class Checkout(Client):`
+  ([#60](https://github.com/troyan-dy/nuke-di/issues/60)).
+
+## [1.9.2] - 2026-10-09
+
+### Changed
+
+- `connect()` and `disconnect()` await each client's coroutine under `asyncio.timeout()` instead of
+  `asyncio.wait_for()`, in the connecting task itself. On Python 3.11 `wait_for()` ran every call in a task
+  of its own, about 40 µs per client per phase: a chain of 1000 clients takes 104 ms instead of 184 ms, a
+  layer of 1000 clients 14.2 ms instead of 17.7 ms; 3.12 and later already ran the coroutine in the caller's
+  task and are unchanged. Outcomes, errors and logs are the same, and a timeout of `0` still expires before
+  the client's coroutine starts ([#30](https://github.com/troyan-dy/nuke-di/issues/30)).
+
+### Fixed
+
+- A `disconnect()` cancelled from outside (an ASGI server tearing down the lifespan, a second signal) left
+  the container with `connected=False` but its clients, layers and timings still registered, so the next
+  `connect()` would have reconnected the half-disconnected instances and `resolve()` would have handed them
+  out. The container is now flushed whichever way `disconnect()` ends. A client whose `disconnect()` raises
+  `CancelledError` of its own, re-raising the cancellation of a task it awaited for instance, no longer stops
+  `disconnect()` there: the rest of its layer and the layers below are still disconnected, and the client is
+  recorded as `cancelled`. The rollback of a failed `connect()` behaves the same
+  ([#37](https://github.com/troyan-dy/nuke-di/issues/37)).
 
 ## [1.9.1] - 2026-10-09
 
@@ -282,7 +333,9 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.9.1...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/troyan-dy/nuke-di/compare/v1.9.2...v1.10.0
+[1.9.2]: https://github.com/troyan-dy/nuke-di/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/troyan-dy/nuke-di/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/troyan-dy/nuke-di/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/troyan-dy/nuke-di/compare/v1.7.1...v1.8.0
