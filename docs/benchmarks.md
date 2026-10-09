@@ -19,6 +19,31 @@ $ uv run python benchmarks/run.py [--size N]... [--repeat K] [--only SCENARIO]..
 | `--only SCENARIO` | all                | `resolve`, `connect`, `inject`, `not_singleton`, `overrides`, `fastapi`, `import`, `memory`; repeatable |
 | `--json PATH`     |                    | Also write the figures, with every sample, the Python version, platform and commit, as JSON |
 
+It prints a Markdown table with the median and the p95 of the repeats and a figure per client:
+
+```console
+$ uv run python benchmarks/run.py --only resolve --size 100
+nuke-di 1.11.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 6c2ae10 · N = 100 · 20 repeats
+
+| Scenario                                         | Shape          |   N |  Median |     p95 | Per client |
+|--------------------------------------------------|----------------|----:|--------:|--------:|-----------:|
+| resolve(), cold                                  | wide           | 100 |  416 µs |  496 µs |    4.16 µs |
+| resolve(), second container, classes seen before | wide           | 100 |  142 µs |  183 µs |    1.42 µs |
+| resolve(), warm                                  | wide           | 100 | 84.8 ns | 97.0 ns |            |
+| resolve(), cold                                  | deep           | 100 |  397 µs |  547 µs |    3.97 µs |
+| resolve(), second container, classes seen before | deep           | 100 |  129 µs |  150 µs |    1.29 µs |
+| resolve(), warm                                  | deep           | 100 | 87.5 ns | 90.3 ns |            |
+| resolve(), cold                                  | mixed          | 100 |  535 µs |  690 µs |    5.35 µs |
+| resolve(), second container, classes seen before | mixed          | 100 |  147 µs |  184 µs |    1.47 µs |
+| resolve(), warm                                  | mixed          | 100 | 92.0 ns | 93.9 ns |            |
+| resolve(), cold                                  | wide, strings  | 100 |  709 µs |  802 µs |    7.09 µs |
+| resolve(), second container, classes seen before | wide, strings  | 100 |  141 µs |  296 µs |    1.41 µs |
+| resolve(), cold                                  | deep, strings  | 100 |  737 µs | 1.18 ms |    7.37 µs |
+| resolve(), second container, classes seen before | deep, strings  | 100 |  134 µs |  152 µs |    1.34 µs |
+| resolve(), cold                                  | mixed, strings | 100 | 1.16 ms | 1.47 ms |    11.6 µs |
+| resolve(), second container, classes seen before | mixed, strings | 100 |  159 µs |  178 µs |    1.59 µs |
+```
+
 The suite needs only the standard library and `nuke-di`; the `fastapi` scenario needs `fastapi` and
 `httpx` (in the dev dependencies) and is skipped without them. `make bench` runs the suite on the
 project's Python, `make bench-all` on every supported version into `docs/benchmarks/py<version>.json`,
