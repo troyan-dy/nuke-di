@@ -23,7 +23,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - `benchmarks/compare.py` makes the classes of the cold start for every sample, as the cold row of
   `benchmarks/run.py` does: with the same classes every sample, the per-class cache of 1.9.1 served `nuke-di`
   after the first one, so the row measured its second container, 158 µs for 100 clients instead of a cold
-  494–532 µs.
+  about 0.5 ms (532 µs in the baseline).
 
 ### Fixed
 

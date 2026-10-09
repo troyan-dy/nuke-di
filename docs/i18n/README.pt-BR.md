@@ -2147,19 +2147,25 @@ número por cliente:
 
 ```console
 $ uv run python benchmarks/run.py --only resolve --size 100
-nuke-di 1.11.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit bd9241f · N = 100 · 20 repeats
+nuke-di 1.11.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 6c2ae10 · N = 100 · 20 repeats
 
 | Scenario                                         | Shape          |   N |  Median |     p95 | Per client |
 |--------------------------------------------------|----------------|----:|--------:|--------:|-----------:|
-| resolve(), cold                                  | wide           | 100 |  403 µs |  505 µs |    4.03 µs |
-| resolve(), second container, classes seen before | wide           | 100 |  133 µs |  145 µs |    1.33 µs |
-| resolve(), warm                                  | wide           | 100 | 84.8 ns | 87.1 ns |            |
-| resolve(), cold                                  | deep           | 100 |  379 µs |  455 µs |    3.79 µs |
-| resolve(), second container, classes seen before | deep           | 100 |  130 µs |  182 µs |    1.30 µs |
-| resolve(), warm                                  | deep           | 100 | 88.4 ns | 96.9 ns |            |
-| resolve(), cold                                  | mixed          | 100 |  471 µs |  529 µs |    4.71 µs |
-| resolve(), second container, classes seen before | mixed          | 100 |  147 µs |  157 µs |    1.47 µs |
-| resolve(), warm                                  | mixed          | 100 | 89.6 ns | 90.7 ns |            |
+| resolve(), cold                                  | wide           | 100 |  416 µs |  496 µs |    4.16 µs |
+| resolve(), second container, classes seen before | wide           | 100 |  142 µs |  183 µs |    1.42 µs |
+| resolve(), warm                                  | wide           | 100 | 84.8 ns | 97.0 ns |            |
+| resolve(), cold                                  | deep           | 100 |  397 µs |  547 µs |    3.97 µs |
+| resolve(), second container, classes seen before | deep           | 100 |  129 µs |  150 µs |    1.29 µs |
+| resolve(), warm                                  | deep           | 100 | 87.5 ns | 90.3 ns |            |
+| resolve(), cold                                  | mixed          | 100 |  535 µs |  690 µs |    5.35 µs |
+| resolve(), second container, classes seen before | mixed          | 100 |  147 µs |  184 µs |    1.47 µs |
+| resolve(), warm                                  | mixed          | 100 | 92.0 ns | 93.9 ns |            |
+| resolve(), cold                                  | wide, strings  | 100 |  709 µs |  802 µs |    7.09 µs |
+| resolve(), second container, classes seen before | wide, strings  | 100 |  141 µs |  296 µs |    1.41 µs |
+| resolve(), cold                                  | deep, strings  | 100 |  737 µs | 1.18 ms |    7.37 µs |
+| resolve(), second container, classes seen before | deep, strings  | 100 |  134 µs |  152 µs |    1.34 µs |
+| resolve(), cold                                  | mixed, strings | 100 | 1.16 ms | 1.47 ms |    11.6 µs |
+| resolve(), second container, classes seen before | mixed, strings | 100 |  159 µs |  178 µs |    1.59 µs |
 ```
 
 `--size N` e `--repeat K` definem o tamanho da árvore e o número de repetições, `--only` escolhe um
@@ -2181,24 +2187,24 @@ dependências `compare`:
 
 ```console
 $ uv run python benchmarks/compare.py --size 100 --summary
-nuke-di 1.11.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit bd9241f · N = 100 · 20 repeats
+nuke-di 1.11.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 6c2ae10 · N = 100 · 20 repeats
 nuke-di 1.11.1 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 
 | Lower is better                                          | nuke-di        | dishka          | wireup          | dependency-injector | injector        |
 |----------------------------------------------------------|---------------:|----------------:|----------------:|--------------------:|----------------:|
-| Cold start: a container and a tree of 100 clients        | **494 µs**     | 12.2 ms (24.6×) | 20.2 ms (40.9×) | 1.02 ms (2.1×)      | 1.34 ms (2.7×)  |
-| Cold start: the same 100 clients with string annotations | 1.06 ms (1.0×) | 12.9 ms (12.7×) | 22.2 ms (21.9×) | **1.02 ms**         | 1.38 ms (1.4×)  |
-| A cached root                                            | 88.4 ns (2.4×) | 257 ns (6.9×)   | 91.4 ns (2.5×)  | **37.0 ns**         | 1.23 µs (33.2×) |
-| A FastAPI request with a client                          | **103 µs**     | 105 µs (1.0×)   | 212 µs (2.1×)   | 209 µs (2.0×)       | —               |
+| Cold start: a container and a tree of 100 clients        | **541 µs**     | 12.9 ms (23.8×) | 20.0 ms (37.0×) | 1.05 ms (1.9×)      | 1.34 ms (2.5×)  |
+| Cold start: the same 100 clients with string annotations | 1.27 ms (1.2×) | 13.7 ms (12.6×) | 21.4 ms (19.6×) | **1.09 ms**         | 1.47 ms (1.3×)  |
+| A cached root                                            | 94.1 ns (2.5×) | 261 ns (7.1×)   | 92.6 ns (2.5×)  | **37.0 ns**         | 1.18 µs (31.9×) |
+| A FastAPI request with a client                          | **103 µs**     | 107 µs (1.0×)   | 206 µs (2.0×)   | 221 µs (2.2×)       | —               |
 ```
 
 ![nuke-di against other DI libraries: lower is better](../benchmarks/compare.png)
 
 Então o `nuke-di` é o mais rápido? Ao construir uma árvore com anotações de tipo reais e em uma
-requisição FastAPI, sim: dependency-injector e injector levam 2–2,7 vezes mais tempo na árvore, dishka e
-wireup 25–41 vezes mais para validar o grafo ao criar o container, e wireup e dependency-injector o dobro
+requisição FastAPI, sim: dependency-injector e injector levam 2–2,5 vezes mais tempo na árvore, dishka e
+wireup 24–37 vezes mais para validar o grafo ao criar o container, e wireup e dependency-injector o dobro
 por requisição. Com anotações em string, o dependency-injector, que não lê nenhuma anotação, fica
-empatado. Em uma raiz em cache o `nuke-di` empata com o wireup, e o `get()` em Cython do
+um quinto à frente. Em uma raiz em cache o `nuke-di` empata com o wireup, e o `get()` em Cython do
 dependency-injector vence por cerca de 50 ns, uma diferença que nenhuma aplicação percebe. A tabela completa,
 com o método, está em [docs/benchmarks.md](../benchmarks.md#comparison-with-other-libraries).
 
