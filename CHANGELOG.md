@@ -6,6 +6,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-10-09
+
 ### Changed
 
 - The arguments of a client's `__init__` are read once per class in the process instead of on every resolve of
@@ -267,7 +269,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.9.1...HEAD
+[1.9.1]: https://github.com/troyan-dy/nuke-di/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/troyan-dy/nuke-di/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/troyan-dy/nuke-di/compare/v1.7.1...v1.8.0
 [1.7.1]: https://github.com/troyan-dy/nuke-di/compare/v1.7.0...v1.7.1
