@@ -54,3 +54,6 @@ def test_exits_on_sigterm() -> None:
         raise AssertionError("still running 8 s after SIGTERM") from None
 
     assert "Traceback" not in output, output
+    assert "processed " in output, output
+    # 143 is 128 + SIGTERM, what @worker exits with; 0 for a process that handles the signal itself
+    assert process.returncode in {0, 143}, (process.returncode, output)

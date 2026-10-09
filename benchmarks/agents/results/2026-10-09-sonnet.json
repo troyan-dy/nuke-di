@@ -1,0 +1,987 @@
+[
+  {
+    "task": "fresh_fastapi",
+    "condition": "baseline",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 160.7,
+    "cost_usd": 0.5551,
+    "turns": 21,
+    "notes": ""
+  },
+  {
+    "task": "fresh_fastapi",
+    "condition": "skill",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 121.6,
+    "cost_usd": 0.3628,
+    "turns": 16,
+    "notes": ""
+  },
+  {
+    "task": "fresh_fastapi",
+    "condition": "agents-md",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 129.2,
+    "cost_usd": 0.6518,
+    "turns": 32,
+    "notes": ""
+  },
+  {
+    "task": "fresh_job",
+    "condition": "baseline",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 132.0,
+    "cost_usd": 0.506,
+    "turns": 23,
+    "notes": ""
+  },
+  {
+    "task": "fresh_job",
+    "condition": "skill",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 116.7,
+    "cost_usd": 0.3575,
+    "turns": 18,
+    "notes": ""
+  },
+  {
+    "task": "fresh_job",
+    "condition": "agents-md",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 150.3,
+    "cost_usd": 0.5309,
+    "turns": 20,
+    "notes": ""
+  },
+  {
+    "task": "fresh_worker",
+    "condition": "baseline",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 138.0,
+    "cost_usd": 0.448,
+    "turns": 18,
+    "notes": ""
+  },
+  {
+    "task": "fresh_worker",
+    "condition": "skill",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 158.4,
+    "cost_usd": 0.5664,
+    "turns": 23,
+    "notes": ""
+  },
+  {
+    "task": "fresh_worker",
+    "condition": "agents-md",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 315.2,
+    "cost_usd": 0.5643,
+    "turns": 24,
+    "notes": ""
+  },
+  {
+    "task": "protocol",
+    "condition": "baseline",
+    "repeat": 1,
+    "passed": false,
+    "grades": {
+      "agent tests": false,
+      "hidden": false,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 459.4,
+    "cost_usd": 0.9736,
+    "turns": 34,
+    "notes": "tests:\negration.py:106: RuntimeError\n------------------------------ Captured log call -------------------------------\nERROR    nuke_di.core:core.py:447 UserSource.__init__ raised TypeError (resolving UserCache -> UserSource): Can't instantiate abstract class UserSource without an implementation for abstract method 'fetch_users'\nTraceback (most recent call last):\n  File \"<workdir>/venv/lib/python3.12/site-packages/nuke_di/core.py\", line 414, in _resolve_tree\n    inst = cls(**init)\n           ^^^^^^^^^^^\nTypeError: Can't instantiate abstract class UserSource without an implementation for abstract method 'fetch_users'\n=============================== warnings summary ===============================\n../../venv/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <workdir>/venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED hidden/test_fastapi_app.py::test_application_still_serves_users - Runt...\n1 failed, 4 passed, 1 warning in 0.60s\n\nhidden:\nke_di/_integration.py:106: RuntimeError\n------------------------------ Captured log call -------------------------------\nERROR    nuke_di.core:core.py:447 UserSource.__init__ raised TypeError (resolving UserCache -> UserSource): Can't instantiate abstract class UserSource without an implementation for abstract method 'fetch_users'\nTraceback (most recent call last):\n  File \"<workdir>/venv/lib/python3.12/site-packages/nuke_di/core.py\", line 414, in _resolve_tree\n    inst = cls(**init)\n           ^^^^^^^^^^^\nTypeError: Can't instantiate abstract class UserSource without an implementation for abstract method 'fetch_users'\n=============================== warnings summary ===============================\n../../venv/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <workdir>/venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED hidden/test_fastapi_app.py::test_application_still_serves_users - Runt...\n1 failed, 1 warning in 0.83s\n"
+  },
+  {
+    "task": "protocol",
+    "condition": "skill",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 32.2,
+    "cost_usd": 0.1649,
+    "turns": 10,
+    "notes": ""
+  },
+  {
+    "task": "protocol",
+    "condition": "agents-md",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 400.8,
+    "cost_usd": 0.7869,
+    "turns": 23,
+    "notes": ""
+  },
+  {
+    "task": "startup",
+    "condition": "baseline",
+    "repeat": 1,
+    "passed": false,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": false
+    },
+    "shapes": [
+      "fastapi_app/clients.py:22: a loop that catches and sleeps, a retry (ADR-0009)",
+      "fastapi_app/clients.py:22: a while loop in connect() (ADR-0009)"
+    ],
+    "skill_used": false,
+    "seconds": 150.4,
+    "cost_usd": 0.6334,
+    "turns": 29,
+    "notes": ""
+  },
+  {
+    "task": "startup",
+    "condition": "skill",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 58.4,
+    "cost_usd": 0.1699,
+    "turns": 10,
+    "notes": ""
+  },
+  {
+    "task": "startup",
+    "condition": "agents-md",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 298.4,
+    "cost_usd": 0.8012,
+    "turns": 31,
+    "notes": ""
+  },
+  {
+    "task": "audit",
+    "condition": "baseline",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 85.0,
+    "cost_usd": 0.3083,
+    "turns": 19,
+    "notes": ""
+  },
+  {
+    "task": "audit",
+    "condition": "skill",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 52.3,
+    "cost_usd": 0.2135,
+    "turns": 14,
+    "notes": ""
+  },
+  {
+    "task": "audit",
+    "condition": "agents-md",
+    "repeat": 1,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 66.3,
+    "cost_usd": 0.2875,
+    "turns": 17,
+    "notes": ""
+  },
+  {
+    "task": "fresh_fastapi",
+    "condition": "baseline",
+    "repeat": 2,
+    "passed": false,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": false
+    },
+    "shapes": [
+      "app/main.py:31: I/O object created in __init__"
+    ],
+    "skill_used": false,
+    "seconds": 162.3,
+    "cost_usd": 0.5717,
+    "turns": 19,
+    "notes": ""
+  },
+  {
+    "task": "fresh_fastapi",
+    "condition": "skill",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 117.7,
+    "cost_usd": 0.4065,
+    "turns": 22,
+    "notes": ""
+  },
+  {
+    "task": "fresh_fastapi",
+    "condition": "agents-md",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 331.7,
+    "cost_usd": 1.0907,
+    "turns": 50,
+    "notes": ""
+  },
+  {
+    "task": "fresh_job",
+    "condition": "baseline",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 185.2,
+    "cost_usd": 0.9495,
+    "turns": 24,
+    "notes": ""
+  },
+  {
+    "task": "fresh_job",
+    "condition": "skill",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 261.1,
+    "cost_usd": 0.4366,
+    "turns": 18,
+    "notes": ""
+  },
+  {
+    "task": "fresh_job",
+    "condition": "agents-md",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 191.0,
+    "cost_usd": 0.6206,
+    "turns": 25,
+    "notes": ""
+  },
+  {
+    "task": "fresh_worker",
+    "condition": "baseline",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 415.8,
+    "cost_usd": 0.6574,
+    "turns": 24,
+    "notes": ""
+  },
+  {
+    "task": "fresh_worker",
+    "condition": "skill",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 145.0,
+    "cost_usd": 0.4599,
+    "turns": 19,
+    "notes": ""
+  },
+  {
+    "task": "fresh_worker",
+    "condition": "agents-md",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 179.8,
+    "cost_usd": 0.5786,
+    "turns": 20,
+    "notes": ""
+  },
+  {
+    "task": "protocol",
+    "condition": "baseline",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 289.7,
+    "cost_usd": 0.5379,
+    "turns": 26,
+    "notes": ""
+  },
+  {
+    "task": "protocol",
+    "condition": "skill",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 59.9,
+    "cost_usd": 0.1863,
+    "turns": 10,
+    "notes": ""
+  },
+  {
+    "task": "protocol",
+    "condition": "agents-md",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 85.8,
+    "cost_usd": 0.2922,
+    "turns": 11,
+    "notes": ""
+  },
+  {
+    "task": "startup",
+    "condition": "baseline",
+    "repeat": 2,
+    "passed": false,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": false
+    },
+    "shapes": [
+      "fastapi_app/clients.py:19: a loop that catches and sleeps, a retry (ADR-0009)",
+      "fastapi_app/clients.py:19: a while loop in connect() (ADR-0009)"
+    ],
+    "skill_used": false,
+    "seconds": 125.2,
+    "cost_usd": 0.4315,
+    "turns": 18,
+    "notes": ""
+  },
+  {
+    "task": "startup",
+    "condition": "skill",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 102.7,
+    "cost_usd": 0.2718,
+    "turns": 15,
+    "notes": ""
+  },
+  {
+    "task": "startup",
+    "condition": "agents-md",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 312.5,
+    "cost_usd": 0.7215,
+    "turns": 27,
+    "notes": ""
+  },
+  {
+    "task": "audit",
+    "condition": "baseline",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 76.1,
+    "cost_usd": 0.2921,
+    "turns": 20,
+    "notes": ""
+  },
+  {
+    "task": "audit",
+    "condition": "skill",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 60.8,
+    "cost_usd": 0.2605,
+    "turns": 17,
+    "notes": ""
+  },
+  {
+    "task": "audit",
+    "condition": "agents-md",
+    "repeat": 2,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 96.5,
+    "cost_usd": 0.3122,
+    "turns": 19,
+    "notes": ""
+  },
+  {
+    "task": "fresh_fastapi",
+    "condition": "baseline",
+    "repeat": 3,
+    "passed": false,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": false
+    },
+    "shapes": [
+      "app/main.py:27: I/O object created in __init__"
+    ],
+    "skill_used": false,
+    "seconds": 397.4,
+    "cost_usd": 0.5764,
+    "turns": 22,
+    "notes": ""
+  },
+  {
+    "task": "fresh_fastapi",
+    "condition": "skill",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 70.4,
+    "cost_usd": 0.277,
+    "turns": 14,
+    "notes": ""
+  },
+  {
+    "task": "fresh_fastapi",
+    "condition": "agents-md",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 197.3,
+    "cost_usd": 0.6719,
+    "turns": 31,
+    "notes": ""
+  },
+  {
+    "task": "fresh_job",
+    "condition": "baseline",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 180.5,
+    "cost_usd": 0.723,
+    "turns": 30,
+    "notes": ""
+  },
+  {
+    "task": "fresh_job",
+    "condition": "skill",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 102.5,
+    "cost_usd": 0.4519,
+    "turns": 19,
+    "notes": ""
+  },
+  {
+    "task": "fresh_job",
+    "condition": "agents-md",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 180.7,
+    "cost_usd": 0.6613,
+    "turns": 27,
+    "notes": ""
+  },
+  {
+    "task": "fresh_worker",
+    "condition": "baseline",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 244.5,
+    "cost_usd": 0.5894,
+    "turns": 25,
+    "notes": ""
+  },
+  {
+    "task": "fresh_worker",
+    "condition": "skill",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 122.0,
+    "cost_usd": 0.3808,
+    "turns": 17,
+    "notes": ""
+  },
+  {
+    "task": "fresh_worker",
+    "condition": "agents-md",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 573.3,
+    "cost_usd": 1.0971,
+    "turns": 39,
+    "notes": ""
+  },
+  {
+    "task": "protocol",
+    "condition": "baseline",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 925.3,
+    "cost_usd": 1.4997,
+    "turns": 32,
+    "notes": ""
+  },
+  {
+    "task": "protocol",
+    "condition": "skill",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 21.4,
+    "cost_usd": 0.1112,
+    "turns": 8,
+    "notes": ""
+  },
+  {
+    "task": "protocol",
+    "condition": "agents-md",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 153.7,
+    "cost_usd": 0.3248,
+    "turns": 14,
+    "notes": ""
+  },
+  {
+    "task": "startup",
+    "condition": "baseline",
+    "repeat": 3,
+    "passed": false,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": false
+    },
+    "shapes": [
+      "fastapi_app/clients.py:23: a loop that catches and sleeps, a retry (ADR-0009)",
+      "fastapi_app/clients.py:23: a loop that catches exceptions in connect() (ADR-0009)"
+    ],
+    "skill_used": false,
+    "seconds": 236.7,
+    "cost_usd": 0.5031,
+    "turns": 23,
+    "notes": ""
+  },
+  {
+    "task": "startup",
+    "condition": "skill",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 233.3,
+    "cost_usd": 0.2579,
+    "turns": 11,
+    "notes": ""
+  },
+  {
+    "task": "startup",
+    "condition": "agents-md",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 174.7,
+    "cost_usd": 0.4228,
+    "turns": 16,
+    "notes": ""
+  },
+  {
+    "task": "audit",
+    "condition": "baseline",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 66.3,
+    "cost_usd": 0.2944,
+    "turns": 21,
+    "notes": ""
+  },
+  {
+    "task": "audit",
+    "condition": "skill",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": true,
+    "seconds": 50.3,
+    "cost_usd": 0.2056,
+    "turns": 14,
+    "notes": ""
+  },
+  {
+    "task": "audit",
+    "condition": "agents-md",
+    "repeat": 3,
+    "passed": true,
+    "grades": {
+      "agent tests": true,
+      "hidden": true,
+      "mypy": true,
+      "shapes": true
+    },
+    "shapes": [],
+    "skill_used": false,
+    "seconds": 55.8,
+    "cost_usd": 0.2254,
+    "turns": 15,
+    "notes": ""
+  }
+]

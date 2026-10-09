@@ -23,7 +23,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   - `context7.json`, so the Context7 MCP server indexes the README, the guide and the examples.
   - The graph as JSON: a recipe over `Graph.nodes`, not a new export.
 - `benchmarks/agents/`: coding tasks that an agent solves in a fresh project, with and without the skill, graded
-  by pytest, hidden tests, mypy with the plugin and a search for the rejected designs. EVAL_SUMMARY
+  by pytest, hidden tests, mypy with the plugin and a search for the rejected designs. With Claude Sonnet, six tasks
+  three times each: 12/18 without the skill, 18/18 with it and 18/18 with the `AGENTS.md` block; the skill also
+  halves the cost and the turns of a run. Without either, the agent retried in `connect()`, created an
+  `httpx.AsyncClient` in `__init__` and typed a client's argument with a `Protocol`.
 
 ## [1.12.1] - 2026-10-09
 

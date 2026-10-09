@@ -29,8 +29,12 @@ Full manual in one file: https://raw.githubusercontent.com/troyan-dy/nuke-di/mas
 from nuke_di import DI, Client
 
 
+class Settings(Client):  # configuration is a client too, see below
+    database_url = "postgresql://localhost/app"
+
+
 class Database(Client):
-    def __init__(self, settings: Settings) -> None:  # Settings is a Client too
+    def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._pool: Pool | None = None
 
@@ -173,9 +177,10 @@ Each of these was proposed and rejected; the container has no API for them and w
 
 ## Errors
 
-- `InvalidSignatureError ... which is not a client`: an `__init__` or function argument has a
-  type that is neither a client nor a value the caller passes; make it a `Client`, or pass it from
-  the caller (a function argument), or read it from a settings client.
+- `InvalidSignatureError ... which is not a client`: an argument of a client's `__init__` is typed
+  with something that is not a client (a `Protocol`, an ABC, `str`). Make it a concrete `Client`,
+  read the value from a settings client, or give the argument a default, which the container leaves
+  alone. A function given to `inject()` keeps its non-client arguments for the caller instead.
 - `CircularDependencyError`: two clients need each other; extract the shared part into a third
   client both depend on.
 - `ConnectError: ... already resolved, call mock() before resolve() or inject()`: move the
