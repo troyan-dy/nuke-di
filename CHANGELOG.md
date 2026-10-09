@@ -26,6 +26,30 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   recorded as `cancelled`. The rollback of a failed `connect()` behaves the same
   ([#37](https://github.com/troyan-dy/nuke-di/issues/37)).
 
+## [1.9.1] - 2026-10-09
+
+### Changed
+
+- The arguments of a client's `__init__` are read once per class in the process instead of on every resolve of
+  every container: the result is kept on the class, keyed by the identity of the `__init__` it was read from.
+  A subclass that inherits `__init__` shares the entry of its base class; one that redefines `__init__`, or a
+  class whose `__init__` is replaced, is read again; mutating `__defaults__` or `__annotations__` of the same
+  `__init__` in place after the first resolve is not seen. A type hint that fails to evaluate is not kept and
+  fails again. A class whose `__init__` is `object.__init__` takes no arguments and is not inspected. The
+  per-client debug records of `resolve()`, `connect()` and `disconnect()` are built only when the
+  `nuke_di.core` logger is enabled for `DEBUG`. Together with the two changes below, cold `resolve()` of a
+  tree of 100 or 1000 clients on the second container of a process went from 7.8–12.2 µs to 1.4–1.7 µs per
+  client on CPython 3.14 ([#29](https://github.com/troyan-dy/nuke-di/issues/29)).
+- The parameters of a plain `__init__` are read from its code object instead of `inspect.signature`, which
+  stays for a decorated `__init__` (`__wrapped__`), a declared `__signature__` and a C function; the type hints
+  still come from `get_type_hints`, so forward references and string annotations keep working. The first
+  container of a process resolves a tree of 100 clients in about 0.43 ms instead of 0.94 ms
+  ([#36](https://github.com/troyan-dy/nuke-di/issues/36)).
+- The cycle check of `resolve()` looks a class up in a set beside the path list instead of scanning the list,
+  which was as long as the depth of the resolution, about 30% of a chain of 1000 clients before: the chain
+  now costs the same per client as a wide tree, 1.45 µs against 1.43 µs
+  ([#33](https://github.com/troyan-dy/nuke-di/issues/33)).
+
 ## [1.9.0] - 2026-10-09
 
 ### Added
@@ -265,7 +289,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.9.1...HEAD
+[1.9.1]: https://github.com/troyan-dy/nuke-di/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/troyan-dy/nuke-di/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/troyan-dy/nuke-di/compare/v1.7.1...v1.8.0
 [1.7.1]: https://github.com/troyan-dy/nuke-di/compare/v1.7.0...v1.7.1

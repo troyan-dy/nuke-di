@@ -9,7 +9,7 @@ from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass, field
 from functools import partial
 from types import MappingProxyType
-from typing import Any, Literal, TypeVar, Union, cast, get_args, get_origin, get_type_hints
+from typing import Any, Literal, NamedTuple, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
 from nuke_di.errors import (
     CircularDependencyError,
@@ -32,6 +32,9 @@ isnotsingleton = isa(NotSingletonClient)
 CT = TypeVar("CT", bound=NotSingletonClient)
 
 Limiter = asyncio.Semaphore | contextlib.nullcontext[None]
+
+# `*args` and `**kwargs`: never filled by the container
+_VARIADIC = frozenset({inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD})
 
 
 class _ClientConnectError(Exception):
@@ -69,6 +72,8 @@ class Dependencies:
     _overrides: list[tuple[type[NotSingletonClient], NotSingletonClient]] = field(default_factory=list, init=False)
     # Clients being resolved right now, outermost first: finds cycles and names the path in errors
     _resolving: list[type[NotSingletonClient]] = field(default_factory=list, init=False)
+    # The same classes, for the cycle check: the list would be scanned once per client, as long as the depth
+    _resolving_set: set[type[NotSingletonClient]] = field(default_factory=set, init=False)
     # The function `inject()` is resolving for, named first in the path but never part of a cycle
     _injecting: Callable[..., Any] | None = field(default=None, init=False)
 
@@ -165,13 +170,19 @@ class Dependencies:
     ) -> None:
         timing = self._timings[id(client)]
         name = timing.name
+        # The record's fields are built per client: skipped when nobody listens
+        debug = logger.isEnabledFor(logging.DEBUG)
         try:
             async with limiter:
-                logger.debug("Connecting client %s", name, extra=_fields(timing))
+                if debug:
+                    logger.debug("Connecting client %s", name, extra=_fields(timing))
                 with _measure(timing, "connect"):
                     await _within(self.settings.connect_timeout, client.connect())
             connected.append(client)
-            logger.debug("Connected client %s in %.3fs", name, timing.connect, extra=_fields(timing, timing.connect))
+            if debug:
+                logger.debug(
+                    "Connected client %s in %.3fs", name, timing.connect, extra=_fields(timing, timing.connect)
+                )
 
         except TimeoutError as exc:
             logger.exception("Timeout occurred connecting client %s", name, extra=_fields(timing, timing.connect))
@@ -214,14 +225,20 @@ class Dependencies:
     async def _disconnect_client(self, client: NotSingletonClient, limiter: Limiter) -> None:
         timing = self._timings[id(client)]
         name = timing.name
+        debug = logger.isEnabledFor(logging.DEBUG)
         try:
             async with limiter:
-                logger.debug("Disconnecting client %s", name, extra=_fields(timing))
+                if debug:
+                    logger.debug("Disconnecting client %s", name, extra=_fields(timing))
                 with _measure(timing, "disconnect"):
                     await _within(self.settings.disconnect_timeout, client.disconnect())
-            logger.debug(
-                "Disconnected client %s in %.3fs", name, timing.disconnect, extra=_fields(timing, timing.disconnect)
-            )
+            if debug:
+                logger.debug(
+                    "Disconnected client %s in %.3fs",
+                    name,
+                    timing.disconnect,
+                    extra=_fields(timing, timing.disconnect),
+                )
         except TimeoutError:
             logger.exception("Timeout occurred disconnecting client %s", name, extra=_fields(timing, timing.disconnect))
         except Exception:
@@ -253,18 +270,21 @@ class Dependencies:
         if inst is not None:
             return cast(CT, inst)
 
-        if cls in self._resolving:
+        if cls in self._resolving_set:
             raise CircularDependencyError(f"Circular dependency: {self._path(cls)}")
 
         name = sname(cls)
-        logger.debug('Resolving dependency "%s"', name, extra=fields(client=name))
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug('Resolving dependency "%s"', name, extra=fields(client=name))
 
         self._resolving.append(cls)
+        self._resolving_set.add(cls)
         try:
             arguments = self._client_arguments(cls)
             init = {key: self.resolve(dep) for key, dep in arguments.items()}
         finally:
             self._resolving.pop()
+            self._resolving_set.remove(cls)
 
         try:
             inst = cls(**init)
@@ -312,29 +332,54 @@ class Dependencies:
     def _client_arguments(self, cls: type[NotSingletonClient]) -> dict[str, type[NotSingletonClient]]:
         """
         The arguments of `cls.__init__` to fill with clients; fail on any other required argument.
+
+        Read once per class in the process: the result depends on `__init__` alone, so it is kept on the class
+        beside the `__init__` it was read from, and read again when the class gets another `__init__`.
         """
-        hints = self._type_hints(cls.__init__, f"{sname(cls)}.__init__")
+        init = cls.__init__
+        if init is object.__init__:
+            # `inspect.signature` parses the text signature of a slot wrapper on every call
+            return {}
+
+        # A subclass that inherits `__init__` finds its base class's entry and shares it; one that redefines
+        # `__init__` fails the check below and stores its own
+        entry: tuple[Callable[..., Any], dict[str, type[NotSingletonClient]]] | None = getattr(
+            cls, "__nuke_di_arguments__", None
+        )
+        if entry is not None and entry[0] is init:
+            return entry[1]
+
+        # Only a success is kept: a type hint that fails to evaluate must fail on the next resolve too
+        arguments = self._read_arguments(cls, init)
+        try:
+            cls.__nuke_di_arguments__ = (init, arguments)  # type: ignore[attr-defined]
+        except AttributeError:
+            # A metaclass that forbids setting attributes: the class is read again on the next resolve
+            pass
+        return arguments
+
+    def _read_arguments(
+        self, cls: type[NotSingletonClient], init: Callable[..., Any]
+    ) -> dict[str, type[NotSingletonClient]]:
+        hints = self._type_hints(init, f"{sname(cls)}.__init__")
 
         clients: dict[str, type[NotSingletonClient]] = {}
-        # The first parameter is `self`
-        for param in list(inspect.signature(cls.__init__).parameters.values())[1:]:
-            if param.kind in {param.VAR_POSITIONAL, param.VAR_KEYWORD}:
-                continue
-
-            hint: Any = hints.get(param.name)
+        for argument in _init_arguments(init):
+            name = argument.name
+            hint: Any = hints.get(name)
             if isnotsingleton(hint):
-                if param.kind is param.POSITIONAL_ONLY:
-                    raise self._signature_error(cls, param, "is positional-only, a client is passed by keyword")
-                clients[param.name] = hint
-            elif param.default is not param.empty:
+                if argument.positional_only:
+                    raise self._signature_error(cls, name, "is positional-only, a client is passed by keyword")
+                clients[name] = hint
+            elif argument.has_default:
                 # Not ours to fill: the default stays
                 continue
             elif hint is None:
-                raise self._signature_error(cls, param, "has no type hint")
+                raise self._signature_error(cls, name, "has no type hint")
             elif (client := _optional_client(hint)) is not None:
-                raise self._signature_error(cls, param, f"is {sname(client)} | None, a client cannot be optional")
+                raise self._signature_error(cls, name, f"is {sname(client)} | None, a client cannot be optional")
             else:
-                raise self._signature_error(cls, param, f"is {_type_name(hint)}, which is not a client")
+                raise self._signature_error(cls, name, f"is {_type_name(hint)}, which is not a client")
         return clients
 
     def _type_hints(self, func: Callable[..., Any], name: str) -> dict[str, Any]:
@@ -347,12 +392,8 @@ class Dependencies:
                 f"{self._path_suffix()}"
             ) from exc
 
-    def _signature_error(
-        self, cls: type[NotSingletonClient], param: inspect.Parameter, reason: str
-    ) -> InvalidSignatureError:
-        return InvalidSignatureError(
-            f'Argument "{param.name}" of "{sname(cls)}.__init__" {reason}{self._path_suffix()}'
-        )
+    def _signature_error(self, cls: type[NotSingletonClient], name: str, reason: str) -> InvalidSignatureError:
+        return InvalidSignatureError(f'Argument "{name}" of "{sname(cls)}.__init__" {reason}{self._path_suffix()}')
 
     def _path(self, *more: Callable[..., Any]) -> str:
         root = [] if self._injecting is None else [self._injecting]
@@ -451,7 +492,7 @@ class Dependencies:
 
         # get_type_hints silently skips unannotated arguments, so they are looked up in the signature
         for param in inspect.signature(func).parameters.values():
-            if param.kind in {param.VAR_POSITIONAL, param.VAR_KEYWORD}:
+            if param.kind in _VARIADIC:
                 continue
             if param.annotation is inspect.Parameter.empty:
                 raise InvalidSignatureError(f'Argument "{param.name}" of "{sname(func)}" has no type hint')
@@ -469,6 +510,46 @@ class Dependencies:
             self._injecting = outer
 
         return signature
+
+
+class _Argument(NamedTuple):
+    """
+    One argument of an `__init__`, as much of its signature as the container needs.
+    """
+
+    name: str
+    positional_only: bool
+    has_default: bool
+
+
+def _init_arguments(init: Callable[..., Any]) -> list[_Argument]:
+    """
+    The arguments of `init` after `self`, without `*args` and `**kwargs`.
+    """
+    # A plain function is read from its code object, which is what `inspect.signature` does at thirty times the cost;
+    # a decorated one (`__wrapped__`), a declared signature or a C function go through `inspect.signature`
+    if inspect.isfunction(init) and "__wrapped__" not in init.__dict__ and "__signature__" not in init.__dict__:
+        code = init.__code__
+        positional = code.co_argcount
+        names = code.co_varnames[: positional + code.co_kwonlyargcount]
+        positional_only = code.co_posonlyargcount
+        first_default = positional - len(init.__defaults__ or ())
+        kwdefaults = init.__kwdefaults__ or {}
+        # `self` is the first argument, unless the method takes it through `*args`
+        start = 1 if positional or not code.co_flags & inspect.CO_VARARGS else 0
+        return [
+            _Argument(
+                name, index < positional_only, index >= first_default if index < positional else name in kwdefaults
+            )
+            for index, name in enumerate(names[start:], start)
+        ]
+
+    parameters = list(inspect.signature(init).parameters.values())[1:]
+    return [
+        _Argument(param.name, param.kind is param.POSITIONAL_ONLY, param.default is not param.empty)
+        for param in parameters
+        if param.kind not in _VARIADIC
+    ]
 
 
 def _fields(timing: ClientTiming, duration: float | None = None) -> dict[str, Any]:
