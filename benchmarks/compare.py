@@ -36,7 +36,6 @@ from run import (
     SIZES,
     Result,
     Tree,
-    allow_recursion,
     collect,
     environment,
     fmt,
@@ -165,6 +164,12 @@ def injector_warm(tree: Tree) -> Callable[[], object]:
     container = injector_container(tree)
     container.get(tree.root)
     return partial(container.get, tree.root)
+
+
+def allow_recursion(n: int) -> None:
+    # dishka, wireup and injector recurse once per level of the tree, and dependency-injector does on 3.11, which the
+    # default limit stops before a chain of 1000; nuke-di does not recurse, the limit is raised for the others
+    sys.setrecursionlimit(max(sys.getrecursionlimit(), 4 * n + 1000))
 
 
 LIBRARIES = [

@@ -226,11 +226,6 @@ def shape_label(shape: str, strings: bool) -> str:
     return f"{shape}, strings" if strings else shape
 
 
-def allow_recursion(n: int) -> None:
-    # resolve() recurses once per level of the tree, which the default limit stops at a few hundred
-    sys.setrecursionlimit(max(sys.getrecursionlimit(), 4 * n + 1000))
-
-
 # Scenarios
 
 
@@ -820,7 +815,6 @@ def main(argv: list[str] | None = None) -> int:
     sizes: list[int] = sorted(set(args.size or SIZES))
     if args.repeat < 1 or any(n < 2 for n in sizes):
         parser.error("--repeat must be at least 1 and every --size at least 2")
-    allow_recursion(max(sizes))
 
     env = environment(sizes, args.repeat)
     print(summary(env), end="\n\n")
