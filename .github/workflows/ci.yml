@@ -26,6 +26,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
+      - run: uvx pyright@1.1.414  # the pin of the Makefile
 
   test:
     runs-on: ubuntu-latest

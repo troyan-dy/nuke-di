@@ -161,7 +161,7 @@ class Redis(Client):
 
 ### <a id="dataclass-clients"></a>データクラスのクライアント
 
-`client_dataclass` はクラスを `Client` かつデータクラスに一度に変換します。そのため、フィールドがそのまま注入される依存関係になります。
+`client_dataclass` はクラスを `Client` かつデータクラスに一度に変換します。そのため、フィールドがそのまま注入される依存関係になります。あわせて `Client` も継承してください。デコレータは恒等関数として型付けされているので、`Checkout` がクライアントであることを mypy と pyright に伝えるのは基底クラスです。基底クラスがなければ、そのクラスは実行時にだけクライアントになります。
 
 ```python
 from nuke_di import Client, Dependencies, client_dataclass
@@ -176,7 +176,7 @@ class Payments(Client):
 
 
 @client_dataclass(frozen=True)
-class Checkout:
+class Checkout(Client):
     pg: Postgres
     payments: Payments
 

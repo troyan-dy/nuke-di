@@ -176,7 +176,9 @@ trava é registrado no log, e os demais clientes são encerrados mesmo assim.
 ### <a id="dataclass-clients"></a>Clientes dataclass
 
 `client_dataclass` transforma uma classe em `Client` e em dataclass ao mesmo tempo, de modo que os campos
-passam a ser as dependências injetadas:
+passam a ser as dependências injetadas. Herde também de `Client`: o decorador é tipado como identidade,
+então é a classe base que diz ao mypy e ao pyright que `Checkout` é um cliente; sem ela, a classe é um
+cliente apenas em tempo de execução:
 
 ```python
 from nuke_di import Client, Dependencies, client_dataclass
@@ -191,7 +193,7 @@ class Payments(Client):
 
 
 @client_dataclass(frozen=True)
-class Checkout:
+class Checkout(Client):
     pg: Postgres
     payments: Payments
 

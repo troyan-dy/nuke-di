@@ -41,7 +41,8 @@ def help_of(func: Callable[..., Any]) -> str:
     ],
 )
 def test_scalar(annotation: Any, value: str, expected: Any) -> None:
-    async def entry(x: annotation) -> None:
+    # The annotation is a variable on purpose: the parser reads it at runtime
+    async def entry(x: annotation) -> None:  # pyright: ignore[reportInvalidTypeForm]
         pass
 
     assert run(entry, "--x", value) == {"x": expected}
@@ -147,7 +148,8 @@ def test_short_option() -> None:
     ],
 )
 def test_invalid_value(annotation: Any, value: str, message: str) -> None:
-    async def entry(x: annotation) -> None:
+    # The annotation is a variable on purpose: the parser reads it at runtime
+    async def entry(x: annotation) -> None:  # pyright: ignore[reportInvalidTypeForm]
         pass
 
     with pytest.raises(UsageError, match=message):
@@ -220,7 +222,8 @@ def test_help_text() -> None:
     ],
 )
 def test_unsupported_type(annotation: Any) -> None:
-    async def entry(x: annotation) -> None:
+    # The annotation is a variable on purpose: the parser reads it at runtime
+    async def entry(x: annotation) -> None:  # pyright: ignore[reportInvalidTypeForm]
         pass
 
     with pytest.raises(InvalidSignatureError, match='Argument "x" of "entry" has an unsupported type'):

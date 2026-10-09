@@ -110,7 +110,7 @@ class Variadic(Client):
 
 
 @client_dataclass
-class DataclassClient:
+class DataclassClient(Client):
     db: Database
     retries: int = 3
 
@@ -186,7 +186,7 @@ def test_variadic_arguments_are_left_alone() -> None:
 
 
 def test_dataclass_client() -> None:
-    client = Dependencies().resolve(DataclassClient)  # type: ignore[type-var]
+    client = Dependencies().resolve(DataclassClient)
 
     assert isinstance(client.db, Database)
 

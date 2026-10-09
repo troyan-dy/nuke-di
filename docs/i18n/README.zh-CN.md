@@ -170,7 +170,7 @@ class Redis(Client):
 
 ### <a id="dataclass-clients"></a>dataclass 客户端
 
-`client_dataclass` 把一个类同时变成 `Client` 和 dataclass，于是它的字段就成了被注入的依赖：
+`client_dataclass` 把一个类同时变成 `Client` 和 dataclass，于是它的字段就成了被注入的依赖。同时也要继承 `Client`：装饰器的类型是恒等的，所以让 mypy 和 pyright 知道 `Checkout` 是客户端的正是这个基类；没有它，这个类只在运行时才是客户端：
 
 ```python
 from nuke_di import Client, Dependencies, client_dataclass
@@ -185,7 +185,7 @@ class Payments(Client):
 
 
 @client_dataclass(frozen=True)
-class Checkout:
+class Checkout(Client):
     pg: Postgres
     payments: Payments
 

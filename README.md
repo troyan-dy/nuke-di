@@ -176,7 +176,9 @@ Each `connect()` is bounded by `CONNECT_TIMEOUT_SECONDS` (default `30`) and each
 ### Dataclass clients
 
 `client_dataclass` turns a class into a `Client` and a dataclass at once, so the fields
-become the injected dependencies:
+become the injected dependencies. Subclass `Client` as well: the decorator is typed as an
+identity, so the base class is what tells mypy and pyright that `Checkout` is a client; without
+it the class is a client at runtime only:
 
 ```python
 from nuke_di import Client, Dependencies, client_dataclass
@@ -191,7 +193,7 @@ class Payments(Client):
 
 
 @client_dataclass(frozen=True)
-class Checkout:
+class Checkout(Client):
     pg: Postgres
     payments: Payments
 

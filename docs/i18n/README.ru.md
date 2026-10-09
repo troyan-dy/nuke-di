@@ -176,7 +176,9 @@ class Redis(Client):
 ### <a id="dataclass-clients"></a>Клиенты-датаклассы
 
 `client_dataclass` делает класс одновременно `Client` и датаклассом, так что его поля
-становятся внедряемыми зависимостями:
+становятся внедряемыми зависимостями. Наследуйте и от `Client`: декоратор типизирован как
+тождественный, и именно базовый класс сообщает mypy и pyright, что `Checkout` — клиент; без него
+класс является клиентом только во время выполнения:
 
 ```python
 from nuke_di import Client, Dependencies, client_dataclass
@@ -191,7 +193,7 @@ class Payments(Client):
 
 
 @client_dataclass(frozen=True)
-class Checkout:
+class Checkout(Client):
     pg: Postgres
     payments: Payments
 

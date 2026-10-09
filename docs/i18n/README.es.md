@@ -176,7 +176,9 @@ o se cuelga queda registrado en el log, y el resto de los clientes se apaga igua
 ### <a id="dataclass-clients"></a>Clientes como dataclass
 
 `client_dataclass` convierte una clase en `Client` y en dataclass a la vez, de modo que sus campos
-pasan a ser las dependencias inyectadas:
+pasan a ser las dependencias inyectadas. Hereda también de `Client`: el decorador está tipado como
+identidad, así que es la clase base la que le dice a mypy y a pyright que `Checkout` es un cliente;
+sin ella, la clase es un cliente solo en tiempo de ejecución:
 
 ```python
 from nuke_di import Client, Dependencies, client_dataclass
@@ -191,7 +193,7 @@ class Payments(Client):
 
 
 @client_dataclass(frozen=True)
-class Checkout:
+class Checkout(Client):
     pg: Postgres
     payments: Payments
 

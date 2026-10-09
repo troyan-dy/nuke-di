@@ -114,6 +114,14 @@ files = ["src", "tests", "scripts", "benchmarks"]
 strict = true
 disallow_any_generics = false
 
+[tool.pyright]
+# Run from uvx, outside the project environment, so it is pointed at the venv of `uv sync`
+include = ["src", "tests"]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
+
 [tool.pytest.ini_options]
 # The plugin of this package would import nuke_di before coverage starts; tests/test_pytest_plugin.py loads it
 addopts = "-p no:nuke_di"

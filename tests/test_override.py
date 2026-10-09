@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import NonCallableMock
 
 import pytest
 
@@ -41,7 +41,7 @@ def test_override_without_replacement_creates_autospec() -> None:
     dep = Dependencies()
 
     with dep.override(Database) as db:
-        assert isinstance(db, Mock)
+        assert isinstance(db, NonCallableMock)
         assert isinstance(db, Database)
         assert dep.resolve(Users).db is db
 

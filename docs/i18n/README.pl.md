@@ -176,7 +176,9 @@ Każde `connect()` jest ograniczone przez `CONNECT_TIMEOUT_SECONDS` (domyślnie 
 ### <a id="dataclass-clients"></a>Klienci jako dataclass
 
 `client_dataclass` zamienia klasę jednocześnie w `Client` i w dataclass, więc jej pola
-stają się wstrzykiwanymi zależnościami:
+stają się wstrzykiwanymi zależnościami. Dziedzicz też po `Client`: dekorator jest typowany jako
+tożsamość, więc to klasa bazowa mówi mypy i pyrightowi, że `Checkout` jest klientem; bez niej klasa
+jest klientem tylko w czasie wykonania:
 
 ```python
 from nuke_di import Client, Dependencies, client_dataclass
@@ -191,7 +193,7 @@ class Payments(Client):
 
 
 @client_dataclass(frozen=True)
-class Checkout:
+class Checkout(Client):
     pg: Postgres
     payments: Payments
 
