@@ -22,6 +22,8 @@ Both have translations: `docs/i18n/README.<language>.md` and `docs/i18n/<languag
 
 ## Design principles
 
-Keep the apparent simplicity: a dependency is a class with a type-hinted `__init__` and `connect()` / `disconnect()`, and that is the whole model. A proposed feature whose result is already reachable with a `Client` subclass, `mock()` / `override()` or a recipe in the guide becomes a recipe, however common the feature is in other DI libraries. The reasoning and the rejected designs: `docs/adr/0005-third-party-objects-as-client-classes.md`; earlier rejections are issues #9 (binding a Protocol to an implementation) and #11 (connect retries).
+Keep the apparent simplicity: a dependency is a class with a type-hinted `__init__` and `connect()` / `disconnect()`, and that is the whole model. A proposed feature whose result is already reachable with a `Client` subclass, `mock()` / `override()` or a recipe in the guide becomes a recipe, however common the feature is in other DI libraries. The reasoning and the rejected designs: `docs/adr/0005-third-party-objects-as-client-classes.md` (#8, provider functions and connectors), `docs/adr/0008-clients-depend-on-concrete-clients.md` (#9, binding a Protocol to an implementation, qualifiers, multibinding) and `docs/adr/0009-connect-is-fail-fast.md` (#11, connect retries).
+
+The library stays pure Python with no runtime dependencies: a Rust or compiled core was measured and is not added until a CPU-bound stage appears (`docs/adr/0010-pure-python-no-compiled-core.md`).
 
 A client lives as long as its container. Per-request or per-message clients are never added (#65, `docs/adr/0006-clients-live-as-long-as-the-container.md`), and `NotSingletonClient` is a workaround slated for removal: new features, integrations and examples do not build on it.
