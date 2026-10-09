@@ -110,6 +110,13 @@ What happened:
 - **No runtime dependencies.** The core uses only the standard library; the framework
   integrations are extras.
 
+How a startup goes, on the example of the
+[Clients guide](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#connect-order): `Consumer` needs
+only `Kafka`, so it does not wait for the slow `Postgres`, and the startup takes as long as its longest chain of
+dependencies.
+
+![Six clients connecting by their own dependencies: Consumer and Http start once Kafka and Redis have connected, the startup takes 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/connect-now.svg)
+
 ## Performance
 
 `benchmarks/compare.py` runs the same trees of clients through dishka, wireup, dependency-injector and

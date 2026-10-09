@@ -111,6 +111,12 @@ database: disconnected
 - **Никаких зависимостей во время выполнения.** Ядро использует только стандартную библиотеку;
   интеграции с фреймворками ставятся как extras.
 
+Как проходит старт, на примере из [гайда по клиентам](ru/clients.md#connect-order): `Consumer` нужен только
+`Kafka`, поэтому он не ждёт медленный `Postgres`, и старт длится столько, сколько самая длинная цепочка
+зависимостей.
+
+![Шесть клиентов подключаются по собственным зависимостям: Consumer и Http стартуют, как только подключились Kafka и Redis, старт занимает 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/connect-now.svg)
+
 ## <a id="performance"></a>Производительность
 
 `benchmarks/compare.py` прогоняет одни и те же деревья клиентов через dishka, wireup, dependency-injector

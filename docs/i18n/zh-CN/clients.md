@@ -202,9 +202,9 @@ INFO Connected 7 clients in 0.35s (slowest: Postgres 0.30s, Consumer 0.30s, Http
 
 `Consumer` 只需要 `Kafka`，所以它在 0.05s 就开始连接，此时 `Postgres` 还在连接中；
 整个启动耗时等于最长的那条依赖链 `Kafka` → `Consumer`。在 1.12 及之前的版本中，客户端按层连接，
-每个客户端都要等待下面那一层中最慢的客户端，在这里需要 0.60s：
+每个客户端都要等待下面那一层中最慢的客户端，在这里需要 0.60s；而在 1.0 中按解析顺序逐个连接，需要 0.90s：
 
-![示例中的六个客户端：按层连接耗时 0.60s，按各自的依赖连接耗时 0.35s](../../connect-order.svg)
+![示例中的六个客户端：逐个连接耗时 0.90s，按层连接耗时 0.60s，按各自的依赖连接耗时 0.35s](../../connect-order.svg)
 
 开启 `DEBUG` 后，`nuke_di` logger 会在每个客户端开始和完成时记下它的名字，以及目前已连接的数量：
 `Connecting client Consumer (2/7 connected)`，`disconnect()` 也是如此。

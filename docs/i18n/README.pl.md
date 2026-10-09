@@ -109,6 +109,12 @@ Co się stało:
 - **Brak zależności w czasie działania.** Rdzeń korzysta wyłącznie z biblioteki standardowej; integracje
   z frameworkami to dodatki (extras).
 
+Tak przebiega start, na przykładzie z [przewodnika po klientach](pl/clients.md#connect-order): `Consumer`
+potrzebuje tylko `Kafka`, więc nie czeka na wolny `Postgres`, a start trwa tyle, ile najdłuższy łańcuch
+zależności.
+
+![Sześciu klientów łączących się według własnych zależności: Consumer i Http startują, gdy tylko połączą się Kafka i Redis, start trwa 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/connect-now.svg)
+
 ## <a id="performance"></a>Wydajność
 
 `benchmarks/compare.py` przepuszcza te same drzewa klientów przez dishka, wireup, dependency-injector i

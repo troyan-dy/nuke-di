@@ -209,9 +209,10 @@ INFO Connected 7 clients in 0.35s (slowest: Postgres 0.30s, Consumer 0.30s, Http
 
 `Consumer` potrzebuje tylko `Kafka`, więc startuje w 0.05s, gdy `Postgres` wciąż się łączy, a start
 trwa tyle, ile najdłuższy łańcuch zależności, `Kafka` → `Consumer`. Do wersji 1.12 włącznie klienci łączyli się
-warstwami, a każda warstwa czekała na najwolniejszego klienta warstwy poniżej, co tutaj zajmowało 0.60s:
+warstwami, a każda warstwa czekała na najwolniejszego klienta warstwy poniżej, co tutaj zajmowało 0.60s,
+a w wersji 1.0 jeden po drugim w kolejności rozwiązywania, co zajmowało 0.90s:
 
-![Sześciu klientów z przykładu połączonych warstwami w 0.60s i według własnych zależności w 0.35s](../../connect-order.svg)
+![Sześciu klientów z przykładu połączonych jeden po drugim w 0.90s, warstwami w 0.60s i według własnych zależności w 0.35s](../../connect-order.svg)
 
 Przy włączonym `DEBUG` logger `nuke_di` podaje nazwę każdego klienta, gdy zaczyna i kończy łączenie,
 wraz z liczbą klientów połączonych do tej pory: `Connecting client Consumer (2/7 connected)`, i tak

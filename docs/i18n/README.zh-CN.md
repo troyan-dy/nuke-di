@@ -102,6 +102,11 @@ database: disconnected
   被测代码无需改动。
 - **没有运行时依赖。** 核心只使用标准库；各框架集成作为 extras 提供。
 
+启动过程是这样的，以[客户端指南](zh-CN/clients.md#connect-order)中的示例为例：`Consumer` 只需要 `Kafka`，
+所以它不会等待较慢的 `Postgres`，整个启动耗时等于最长的那条依赖链。
+
+![六个客户端按各自的依赖连接：Kafka 和 Redis 连接完成后 Consumer 和 Http 立即启动，启动耗时 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/connect-now.svg)
+
 ## <a id="performance"></a>性能
 
 `benchmarks/compare.py` 把同样的客户端依赖树交给 dishka、wireup、dependency-injector 和 injector，各自按自己的方式注册同一组类：

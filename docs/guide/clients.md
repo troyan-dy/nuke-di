@@ -209,9 +209,9 @@ INFO Connected 7 clients in 0.35s (slowest: Postgres 0.30s, Consumer 0.30s, Http
 `Consumer` needs only `Kafka`, so it starts at 0.05s while `Postgres` is still connecting, and
 the startup takes as long as its longest chain of dependencies, `Kafka` → `Consumer`. Up to
 1.12 the clients connected in layers, each waiting for the slowest client of the layer below,
-which took 0.60s here:
+which took 0.60s here, and in 1.0 one after another in resolution order, which took 0.90s:
 
-![The six clients of the example connected by layer in 0.60s and by their own dependencies in 0.35s](../connect-order.svg)
+![The six clients of the example connected one after another in 0.90s, by layer in 0.60s and by their own dependencies in 0.35s](../connect-order.svg)
 
 With `DEBUG` on, the `nuke_di` logger names every client as it starts and finishes, with how
 many have connected so far: `Connecting client Consumer (2/7 connected)`, and the same for

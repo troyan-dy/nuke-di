@@ -33,6 +33,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   The startup summary drops the layers: `Connected 7 clients in 0.35s (slowest: ...)`.
 - `deps.timings` and `Run.clients` list the clients in resolution order, a client after its dependencies, instead
   of layer by layer.
+- The Clients guide section "Layers" is "Connect order" now, with an animated SVG of the example tree connected
+  three ways: one after another as in 1.0 (0.90 s), by layer as up to 1.12 (0.60 s) and by own dependencies
+  (0.35 s). The README shows how a startup goes now with a second animation, `docs/connect-now.svg`, in every
+  language.
 - The benchmark scenarios are renamed: `wide: N independent clients`, `deep: a chain of N`, and the application
   rows `ideal: the critical path` and `above the critical path`.
 

@@ -91,6 +91,10 @@ database: disconnected
 - **テストは差し替えるだけで、配線し直さない。** `mock()` と `override()` は、1 つのテストの間だけクライアントの代わりにフェイクを置きます。テスト対象のコードは変わりません。
 - **実行時の依存パッケージはない。** コアは標準ライブラリだけを使い、フレームワークとの統合はエクストラとして提供されます。
 
+起動の流れを[クライアントのガイド](ja/clients.md#connect-order)の例で示します。`Consumer` が必要とするのは `Kafka` だけなので、遅い `Postgres` を待たず、起動にかかる時間は最も長い依存関係の連鎖の時間になります。
+
+![6 つのクライアントが自身の依存先に従って接続する様子：Kafka と Redis の接続が終わるとすぐに Consumer と Http が開始し、起動は 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/connect-now.svg)
+
 ## <a id="performance"></a>パフォーマンス
 
 `benchmarks/compare.py` は同じクライアントのツリーを dishka、wireup、dependency-injector、injector に通します。各ライブラリは同じクラス群を

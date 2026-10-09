@@ -110,6 +110,12 @@ Qué pasó:
 - **Sin dependencias en tiempo de ejecución.** El núcleo usa solo la biblioteca estándar; las
   integraciones con frameworks son extras.
 
+Así transcurre un arranque, con el ejemplo de la [guía de clientes](es/clients.md#connect-order): `Consumer`
+solo necesita `Kafka`, así que no espera al lento `Postgres`, y el arranque dura lo que su cadena de
+dependencias más larga.
+
+![Seis clientes que se conectan por sus propias dependencias: Consumer y Http arrancan en cuanto Kafka y Redis se han conectado, el arranque tarda 0.35s](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/connect-now.svg)
+
 ## <a id="performance"></a>Rendimiento
 
 `benchmarks/compare.py` pasa los mismos árboles de clientes por dishka, wireup, dependency-injector e
