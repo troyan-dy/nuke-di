@@ -6,6 +6,24 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `connect()` and `disconnect()` await each client's coroutine under `asyncio.timeout()` instead of
+  `asyncio.wait_for()`, in the connecting task itself. On Python 3.11 `wait_for()` ran every call in a task
+  of its own, about 40 µs per client per phase: a chain of 1000 clients takes 104 ms instead of 184 ms, a
+  layer of 1000 clients 14.2 ms instead of 17.7 ms; 3.12 and later already ran the coroutine in the caller's
+  task and are unchanged. Outcomes, errors and logs are the same, and a timeout of `0` still expires before
+  the client's coroutine starts ([#30](https://github.com/troyan-dy/nuke-di/issues/30)).
+
+### Fixed
+
+- A `disconnect()` cancelled from outside (an ASGI server tearing down the lifespan, a second signal) left
+  the container with `connected=False` but its clients, layers and timings still registered, so the next
+  `connect()` would have reconnected the half-disconnected instances and `resolve()` would have handed them
+  out. The container is now flushed whichever way `disconnect()` ends, and the cancellation waits for the
+  `disconnect()` coroutines of the running layer to finish their own cancellation before it propagates; the
+  rollback of a failed `connect()` behaves the same ([#37](https://github.com/troyan-dy/nuke-di/issues/37)).
+
 ## [1.9.0] - 2026-10-09
 
 ### Added
