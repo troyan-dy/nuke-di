@@ -6,6 +6,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.11.2] - 2026-10-09
+
 ### Changed
 
 - The benchmark baseline on Python 3.11–3.14 and the comparison with other libraries on 3.11.7 are retaken at
@@ -423,7 +425,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.11.1...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.11.2...HEAD
+[1.11.2]: https://github.com/troyan-dy/nuke-di/compare/v1.11.1...v1.11.2
 [1.11.1]: https://github.com/troyan-dy/nuke-di/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/troyan-dy/nuke-di/compare/v1.10.2...v1.11.0
 [1.10.2]: https://github.com/troyan-dy/nuke-di/compare/v1.10.1...v1.10.2
