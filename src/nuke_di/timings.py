@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from typing import Literal
 
 Outcome = Literal["ok", "failed", "timed_out", "cancelled"]
@@ -14,6 +14,8 @@ class ClientTiming:
     """
 
     name: str
+    # The rest by keyword only: a second positional argument was the layer up to 1.12, and would land in `connect`
+    _: KW_ONLY
     # Seconds spent in connect(), not counting the wait for CONNECT_CONCURRENCY
     connect: float | None = None
     connect_outcome: Outcome | None = None

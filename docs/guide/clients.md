@@ -283,10 +283,10 @@ Orders   connect 0.00s ok   disconnect 0.00s ok
 ```
 
 `deps.timings` holds one `ClientTiming` per client of the last `connect()`, in resolution
-order, so a client comes after its dependencies. It outlives `disconnect()`, so it can be read once the container has stopped. In a
-FastAPI app, the lifespan you pass to `FastAPI()` runs inside the connected container, so it
-sees the connect timings. A worker or a job gets the same list as
-[`Run.clients`](workers-and-jobs.md#startup-metrics-and-structured-logs).
+order, so a client comes after its dependencies. It outlives `disconnect()`, so it can be read
+once the container has stopped. In a FastAPI app, the lifespan you pass to `FastAPI()` runs
+inside the connected container, so it sees the connect timings. A worker or a job gets the same
+list as [`Run.clients`](workers-and-jobs.md#startup-metrics-and-structured-logs).
 
 | `ClientTiming` field | Value |
 |----------------------|-------|

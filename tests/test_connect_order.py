@@ -392,12 +392,13 @@ async def test_client_cancelling_its_own_connect_fails_the_connect() -> None:
     dep.resolve(AfterCancelled)
 
     async with asyncio.timeout(1):
-        with pytest.raises(ConnectError, match=r"CancelsItself\.connect\(\) raised CancelledError"):
+        with pytest.raises(ConnectError, match=r"^CancelsItself\.connect\(\) raised CancelledError$"):
             await dep.connect()
 
     assert probe.events == []
     [timing] = [timing for timing in dep.timings if timing.name == "CancelsItself"]
-    assert timing.connect_outcome == "cancelled"
+    # The culprit, told apart from the clients cancelled because of it
+    assert timing.connect_outcome == "failed"
 
 
 class HangsOnDisconnect(Tracked):
@@ -420,3 +421,80 @@ async def test_timed_out_disconnect_still_releases_its_dependencies() -> None:
     assert probe.before("disconnect:HangsOnDisconnect", "disconnect:Postgres")
     [timing] = [timing for timing in dep.timings if timing.name == "HangsOnDisconnect"]
     assert timing.disconnect_outcome == "timed_out"
+
+
+class SlowToStop(Tracked):
+    """
+    Resolved second, disconnects slowest: Postgres waiting for its first consumer only would stop under it.
+    """
+
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+    async def disconnect(self) -> None:
+        await probe.run("disconnect:SlowToStop")
+        await asyncio.sleep(0.05)
+        probe.events.append("disconnect:SlowToStop:done")
+
+
+class QuickToStop(Tracked):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+async def test_dependency_disconnects_after_every_consumer() -> None:
+    dep = Dependencies()
+    dep.resolve(QuickToStop)
+    dep.resolve(SlowToStop)
+
+    async with dep:
+        pass
+
+    assert probe.events.index("disconnect:SlowToStop:done") < probe.events.index("disconnect:Postgres:start")
+    assert probe.before("disconnect:QuickToStop", "disconnect:Postgres")
+
+
+class SlowToStart(Client):
+    async def connect(self) -> None:
+        await asyncio.sleep(0.05)
+        probe.events.append("connect:SlowToStart:done")
+
+
+class NeedsBoth(Tracked):
+    # The slow dependency second: a client waiting for its first dependency only would start under it
+    def __init__(self, pg: Postgres, slow: SlowToStart) -> None:
+        self.slow = slow
+        self.pg = pg
+
+
+async def test_client_connects_after_every_dependency() -> None:
+    dep = Dependencies()
+    dep.resolve(NeedsBoth)
+
+    async with dep:
+        assert probe.events.index("connect:SlowToStart:done") < probe.events.index("connect:NeedsBoth:start")
+        assert probe.before("connect:Postgres", "connect:NeedsBoth")
+
+
+class Waits(Tracked):
+    def __init__(self, slow: Slow) -> None:
+        self.slow = slow
+
+
+async def test_cancelled_connect_cancels_the_clients_waiting_for_dependencies() -> None:
+    dep = Dependencies()
+    dep.resolve(Waits)
+    dep.resolve(Postgres)
+
+    task = asyncio.create_task(dep.connect())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    timings = {timing.name: timing for timing in dep.timings}
+    assert timings["Slow"].connect_outcome == "cancelled"
+    assert timings["Waits"].connect_outcome is None
+    assert timings["Postgres"].disconnect_outcome == "ok"
+    assert dep.connected is False
+    assert "connect:Waits:start" not in probe.events

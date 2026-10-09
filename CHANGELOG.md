@@ -14,16 +14,18 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   ([#28](https://github.com/troyan-dy/nuke-di/issues/28), ADR-0007): a client starts as soon as the clients it
   declares in `__init__` have connected, concurrently with every other client that is ready, and disconnects as
   soon as the clients that depend on it have, whatever their `disconnect()` ended in. A slow client holds back
-  only the clients that need it: the example of six clients in the Clients guide (Postgres 0.3 s; Consumer 0.3 s, which needs
+  only the clients that need it: the example in the Clients guide (Postgres 0.3 s; Consumer 0.3 s, which needs
   only the 0.05 s Kafka) starts in 0.35 s instead of 0.60 s, and one hung `disconnect()` no longer stalls the
   clients beside it. Only declared dependencies are ordered, as before: a client that relied on an unrelated
   client of the layer below being connected first has to declare it now.
-- The first failure in `connect()` cancels every client still connecting, across the whole tree; the clients
+- The first failure in `connect()` cancels every client still connecting, across the whole graph; the clients
   still waiting for their dependencies keep `None` in their `ClientTiming`, and the connected ones are rolled
   back as before.
 - A client whose `connect()` ends in a `CancelledError` of its own, e.g. re-raised from a task it awaited, fails
   the connect with a `ConnectError` like an exception does; its consumers would otherwise wait for it forever. Up
-  to 1.12 it was skipped as not connected and the layers above it connected anyway.
+  to 1.12 it was skipped as not connected and the layers above it connected anyway. Its `connect_outcome` is
+  `"failed"`, which tells it apart from the clients cancelled because of it, and the message has no empty `: `
+  after an exception without one. A `CancelledError` of its own in `disconnect()` is logged now, like a failure.
 - `CONNECT_CONCURRENCY` counts only clients in `connect()` or `disconnect()`; a client waiting for its
   dependencies does not take a slot.
 - The `DEBUG` records of a client connecting or disconnecting say how many have finished so far:
@@ -40,7 +42,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   record and the layer subgraphs of `Graph.to_mermaid()`, which now draws the clients and the arrows alone. Removing
   public fields in a minor release departs from semantic versioning on purpose: the fields described a schedule
   that no longer exists (ADR-0007).
-
+- `ClientTiming` takes everything after `name` by keyword only, so `ClientTiming("Orders", 1)`, which set the
+  layer up to 1.12, raises a `TypeError` instead of setting `connect` silently.
 
 ## [1.12.1] - 2026-10-09
 

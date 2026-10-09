@@ -192,7 +192,7 @@ def deep(n: int, strings: bool = False) -> Tree:
 def mixed(n: int, strings: bool = False) -> Tree:
     """
     A pyramid of `n` clients, 1, 2, 4, ... wide from the top; every client depends on two or three of the
-    level below, so the levels share their dependencies like a diamond. About log2(n) clients deep.
+    row below, so the rows share their dependencies like a diamond. About log2(n) clients deep.
     """
     widths = []
     total, width = 0, 1

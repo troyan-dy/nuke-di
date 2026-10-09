@@ -76,7 +76,7 @@ underestimate.
 |----------|-------|------------|
 | `resolve(), cold` | `wide`: one root that declares `N - 1` clients without dependencies | `resolve()` of the root on a fresh `Dependencies()`, the classes never resolved before: a fresh tree per sample, so nothing a process keeps per class serves them |
 | | `deep`: a chain of `N` clients | |
-| | `mixed`: a pyramid 1, 2, 4, ... wide from the top, every client depends on two or three of the level below, about log2(N) levels | |
+| | `mixed`: a pyramid 1, 2, 4, ... wide from the top, every client depends on two or three of the row below, about log2(N) clients deep | |
 | | `wide, strings`, `deep, strings`, `mixed, strings`: the same trees with string annotations | |
 | `resolve(), second container, classes seen before` | the same six trees | `resolve()` of the root on a fresh `Dependencies()` after the classes were resolved once in the process: what every test of a session pays after the first, and the row the per-class cache of 1.9.1 ([#29](https://github.com/troyan-dy/nuke-di/issues/29)) moved |
 | `resolve(), warm` | the three trees with real type hints | A second `resolve()` of the same root: the singleton cache hit, independent of `N` and of the hints |

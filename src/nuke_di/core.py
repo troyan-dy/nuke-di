@@ -151,7 +151,7 @@ class Dependencies:
         try:
             # A client connects once its dependencies have; the first failure cancels every client still connecting
             # and every client still waiting
-            await _in_order(
+            await _in_dependency_order(
                 clients,
                 self._dependencies_among(clients),
                 partial(self._connect_client, limiter=limiter, connected=connected, total=len(clients)),
@@ -234,14 +234,16 @@ class Dependencies:
             raise _ClientConnectError(error) from exc
 
         except (Exception, asyncio.CancelledError) as exc:
-            # A CancelledError of the client's own fails the connect like an exception: its consumers would wait for
-            # it forever. A cancellation of connect() itself, or by the failure of another client, goes on.
-            if isinstance(exc, asyncio.CancelledError) and _cancelled_from_outside():
-                raise
-            logger.exception(
-                "%s.connect() raised %s: %s", name, type(exc).__name__, exc, extra=_fields(timing, timing.connect)
-            )
-            error = ConnectError(f"{name}.connect() raised {type(exc).__name__}: {exc}")
+            if isinstance(exc, asyncio.CancelledError):
+                # A cancellation of connect() itself, or by the failure of another client, goes on. One of the client's
+                # own fails the connect like an exception, its consumers would wait for it forever, and the timing
+                # tells the culprit apart from the clients cancelled because of it
+                if _cancelled_from_outside():
+                    raise
+                timing.connect_outcome = "failed"
+            raised = f"{name}.connect() raised {_described(exc)}"
+            logger.exception("%s", raised, extra=_fields(timing, timing.connect))
+            error = ConnectError(raised)
             error.__cause__ = exc
             raise _ClientConnectError(error) from exc
 
@@ -255,14 +257,16 @@ class Dependencies:
         logger.debug("Connect failed, disconnecting %d connected clients", len(connected), extra=fields())
         await self._disconnect_clients(connected)
 
-    async def _disconnect_clients(self, clients: list[NotSingletonClient]) -> None:
+    async def _disconnect_clients(self, to_disconnect: list[NotSingletonClient]) -> None:
         with self._lock:
             self.connected = False
-            clients = list(clients)
+            clients = list(to_disconnect)
+            # Read with the flag: once it is down, another thread may flush() the dependencies away
+            dependencies = self._dependencies_among(clients)
         # A client disconnects once its consumers have, however their disconnect() ended
         consumers: dict[int, list[int]] = {id(client): [] for client in clients}
-        for consumer, dependencies in self._dependencies_among(clients).items():
-            for dependency in dependencies:
+        for consumer, ids in dependencies.items():
+            for dependency in ids:
                 consumers[dependency].append(consumer)
         # Clients whose disconnect() ended, for the progress in the records
         disconnected: list[NotSingletonClient] = []
@@ -270,7 +274,7 @@ class Dependencies:
         try:
             # Only a cancellation of disconnect() itself ends it early: _disconnect_client logs and swallows what a
             # client raises
-            await _in_order(
+            await _in_dependency_order(
                 clients,
                 consumers,
                 partial(
@@ -316,6 +320,7 @@ class Dependencies:
             # dependencies still have to be stopped. A cancellation of disconnect() itself goes on.
             if _cancelled_from_outside():
                 raise
+            logger.exception("%s.disconnect() raised CancelledError", name, extra=_fields(timing, timing.disconnect))
         except TimeoutError:
             logger.exception(
                 "%s did not disconnect within %gs (DISCONNECT_TIMEOUT_SECONDS)",
@@ -846,7 +851,7 @@ async def _within(seconds: float, coro: Coroutine[Any, Any, None]) -> None:
         await coro
 
 
-async def _in_order(
+async def _in_dependency_order(
     clients: list[NotSingletonClient],
     waits_for: dict[int, list[int]],
     step: Callable[[NotSingletonClient], Coroutine[Any, Any, None]],
@@ -878,6 +883,14 @@ def _cancelled_from_outside() -> bool:
     """
     task = asyncio.current_task()
     return task is None or task.cancelling() > 0
+
+
+def _described(exc: BaseException) -> str:
+    """
+    The type of `exc` and its message, if it has one: `OSError: unreachable`, a bare `CancelledError`.
+    """
+    message = str(exc)
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
 def _display_names(classes: Iterable[type]) -> dict[type, str]:

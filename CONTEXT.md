@@ -20,9 +20,13 @@ _Avoid_: Registry, injector
 Building a client together with its whole dependency tree, before the container connects.
 _Avoid_: Instantiation, wiring
 
+**Connect order**:
+A client connects as soon as its own dependencies have and disconnects as soon as its consumers have; only dependencies declared in `__init__` order clients, and every client that is ready connects concurrently with the others.
+_Avoid_: Layer, level, DAG schedule
+
 **Connect concurrency**:
-The most `connect()` or `disconnect()` calls of one container running at once; unlimited by default. A client waiting for its own dependencies does not count against it. A client connects as soon as its own dependencies have and disconnects as soon as its consumers have: only dependencies declared in `__init__` order clients.
-_Avoid_: Layer, level, parallelism, workers
+The most `connect()` or `disconnect()` calls of one container running at once; unlimited by default. A client waiting for its own dependencies does not count against it.
+_Avoid_: Parallelism, workers
 
 **Graph**:
 Every client the container has resolved so far, with who depends on whom. A snapshot: a flush empties it, apart from the Replacements of open Override blocks. Resolution of one root builds that root's tree; the container holds the graph, because singletons are shared between trees.

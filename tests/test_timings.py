@@ -457,3 +457,9 @@ async def test_client_cancelled_while_waiting_for_a_slot_never_started() -> None
     assert timings["Slow"].connect_outcome == "cancelled"
     assert timings["Sleepy"].connect is None
     assert timings["Sleepy"].connect_outcome is None
+
+
+def test_only_the_name_is_positional() -> None:
+    # A second positional argument was the layer up to 1.12: it must not land in `connect` silently
+    with pytest.raises(TypeError):
+        ClientTiming("Orders", 1)  # type: ignore[call-arg]
