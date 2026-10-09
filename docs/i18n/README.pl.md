@@ -356,6 +356,8 @@ Routery, websockety i własny lifespan aplikacji opisuje rozdział [FastAPI](pl/
 - [Testowanie](pl/testing.md): `mock()`, `override()`, fixture'y pytest, sprawdzanie okablowania
 - [Konfiguracja](pl/configuration.md): timeouty, współbieżność i okres karencji
 - [Błędy](pl/errors.md): każdy wyjątek i sytuacja, w której jest zgłaszany
+- [Przykłady](../../examples/README.md): 21 scenariuszy gotowych do uruchomienia, od jednorazowego skryptu i workera kolejki
+  po FastAPI, Litestar, FastStream, Starlette i cały serwis, każdy z wynikiem i testami
 - [Benchmarki](../benchmarks.md): każdy scenariusz, punkt odniesienia dla Pythona 3.11–3.14 i porównanie
   z innymi bibliotekami
 - [Rozwój](pl/development.md): sprawdzenia, pokrycie i wydania

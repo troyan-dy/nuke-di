@@ -343,6 +343,8 @@ $ pytest -q tests/test_api.py
 - [测试](zh-CN/testing.md)：`mock()`、`override()`、pytest fixture、检查装配
 - [配置](zh-CN/configuration.md)：超时、并发和宽限期
 - [错误](zh-CN/errors.md)：每种异常及其抛出时机
+- [示例](../../examples/README.md)：21 个可直接运行的场景，从一次性脚本、队列 worker
+  到 FastAPI、Litestar、FastStream、Starlette 和完整的服务，每个都附带输出和测试
 - [基准测试](../benchmarks.md)：每个场景、Python 3.11–3.14 上的基线，以及与其他库的
   对比
 - [开发](zh-CN/development.md)：检查、覆盖率和发布

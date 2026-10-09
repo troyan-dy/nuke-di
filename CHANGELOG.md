@@ -6,6 +6,23 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.11.4] - 2026-10-09
+
+### Added
+
+- `examples/`: 21 runnable scenarios, each a package with a short README, the real output of its run and
+  tests. One-off scripts and `@job`s with parameters, workers that consume a SQLite task queue and NATS
+  (nats-py in a queue group), a periodic worker, background tasks, FastAPI, Litestar, FastStream on NATS
+  and Starlette as a framework without an integration, settings from the environment, `NotSingletonClient`,
+  dataclass clients, the graph, startup failures, hooks with metrics and JSON logs, a cookbook of tests and
+  a service with an API, an outbox worker, a cleanup job and its Kubernetes manifests. They run from
+  `examples/` (`uv run python -m hello.main`); `make examples` runs their tests, and the README "Documentation" section and its
+  translations link to the index.
+- `tests/test_examples.py` runs the tests of every example and its programs, workers stopped by a signal
+  included, so an example that drifts from the library fails CI. The CI test job starts a NATS service for
+  the NATS examples, which are skipped where no server listens on localhost:4222. mypy and pyright check
+  `examples/` too.
+
 ## [1.11.3] - 2026-10-09
 
 ### Changed
@@ -440,7 +457,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.11.3...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.11.4...HEAD
+[1.11.4]: https://github.com/troyan-dy/nuke-di/compare/v1.11.3...v1.11.4
 [1.11.3]: https://github.com/troyan-dy/nuke-di/compare/v1.11.2...v1.11.3
 [1.11.2]: https://github.com/troyan-dy/nuke-di/compare/v1.11.1...v1.11.2
 [1.11.1]: https://github.com/troyan-dy/nuke-di/compare/v1.11.0...v1.11.1

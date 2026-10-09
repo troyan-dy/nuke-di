@@ -326,6 +326,8 @@ $ pytest -q tests/test_api.py
 - [テスト](ja/testing.md)：`mock()`、`override()`、pytest フィクスチャ、配線の確認
 - [設定](ja/configuration.md)：タイムアウト、並行数、猶予期間
 - [エラー](ja/errors.md)：すべての例外と、それが送出される条件
+- [サンプル](../../examples/README.md): すぐに動かせる 21 のシナリオ。単発のスクリプトやキューの worker から
+  FastAPI、Litestar、FastStream、Starlette、サービス全体まで、それぞれ出力とテスト付き
 - [ベンチマーク](../benchmarks.md)：すべてのシナリオ、Python 3.11–3.14 のベースライン、他のライブラリとの比較
 - [開発](ja/development.md)：チェック、カバレッジ、リリース
 

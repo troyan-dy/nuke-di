@@ -356,6 +356,8 @@ Routers, websockets e o lifespan da própria aplicação são tratados em [FastA
 - [Testes](pt-BR/testing.md): `mock()`, `override()`, as fixtures do pytest, a verificação da ligação
 - [Configuração](pt-BR/configuration.md): timeouts, concorrência e o período de tolerância
 - [Erros](pt-BR/errors.md): cada exceção e quando ela é lançada
+- [Exemplos](../../examples/README.md): 21 cenários prontos para executar, de um script avulso e um worker de fila
+  a FastAPI, Litestar, FastStream, Starlette e um serviço completo, cada um com sua saída e seus testes
 - [Benchmarks](../benchmarks.md): cada cenário, a linha de base no Python 3.11–3.14 e a comparação
   com outras bibliotecas
 - [Desenvolvimento](pt-BR/development.md): as verificações, a cobertura e as releases

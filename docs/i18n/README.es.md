@@ -359,6 +359,8 @@ Los routers, los websockets y el lifespan propio de la app se describen en [Fast
 - [Pruebas](es/testing.md): `mock()`, `override()`, los fixtures de pytest, la comprobación del cableado
 - [Configuración](es/configuration.md): timeouts, concurrencia y el periodo de gracia
 - [Errores](es/errors.md): cada excepción y cuándo se lanza
+- [Ejemplos](../../examples/README.md): 21 escenarios listos para ejecutar, desde un script puntual y un worker de colas
+  hasta FastAPI, Litestar, FastStream, Starlette y un servicio completo, cada uno con su salida y sus pruebas
 - [Benchmarks](../benchmarks.md): cada escenario, la línea base en Python 3.11–3.14 y la comparación
   con otras bibliotecas
 - [Desarrollo](es/development.md): las comprobaciones, la cobertura y la publicación de versiones

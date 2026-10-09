@@ -1,0 +1,7 @@
+# The rules of the repository, with the imports sorted as in a project that uses nuke-di:
+# nuke_di is a third-party package and every example, run from this directory, is first-party
+extend = "../pyproject.toml"
+src = ["."]
+
+[lint.isort]
+known-third-party = ["nuke_di"]

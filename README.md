@@ -356,6 +356,8 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
 - [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md): `mock()`, `override()`, the pytest fixtures, checking the wiring
 - [Configuration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/configuration.md): timeouts, concurrency and the grace period
 - [Errors](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/errors.md): every exception and when it is raised
+- [Examples](https://github.com/troyan-dy/nuke-di/blob/master/examples/README.md): 21 runnable scenarios, from a one-off script and a queue worker
+  to FastAPI, Litestar, FastStream, Starlette and a whole service, each with its output and tests
 - [Benchmarks](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md): every scenario, the baseline on Python 3.11–3.14 and the comparison
   with other libraries
 - [Development](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/development.md): the checks, coverage and releases
