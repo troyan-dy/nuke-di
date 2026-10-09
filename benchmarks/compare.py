@@ -5,7 +5,8 @@ nuke-di against other dependency injection libraries, on the trees of benchmarks
 
 Every library gets the same classes, whose `__init__` takes the dependencies by type hint, and does the
 same work: `cold` builds a container, registers the classes and gets the root of the tree, which
-constructs every client; `warm` gets the root again from that container, the singleton; `request` is
+constructs every client, on classes made for every sample, as the cold row of benchmarks/run.py; `warm`
+gets the root again from that container, the singleton; `request` is
 one FastAPI request to a handler that takes a client through the library's integration. The figures of
 the baseline are in docs/benchmarks.md.
 
@@ -192,23 +193,41 @@ def attempt(result: Result, sample: Callable[[], float], repeat: int) -> Result:
     return result
 
 
-def trees(sizes: list[int], strings: bool = False) -> Iterator[tuple[str, int, Tree]]:
+def trees(sizes: list[int]) -> Iterator[tuple[str, int, Tree]]:
+    """
+    One tree per shape and size, decorated for every library, for the scenarios that reuse its classes.
+    """
     for shape, build in SHAPES.items():
         for n in sizes:
-            tree = build(n, strings)
+            tree = build(n)
             for library in LIBRARIES:
                 library.prepare(tree)
-            yield shape_label(shape, strings), n, tree
-            tree.discard()
+            yield shape, n, tree
+
+
+def cold_sample(library: Library, build: Callable[[], Tree]) -> float:
+    """
+    One cold start of `library` on classes made for this sample: the same tree every sample would be served
+    by what a library keeps per class after the first one (nuke-di's `__init__` cache, #29), which is the
+    second container of a process and not a startup. Making and decorating the classes stays outside the timing.
+    """
+    tree = build()
+    library.prepare(tree)
+    try:
+        return measure(library.cold, 1, tree)
+    finally:
+        tree.discard()
 
 
 def cold_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
     # The string-annotation trees as well: most code bases have `from __future__ import annotations`
     for strings in (False, True):
-        for shape, n, tree in trees(sizes, strings):
-            for library in LIBRARIES:
-                sample = partial(measure, library.cold, 1, tree)
-                yield attempt(Result(COLD_START, shape, n, [], library=library.name), sample, repeat)
+        for shape, build in SHAPES.items():
+            for n in sizes:
+                for library in LIBRARIES:
+                    sample = partial(cold_sample, library, partial(build, n, strings))
+                    result = Result(COLD_START, shape_label(shape, strings), n, [], library=library.name)
+                    yield attempt(result, sample, repeat)
 
 
 def warm_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
