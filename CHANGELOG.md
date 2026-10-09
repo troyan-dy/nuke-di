@@ -14,8 +14,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   `bind()`, `client_of()`, `running()`, `wrap_lifespan()` and `unique()`. The FastAPI, FastStream and Litestar
   integrations are built on it, so an integration with another framework can live in its own package.
 - `nuke_di.integration.testing.check(framework, make_app, run)`: the contract every integration keeps, as one
-  call for the integration's own tests. It brings its own clients and handlers and checks that a handler and a
-  dependency take clients by type hint, that `override()` before startup applies, that a handler called
+  call for the integration's own tests. It brings its own clients and handlers and checks that a handler takes
+  clients by type hint, and a dependency too with a `DependsFramework`, that `override()` before startup applies, that a handler called
   without the app's lifespan raises the framework's "not connected" error, and that a failed `connect()` fails
   the startup with a `RuntimeError` and leaves the container flushed. Failed cases come back as one
   `ExceptionGroup`, each with a note naming its case. The FastAPI, FastStream and Litestar integrations run it.

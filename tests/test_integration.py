@@ -17,7 +17,7 @@ from nuke_di import Dependencies
 from nuke_di.integration import Binding, DependsFramework, Framework, bind, running, unique
 from nuke_di.integration.testing import Send, check
 
-# --- an integration that breaks the contract -------------------------------------------------------------
+# --- an integration on the kit, and integrations that break the contract ------------------------------------
 
 
 class Toy:
@@ -77,7 +77,7 @@ async def test_an_integration_on_the_kit_keeps_the_contract() -> None:
     await check(TOY, toy_app, toy_run)
 
 
-def notes(group: BaseExceptionGroup[Any]) -> list[str]:
+def notes(group: ExceptionGroup[Exception]) -> list[str]:
     return [error.__notes__[0].split(":")[0].removeprefix("Toy integration, case ") for error in group.exceptions]
 
 
@@ -91,7 +91,7 @@ async def test_check_reports_every_broken_case() -> None:
         bind(handler, container, TOY)
         yield lambda: toy_call(handler)
 
-    with pytest.raises(BaseExceptionGroup, match="the Toy integration breaks the nuke-di contract") as info:
+    with pytest.raises(ExceptionGroup, match="the Toy integration breaks the nuke-di contract") as info:
         await check(TOY, toy_app, run_without_container)
 
     assert notes(info.value) == ["handler", "dependency", "override", "failed_connect"]
@@ -103,7 +103,7 @@ async def test_check_reports_a_handler_that_runs_without_the_lifespan() -> None:
         async with toy_run(toy, True) as send:
             yield send
 
-    with pytest.raises(BaseExceptionGroup) as info:
+    with pytest.raises(ExceptionGroup) as info:
         await check(TOY, toy_app, run_always_connected)
 
     assert notes(info.value) == ["not_connected"]
@@ -115,7 +115,7 @@ async def test_check_reports_a_framework_that_never_calls_the_handler() -> None:
     async def run_nothing(toy: tuple[Toy, Dependencies], lifespan: bool) -> AsyncIterator[Send]:
         yield lambda: None
 
-    with pytest.raises(BaseExceptionGroup) as info:
+    with pytest.raises(ExceptionGroup) as info:
         await check(TOY, toy_app, run_nothing)
 
     assert notes(info.value) == ["handler", "dependency", "override", "not_connected", "failed_connect"]
@@ -142,7 +142,7 @@ async def test_check_reports_a_wrong_error_and_a_container_left_resolved() -> No
             container.resolve(binding.cls)
         raise RuntimeError("nuke-di clients failed to start: Broken.connect() raised OSError: unreachable")
 
-    with pytest.raises(BaseExceptionGroup) as info:
+    with pytest.raises(ExceptionGroup) as info:
         await check(TOY, toy_app, run_carelessly)
 
     assert notes(info.value) == ["not_connected", "failed_connect"]
@@ -166,11 +166,26 @@ async def test_check_reports_a_connect_error_let_out() -> None:
         await container.connect()
         yield lambda: None  # pragma: no cover
 
-    with pytest.raises(BaseExceptionGroup) as info:
+    with pytest.raises(ExceptionGroup) as info:
         await check(TOY, toy_app, run_raw)
 
     assert notes(info.value) == ["failed_connect"]
     assert "expected a RuntimeError" in str(info.value.exceptions[0])
+
+
+async def test_check_reports_a_system_exit_as_a_failed_case() -> None:
+    @asynccontextmanager
+    async def run_exiting(toy: tuple[Toy, Dependencies], lifespan: bool) -> AsyncIterator[Send]:
+        if lifespan:
+            raise SystemExit(3)
+        async with toy_run(toy, lifespan) as send:
+            yield send
+
+    with pytest.raises(ExceptionGroup) as info:
+        await check(TOY, toy_app, run_exiting)
+
+    assert notes(info.value) == ["handler", "dependency", "override", "failed_connect"]
+    assert "a SystemExit escaped the app, which a server cannot report: SystemExit(3)" in str(info.value.exceptions[0])
 
 
 async def test_check_skips_the_dependency_without_depends() -> None:

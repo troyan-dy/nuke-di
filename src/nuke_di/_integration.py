@@ -1,6 +1,6 @@
 """
 Deprecated: the integration kit is public now, import it from `nuke_di.integration`. This alias is removed in
-the next minor version.
+1.15.0.
 """
 
 import warnings

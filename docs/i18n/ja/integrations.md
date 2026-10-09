@@ -12,7 +12,7 @@
 | `DependsFramework(..., depends, make_depends, per_container=True)` | `Depends(...)` マーカーで注入するフレームワーク。`depends` はそのマーカーのクラス、`make_depends` は関数からマーカーを作る関数です。 |
 | `bind(call, container, framework)` | ハンドラー、依存関係の関数、依存関係のクラスのシグネチャと、それらが使う依存関係のシグネチャを書き換えます。クライアントの引数はそれぞれ `Annotated[Client, Depends(...)]` になります。クライアントごとの `Binding` を返します。 |
 | `Binding` | クライアントの引数 1 つ。`get()` は起動時に解決されたクライアントを返すか、`not_started` / `not_connected` を送出します。 |
-| `running(container, bindings)` | 非同期コンテキストマネージャー。`bindings` のクライアントを解決してコンテナを接続し、終了時に `Shutdown` をセットして `BackgroundTasks` を止め、切断します。起動の失敗は `RuntimeError` になり、サーバーはそれを起動の失敗として報告します。 |
+| `running(container, bindings)` | 非同期コンテキストマネージャー。`bindings` のクライアントを解決してコンテナを接続し、終了時に `Shutdown` をセットして `BackgroundTasks` を止め、切断します。`ConnectError` と `InitializeDependencyError` は `RuntimeError` になり、サーバーはそれを起動の失敗として報告します。循環などクライアントツリーのエラーはそのまま伝わります。 |
 | `wrap_lifespan(original, container, bindings)` | アプリ自身の lifespan `original` を `running()` の内側で実行する lifespan。`bindings` は起動時に呼ばれるので、`setup()` の後に宣言したハンドラーも見つかります。 |
 | `client_of(hint, *markers)` | 型ヒントが求めるクライアント、または `None`。対象は `Client`、および `markers` のいずれも含まない `Annotated[Client, ...]` です。 |
 | `unique(bindings)` | 重複を除いた `bindings`。1 つの依存関係が複数のハンドラーから到達できることはよくあります。 |
@@ -161,7 +161,7 @@ F                                                                        [100%]
     | FastStream integration, case dependency: a dependency of a handler takes a client by type hint
     | RuntimeError: Greeter is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`
     | FastStream integration, case override: override() before startup replaces a client the handler gets through another client
-    | AssertionError: expected a RuntimeError with 'nuke-di clients failed to start: Broken.connect() raised OSError: unreachable', got RuntimeError('Broken is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`')
+    | AssertionError: expected a RuntimeError with 'nuke-di clients failed to start' about Broken, got RuntimeError('Broken is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`')
     | FastStream integration, case failed_connect: a failed connect() fails the app's startup with a RuntimeError and leaves the container flushed
 FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 1 failed in 0.17s

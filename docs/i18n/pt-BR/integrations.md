@@ -16,7 +16,7 @@ além dele e da API pública.
 | `DependsFramework(..., depends, make_depends, per_container=True)` | Um framework que injeta por meio de marcadores `Depends(...)`: `depends` é a classe dos marcadores dele, `make_depends` constrói um para uma função. |
 | `bind(call, container, framework)` | Reescreve a assinatura de um handler, de uma função de dependência ou de uma classe de dependência, e das dependências que ele usa: cada argumento de cliente vira `Annotated[Client, Depends(...)]`. Retorna o `Binding` de cada cliente. |
 | `Binding` | Um argumento de cliente; `get()` retorna o cliente resolvido na inicialização, ou lança `not_started` / `not_connected`. |
-| `running(container, bindings)` | Um gerenciador de contexto assíncrono: resolve os clientes de `bindings`, conecta o container e, na saída, aciona `Shutdown`, para as `BackgroundTasks` e desconecta. Uma inicialização que falha é um `RuntimeError`, que um servidor reporta como falha na inicialização. |
+| `running(container, bindings)` | Um gerenciador de contexto assíncrono: resolve os clientes de `bindings`, conecta o container e, na saída, aciona `Shutdown`, para as `BackgroundTasks` e desconecta. Um `ConnectError` ou `InitializeDependencyError` vira um `RuntimeError`, que um servidor reporta como falha na inicialização; um erro da árvore de clientes, como um ciclo, passa como está. |
 | `wrap_lifespan(original, container, bindings)` | Um lifespan que roda o lifespan `original` da própria aplicação dentro de `running()`; `bindings` é chamado na inicialização, então os handlers declarados depois de `setup()` são encontrados. |
 | `client_of(hint, *markers)` | O cliente que um type hint pede, ou `None`: `Client`, ou `Annotated[Client, ...]` sem nenhum dos `markers`. |
 | `unique(bindings)` | `bindings` sem repetições: uma mesma dependência costuma ser alcançável a partir de vários handlers. |
@@ -194,7 +194,7 @@ F                                                                        [100%]
     | FastStream integration, case dependency: a dependency of a handler takes a client by type hint
     | RuntimeError: Greeter is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`
     | FastStream integration, case override: override() before startup replaces a client the handler gets through another client
-    | AssertionError: expected a RuntimeError with 'nuke-di clients failed to start: Broken.connect() raised OSError: unreachable', got RuntimeError('Broken is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`')
+    | AssertionError: expected a RuntimeError with 'nuke-di clients failed to start' about Broken, got RuntimeError('Broken is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`')
     | FastStream integration, case failed_connect: a failed connect() fails the app's startup with a RuntimeError and leaves the container flushed
 FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 1 failed in 0.17s

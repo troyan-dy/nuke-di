@@ -14,7 +14,7 @@
 | `DependsFramework(..., depends, make_depends, per_container=True)` | 通过 `Depends(...)` 标记注入的框架：`depends` 是其标记的类，`make_depends` 为一个函数构建标记。 |
 | `bind(call, container, framework)` | 重写处理函数、依赖函数或依赖类的签名，以及它所用依赖的签名：每个客户端参数都变成 `Annotated[Client, Depends(...)]`。返回每个客户端的 `Binding`。 |
 | `Binding` | 一个客户端参数；`get()` 返回启动时解析出的客户端，否则抛出 `not_started` / `not_connected`。 |
-| `running(container, bindings)` | 一个异步上下文管理器：解析 `bindings` 中的客户端，连接容器；退出时设置 `Shutdown`、停止 `BackgroundTasks` 并断开连接。启动失败表现为 `RuntimeError`，服务器会将其报告为启动失败。 |
+| `running(container, bindings)` | 一个异步上下文管理器：解析 `bindings` 中的客户端，连接容器；退出时设置 `Shutdown`、停止 `BackgroundTasks` 并断开连接。`ConnectError` 或 `InitializeDependencyError` 会变成 `RuntimeError`，服务器会将其报告为启动失败；客户端树的错误（例如循环依赖）则原样抛出。 |
 | `wrap_lifespan(original, container, bindings)` | 一个在 `running()` 内运行应用自己的 `original` lifespan 的 lifespan；`bindings` 在启动时调用，因此在 `setup()` 之后声明的处理函数也能被找到。 |
 | `client_of(hint, *markers)` | 类型提示所请求的客户端，或 `None`：`Client`，或不带任何 `markers` 的 `Annotated[Client, ...]`。 |
 | `unique(bindings)` | 去掉重复项的 `bindings`：同一个依赖常常可以从多个处理函数到达。 |
@@ -185,7 +185,7 @@ F                                                                        [100%]
     | FastStream integration, case dependency: a dependency of a handler takes a client by type hint
     | RuntimeError: Greeter is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`
     | FastStream integration, case override: override() before startup replaces a client the handler gets through another client
-    | AssertionError: expected a RuntimeError with 'nuke-di clients failed to start: Broken.connect() raised OSError: unreachable', got RuntimeError('Broken is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`')
+    | AssertionError: expected a RuntimeError with 'nuke-di clients failed to start' about Broken, got RuntimeError('Broken is not connected: start the app with its lifespan, e.g. `async with TestApp(app)`')
     | FastStream integration, case failed_connect: a failed connect() fails the app's startup with a RuntimeError and leaves the container flushed
 FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 1 failed in 0.17s
