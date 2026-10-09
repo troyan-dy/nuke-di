@@ -147,7 +147,7 @@ def test_init_error_names_the_exception_and_the_path() -> None:
     with pytest.raises(InitializeDependencyError) as info:
         Dependencies().resolve(Root)
 
-    assert str(info.value) == "Strict.__init__ raised ValueError: pool: field required (resolving Root -> Strict)"
+    assert str(info.value) == "Strict.__init__ raised ValueError (resolving Root -> Strict): pool: field required"
     assert isinstance(info.value.__cause__, ValueError)
 
 
@@ -169,8 +169,8 @@ def test_resolve_refuses_what_is_not_a_client(cls: Any, name: str) -> None:
         Dependencies().resolve(cls)
 
 
-def test_inject_refuses_a_function_that_takes_a_non_client() -> None:
-    # `Settings` is looked up by the signature as a plain argument, so it is not resolved at all
+def test_inject_leaves_a_non_client_argument_to_the_caller() -> None:
+    # `Settings` is not a client, so inject() leaves the argument alone, as it does with `user_id: int`
     def handler(settings: Settings) -> None: ...
 
     injected = Dependencies().inject(handler)
@@ -237,7 +237,7 @@ def test_two_clients_with_one_name_are_told_apart_in_the_path() -> None:
     with pytest.raises(ConnectError) as error, deps.override(billing):
         pass
     assert str(error.value) == (
-        f"override(Database) needs a container without resolved clients, found: {__name__}.Database"
+        f"override(app.billing.Database) needs a container without resolved clients, found: {__name__}.Database"
     )
 
 
@@ -260,6 +260,41 @@ async def test_a_class_local_to_a_function_drops_the_function() -> None:
     await deps.disconnect()
 
     assert deps.timings[0].name == "Local"
+
+
+async def test_two_local_classes_with_one_name_are_told_apart_in_full() -> None:
+    def first() -> type[Client]:
+        class Local(Client):
+            pass
+
+        return Local
+
+    def second() -> type[Client]:
+        class Local(Client):
+            pass
+
+        return Local
+
+    deps = Dependencies()
+    deps.resolve(first())
+    deps.resolve(second())
+    await deps.connect()
+    await deps.disconnect()
+
+    assert [timing.name for timing in deps.timings] == [
+        f"{__name__}.test_two_local_classes_with_one_name_are_told_apart_in_full.<locals>.first.<locals>.Local",
+        f"{__name__}.test_two_local_classes_with_one_name_are_told_apart_in_full.<locals>.second.<locals>.Local",
+    ]
+
+
+def test_a_nested_class_is_named_in_full_in_an_argument_error() -> None:
+    class Reports(Client):
+        def __init__(self, inner: Outer.Inner | None) -> None: ...
+
+    with pytest.raises(InvalidSignatureError, match=r"is Outer.Inner \| None, a client cannot be optional"):
+        Dependencies().resolve(Reports)
+    with pytest.raises(InvalidSignatureError, match=r"^Outer is not a client"):
+        Dependencies().resolve(Outer)  # type: ignore[type-var]
 
 
 async def test_a_unique_name_stays_short() -> None:

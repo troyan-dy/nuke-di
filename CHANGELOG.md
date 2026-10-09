@@ -13,18 +13,19 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   `connect(): already connected, call disconnect() first`, `disconnect(): already disconnected`; a timeout
   reads `Kafka did not connect within 30s (CONNECT_TIMEOUT_SECONDS)`; a failed `connect()` reads
   `Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable`; a failed `__init__` reads
-  `Strict.__init__ raised ValidationError: ... (resolving Db -> Strict)` with the path of the resolution. The
+  `Strict.__init__ raised ValidationError (resolving Db -> Strict): ...`, the path before a cause that may span
+  lines. The
   exception classes are the same, and "already connected" / "already disconnected" stay in the text, so a test
   that matches them keeps matching; the log records of the `nuke_di.core` logger carry the same texts
   ([#54](https://github.com/troyan-dy/nuke-di/issues/54)).
 - Errors, logs and `ClientTiming.name` name a client by its `__qualname__`, so a nested class reads
-  `Outer.Inner`, and with the module in front (`app.orders.Database`) when the container holds two clients
-  with the same name; a unique name stays short, so every message shown in the README is unchanged
+  `Outer.Inner`, and in full, module included (`app.orders.Database`), when the container holds two clients
+  with the same name, a Replacement counted; a unique name stays short, so every message shown in the README is unchanged
   ([#64](https://github.com/troyan-dy/nuke-di/issues/64)).
 
 ### Added
 
-- `resolve()` and `inject()` refuse a class that is not a client at resolution, with
+- `resolve()` refuses a class that is not a client, with
   `InvalidSignatureError: Settings is not a client: subclass Client or NotSingletonClient`, instead of building
   it and failing at `connect()` with an `AttributeError` on `connect`
   ([#55](https://github.com/troyan-dy/nuke-di/issues/55)).

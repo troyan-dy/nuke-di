@@ -608,8 +608,7 @@ argument musi mieć wartość domyślną, której biblioteka nie rusza. Te przyp
 | `Client \| None`                           | `is Postgres \| None, a client cannot be optional` |
 | klient, tylko pozycyjny (`/`)              | `is positional-only, a client is passed by keyword` |
 
-Klasa, która w ogóle nie jest klientem, zażądana przez `resolve()` albo jako argument wstrzykiwanej funkcji,
-kończy się błędem `UserRepository is not a client: subclass Client or NotSingletonClient`, zanim cokolwiek zostanie zbudowane.
+Klasa, która w ogóle nie jest klientem, zażądana przez `resolve()`, kończy się błędem `UserRepository is not a client: subclass Client or NotSingletonClient`, zanim cokolwiek zostanie zbudowane.
 
 Klienci zależni od siebie nawzajem w cyklu kończą się błędem `CircularDependencyError`, podklasą
 `InvalidSignatureError`, a adnotacja typu, której nie da się wyewaluować, np. klasa zdefiniowana wewnątrz

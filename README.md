@@ -608,8 +608,7 @@ argument needs a default, which is left alone. These fail with `InvalidSignature
 | `Client \| None`                      | `is Postgres \| None, a client cannot be optional` |
 | a client, positional-only (`/`)       | `is positional-only, a client is passed by keyword` |
 
-A class that is not a client at all, asked for with `resolve()` or as an argument of an injected function,
-fails with `UserRepository is not a client: subclass Client or NotSingletonClient` before anything is built.
+A class that is not a client at all, asked for with `resolve()`, fails with `UserRepository is not a client: subclass Client or NotSingletonClient` before anything is built.
 
 Clients that depend on each other in a cycle fail with `CircularDependencyError`, a subclass of
 `InvalidSignatureError`, and a type hint that cannot be evaluated, e.g. a class defined inside a

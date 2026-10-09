@@ -609,8 +609,7 @@ argumento necesita un valor por defecto, que se deja tal cual. Estos casos falla
 | `Client \| None`                              | `is Postgres \| None, a client cannot be optional` |
 | un cliente, solo posicional (`/`)             | `is positional-only, a client is passed by keyword` |
 
-Una clase que no es un cliente en absoluto, pedida con `resolve()` o como argumento de una función inyectada,
-falla con `UserRepository is not a client: subclass Client or NotSingletonClient` antes de que se construya nada.
+Una clase que no es un cliente en absoluto, pedida con `resolve()`, falla con `UserRepository is not a client: subclass Client or NotSingletonClient` antes de que se construya nada.
 
 Los clientes que dependen unos de otros en un ciclo fallan con `CircularDependencyError`, una
 subclase de `InvalidSignatureError`, y un type hint que no se puede evaluar, por ejemplo una clase

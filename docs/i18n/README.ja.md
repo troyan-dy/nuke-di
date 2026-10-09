@@ -577,7 +577,7 @@ InvalidSignatureError: UserRepository is not a client: subclass Client or NotSin
 | `Client \| None`                      | `is Postgres \| None, a client cannot be optional` |
 | 位置専用（`/`）のクライアント         | `is positional-only, a client is passed by keyword` |
 
-そもそもクライアントではないクラスを `resolve()` で、または注入される関数の引数として求めると、何かが構築される前に `UserRepository is not a client: subclass Client or NotSingletonClient` で失敗します。
+そもそもクライアントではないクラスを `resolve()` で求めると、何かが構築される前に `UserRepository is not a client: subclass Client or NotSingletonClient` で失敗します。
 
 互いに循環して依存するクライアントは、`InvalidSignatureError` のサブクラスである `CircularDependencyError` で失敗します。評価できない型ヒント（関数の内部で定義されたクラスや、`TYPE_CHECKING` の下でインポートされたクラスなど）は、その旨を示す `InvalidSignatureError` で失敗します。エラーが `inject()` から発生した場合、経路は関数から始まります：`(resolving handler -> Checkout -> Profiles)`。[ワーカーやジョブ](#workers-and-jobs)では、いずれの場合も何かが接続される前に、終了コード `1` で実行が失敗します。
 

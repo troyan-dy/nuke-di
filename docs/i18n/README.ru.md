@@ -608,8 +608,7 @@ InvalidSignatureError: UserRepository is not a client: subclass Client or NotSin
 | `Client \| None`                              | `is Postgres \| None, a client cannot be optional` |
 | клиент, только позиционный (`/`)              | `is positional-only, a client is passed by keyword` |
 
-Класс, который вообще не является клиентом, запрошенный через `resolve()` или как аргумент инжектируемой функции,
-падает с `UserRepository is not a client: subclass Client or NotSingletonClient` до того, как что-либо будет построено.
+Класс, который вообще не является клиентом, запрошенный через `resolve()`, падает с `UserRepository is not a client: subclass Client or NotSingletonClient` до того, как что-либо будет построено.
 
 Клиенты, циклически зависящие друг от друга, падают с `CircularDependencyError` — подклассом
 `InvalidSignatureError`, а аннотация типа, которую не удаётся вычислить (например, класс, определённый

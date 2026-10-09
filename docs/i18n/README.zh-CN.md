@@ -589,7 +589,7 @@ InvalidSignatureError: UserRepository is not a client: subclass Client or NotSin
 | `Client \| None`                      | `is Postgres \| None, a client cannot be optional` |
 | 仅限位置（`/`）的客户端参数           | `is positional-only, a client is passed by keyword` |
 
-根本不是客户端的类，无论通过 `resolve()` 请求还是作为被注入函数的参数，都会在构建任何东西之前以 `UserRepository is not a client: subclass Client or NotSingletonClient` 失败。
+根本不是客户端的类，通过 `resolve()` 请求时，会在构建任何东西之前以 `UserRepository is not a client: subclass Client or NotSingletonClient` 失败。
 
 相互循环依赖的客户端会以 `CircularDependencyError`（`InvalidSignatureError` 的子类）失败；无法求值的类型提示，
 例如在函数内部定义的类或在 `TYPE_CHECKING` 下导入的类，则会引发一个说明此情况的 `InvalidSignatureError`。

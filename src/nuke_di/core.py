@@ -86,7 +86,7 @@ class Dependencies:
 
     def flush(self) -> None:
         if self.connected is True:
-            raise self._state_error("flush()")
+            raise ConnectError("flush(): already connected, call disconnect() first")
 
         self.clients = OrderedDict()
         self.connect_clients = []
@@ -106,13 +106,13 @@ class Dependencies:
 
     async def connect(self) -> None:
         if self.connected is True:
-            raise self._state_error("connect()")
+            raise ConnectError("connect(): already connected, call disconnect() first")
 
         self.connected = True
         limiter = self._limiter()
         layers = self._group_by_layer(self.connect_clients)
         # Computed once: the timings, the logs and the errors of this connect() all name a client the same way
-        names = _display_names(type(client) for client in self.connect_clients)
+        names = self._names()
         self._timings = {
             id(client): ClientTiming(names[type(client)], self._layer(client)) for layer in layers for client in layer
         }
@@ -191,22 +191,30 @@ class Dependencies:
                 )
 
         except TimeoutError as exc:
-            message = f"{name} did not connect within {self.settings.connect_timeout:g}s (CONNECT_TIMEOUT_SECONDS)"
-            logger.exception("%s", message, extra=_fields(timing, timing.connect))
-            error: ConnectError = ConnectTimeoutError(message)
+            timeout = self.settings.connect_timeout
+            logger.exception(
+                "%s did not connect within %gs (CONNECT_TIMEOUT_SECONDS)",
+                name,
+                timeout,
+                extra=_fields(timing, timing.connect),
+            )
+            error: ConnectError = ConnectTimeoutError(
+                f"{name} did not connect within {timeout:g}s (CONNECT_TIMEOUT_SECONDS)"
+            )
             error.__cause__ = exc
             raise _ClientConnectError(error) from exc
 
         except Exception as exc:
-            message = f"{name}.connect() raised {type(exc).__name__}: {exc}"
-            logger.exception("%s", message, extra=_fields(timing, timing.connect))
-            error = ConnectError(message)
+            logger.exception(
+                "%s.connect() raised %s: %s", name, type(exc).__name__, exc, extra=_fields(timing, timing.connect)
+            )
+            error = ConnectError(f"{name}.connect() raised {type(exc).__name__}: {exc}")
             error.__cause__ = exc
             raise _ClientConnectError(error) from exc
 
     async def disconnect(self) -> None:
         if self.connected is False:
-            raise self._state_error("disconnect()")
+            raise ConnectError("disconnect(): already disconnected")
 
         await self._disconnect_layers(self.connect_clients)
 
@@ -285,9 +293,7 @@ class Dependencies:
         # A plain class would be built and appended, and the process would die at connect() with an
         # AttributeError on `connect`; a type checker sees the bound, `Any` and `# type: ignore` do not
         if not isnotsingleton(cls):
-            raise InvalidSignatureError(
-                f"{_type_name(cls)} is not a client: subclass Client or NotSingletonClient{self._path_suffix()}"
-            )
+            raise InvalidSignatureError(f"{_type_name(cls)} is not a client: subclass Client or NotSingletonClient")
         if self.connected is True:
             raise self._state_error(f"resolve({qualname(cls)})")
 
@@ -316,9 +322,10 @@ class Dependencies:
         except Exception as exc:
             # `cls` left the path when its arguments were resolved, so it is named at the end of it here
             name = self._name(cls)
-            message = f"{name}.__init__ raised {type(exc).__name__}: {exc}{self._path_suffix(cls)}"
-            logger.exception("%s", message, extra=fields(client=name))
-            raise InitializeDependencyError(message) from exc
+            # The path before the cause: a cause such as a pydantic error spans lines
+            where = f"{name}.__init__ raised {type(exc).__name__}{self._path_suffix(cls)}"
+            logger.exception("%s: %s", where, exc, extra=fields(client=name))
+            raise InitializeDependencyError(f"{where}: {exc}") from exc
 
         if isclient(cls):
             self.clients[cls] = inst
@@ -408,7 +415,7 @@ class Dependencies:
             elif hint is None:
                 raise self._signature_error(cls, name, "has no type hint")
             elif (client := _optional_client(hint)) is not None:
-                raise self._signature_error(cls, name, f"is {sname(client)} | None, a client cannot be optional")
+                raise self._signature_error(cls, name, f"is {qualname(client)} | None, a client cannot be optional")
             else:
                 raise self._signature_error(cls, name, f"is {_type_name(hint)}, which is not a client")
         return clients
@@ -425,12 +432,8 @@ class Dependencies:
 
     def _state_error(self, call: str) -> ConnectError:
         """
-        `call` came in the wrong state: the message names the call, the state and the way out of it.
+        `call` builds the tree, and the container is connected: the message names the call, the state and the way out.
         """
-        if self.connected is False:
-            return ConnectError(f"{call}: already disconnected")
-        if call in {"connect()", "flush()"}:
-            return ConnectError(f"{call}: already connected, call disconnect() first")
         return ConnectError(
             f"{call}: the container is already connected; resolve, inject, mock and override only work before "
             f"connect(), flush() after disconnect()"
@@ -488,7 +491,7 @@ class Dependencies:
         """
         Register a Replacement for `cls`, an autospec mock by default; `flush()` drops it.
         """
-        name = qualname(cls)
+        name = self._name(cls)
         if self.connected is True:
             raise self._state_error(f"mock({name})")
 
@@ -526,7 +529,7 @@ class Dependencies:
         The container must have no resolved clients on entry and is flushed on exit,
         so nothing resolved with the Replacement outlives the block.
         """
-        name = qualname(cls)
+        name = self._name(cls)
         if self.connected is True:
             raise self._state_error(f"override({name})")
 
@@ -681,13 +684,13 @@ async def _within(seconds: float, coro: Coroutine[Any, Any, None]) -> None:
 
 def _display_names(classes: Iterable[type]) -> dict[type, str]:
     """
-    How errors, logs and timings name every class of `classes`: by `qualname()`, and with the module in front
-    (`app.orders.Database`) for the classes that share one, so two wrappers called `Database` are told apart.
-    A unique name stays short.
+    How errors, logs and timings name every class of `classes`: by `qualname()`, and in full, module and
+    `__qualname__` (`app.orders.Database`, `tests.test_x.test_one.<locals>.Database`), for the classes that share
+    one, so two wrappers called `Database` are told apart. A unique name stays short.
     """
     names = {cls: qualname(cls) for cls in classes}
     shared = {name for name, count in Counter(names.values()).items() if count > 1}
-    return {cls: f"{cls.__module__}.{name}" if name in shared else name for cls, name in names.items()}
+    return {cls: f"{cls.__module__}.{cls.__qualname__}" if name in shared else name for cls, name in names.items()}
 
 
 def _count(number: int, noun: str) -> str:
@@ -719,7 +722,7 @@ def _type_name(hint: Any) -> str:
     if origin is not None:
         return f"{_type_name(origin)}[{', '.join(map(_type_name, get_args(hint))) or '()'}]"
     if inspect.isclass(hint):
-        return hint.__name__
+        return qualname(hint)
     return repr(hint).replace("typing.", "")
 
 
