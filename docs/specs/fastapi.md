@@ -31,7 +31,7 @@ The clients connect, layer by layer, when the app starts and disconnect when it 
 
 ## Non-goals
 
-- **Request scopes.** A client is a singleton per container, or one instance per argument for a `NotSingletonClient`, exactly as with `inject()`. Per-request clients are a separate decision.
+- **Request scopes.** A client is a singleton per container, or one instance per argument for a `NotSingletonClient`, exactly as with `inject()`. Per-request clients are not added: [ADR-0006](../adr/0006-clients-live-as-long-as-the-container.md).
 - **Litestar, FastStream.** Each in its own module: [litestar.md](litestar.md), [faststream.md](faststream.md).
 - **Changing `inject()`.**
 

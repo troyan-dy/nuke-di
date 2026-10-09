@@ -6,6 +6,16 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.11.5] - 2026-10-09
+
+### Documentation
+
+- ADR-0006: a client lives as long as its container. Per-request or per-message clients are not added
+  (#65 rejected): a transaction or anything else that lives for one request is opened in the handler
+  through a method of a client. `NotSingletonClient` is a workaround slated for removal in a future major
+  version; new code does not build on it. The decision is noted in CONTEXT.md, AGENTS.md, the FastAPI
+  spec and the Clients guide page with its translations.
+
 ## [1.11.4] - 2026-10-09
 
 ### Added
@@ -457,7 +467,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.11.4...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.11.5...HEAD
+[1.11.5]: https://github.com/troyan-dy/nuke-di/compare/v1.11.4...v1.11.5
 [1.11.4]: https://github.com/troyan-dy/nuke-di/compare/v1.11.3...v1.11.4
 [1.11.3]: https://github.com/troyan-dy/nuke-di/compare/v1.11.2...v1.11.3
 [1.11.2]: https://github.com/troyan-dy/nuke-di/compare/v1.11.1...v1.11.2

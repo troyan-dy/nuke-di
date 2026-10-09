@@ -55,6 +55,11 @@ True
 A client declares its own dependencies as annotated `__init__` arguments. Only arguments
 annotated with a client type are injected, and resolution is recursive.
 
+A client lives as long as its container. There are no per-request or per-message clients, and none
+are planned ([ADR-0006](../adr/0006-clients-live-as-long-as-the-container.md)): a transaction or anything else that lives for one request is
+opened in the handler through a method of a client. `NotSingletonClient` is still supported, but it
+is slated for removal in a future major version, so do not build new code on it.
+
 ## connect() and disconnect()
 
 Override the async `connect()` / `disconnect()` methods to open and release resources such

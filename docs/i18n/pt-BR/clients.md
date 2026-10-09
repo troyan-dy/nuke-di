@@ -55,6 +55,11 @@ True
 Um cliente declara as próprias dependências como argumentos anotados do `__init__`. Só são injetados
 os argumentos anotados com um tipo de cliente, e a resolução é recursiva.
 
+Um cliente vive tanto quanto o seu contêiner. Não existem clientes por requisição ou por mensagem,
+nem existirão ([ADR-0006](../../adr/0006-clients-live-as-long-as-the-container.md)): uma transação ou qualquer coisa que dure uma requisição é aberta no
+handler por meio de um método de um cliente. `NotSingletonClient` continua suportado, mas será
+removido em uma futura versão major, então não construa código novo sobre ele.
+
 ## <a id="connect-and-disconnect"></a>connect() e disconnect()
 
 Sobrescreva os métodos assíncronos `connect()` / `disconnect()` para abrir e liberar recursos, como
