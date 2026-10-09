@@ -296,4 +296,5 @@ async def test_resolve_after_a_concurrent_connect_is_refused() -> None:
 @pytest.mark.skipif(not sysconfig.get_config_var("Py_GIL_DISABLED"), reason="a build with the GIL")
 def test_the_gil_is_off_on_a_free_threaded_build() -> None:
     # The free-threaded CI job runs with PYTHON_GIL=0: the threads of this module really run in parallel there
-    assert not sys._is_gil_enabled()  # pyright: ignore[reportAttributeAccessIssue]  # 3.13+, pyright checks 3.11
+    # 3.13+: mypy and pyright check against 3.11
+    assert not sys._is_gil_enabled()  # type: ignore[attr-defined, unused-ignore]  # pyright: ignore[reportAttributeAccessIssue]
