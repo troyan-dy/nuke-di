@@ -55,6 +55,11 @@ True
 Klient deklaruje własne zależności jako argumenty `__init__` z adnotacjami typów. Wstrzykiwane są
 tylko argumenty, których adnotacja jest typem klienta, a rozwiązywanie działa rekurencyjnie.
 
+Klient żyje tak długo jak jego kontener. Nie ma klientów na żądanie ani na wiadomość i nie będzie
+([ADR-0006](../../adr/0006-clients-live-as-long-as-the-container.md)): transakcję i wszystko, co żyje przez jedno żądanie, handler otwiera przez metodę
+klienta. `NotSingletonClient` jest nadal wspierany, ale zostanie usunięty w jednej z przyszłych wersji
+major, więc nie opieraj na nim nowego kodu.
+
 ## <a id="connect-and-disconnect"></a>connect() i disconnect()
 
 Nadpisz asynchroniczne metody `connect()` / `disconnect()`, aby otwierać i zwalniać zasoby, takie

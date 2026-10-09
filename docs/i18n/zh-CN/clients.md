@@ -55,6 +55,10 @@ True
 客户端通过带注解的 `__init__` 参数声明自己的依赖。只有注解为客户端类型的参数才会被注入，
 并且解析是递归进行的。
 
+客户端的生命周期与其容器相同。没有按请求或按消息创建的客户端，今后也不会有
+（[ADR-0006](../../adr/0006-clients-live-as-long-as-the-container.md)）：事务以及其他只存在于一次请求内的东西，由处理函数通过客户端的方法打开。
+`NotSingletonClient` 目前仍受支持，但会在未来的某个主版本中移除，新代码不要建立在它之上。
+
 ## <a id="connect-and-disconnect"></a>connect() 与 disconnect()
 
 重写异步方法 `connect()` / `disconnect()`，用来打开和释放连接池之类的资源。`__init__`
