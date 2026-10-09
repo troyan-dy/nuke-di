@@ -214,6 +214,9 @@ $ pytest -q test_wiring.py
 2 passed in 0.05s
 ```
 
+O [plugin do mypy](clients.md#checking-the-tree-with-mypy) aponta os mesmos erros de assinatura e
+ciclos sem executar nada; o teste também executa cada `__init__`, então pega ainda um que lança exceção.
+
 Guarde o container para obter [o grafo](clients.md#the-graph) de um entrypoint para o README dele:
 `deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`.
 

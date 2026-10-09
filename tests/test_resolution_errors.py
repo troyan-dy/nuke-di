@@ -120,7 +120,7 @@ async def handler(checkout: Checkout) -> None: ...
 
 def test_cycle_names_the_path() -> None:
     with pytest.raises(CircularDependencyError, match=r"^Circular dependency: Nest -> Chicken -> Egg -> Chicken$"):
-        Dependencies().resolve(Nest)
+        Dependencies().resolve(Nest)  # type: ignore[nuke-di]
 
 
 def test_cycle_is_an_invalid_signature() -> None:
@@ -133,29 +133,29 @@ def test_non_client_argument_names_type_and_path() -> None:
         r"\(resolving Checkout -> UsesRepository\)$"
     )
     with pytest.raises(InvalidSignatureError, match=expected):
-        Dependencies().resolve(Checkout)
+        Dependencies().resolve(Checkout)  # type: ignore[nuke-di]
 
 
 def test_path_starts_at_injected_function() -> None:
     with pytest.raises(InvalidSignatureError, match=r"\(resolving handler -> Checkout -> UsesRepository\)$"):
-        Dependencies().inject(handler)
+        Dependencies().inject(handler)  # type: ignore[nuke-di]
 
 
 def test_argument_without_type_hint() -> None:
     expected = r'^Argument "db" of "NoHint.__init__" has no type hint \(resolving NoHint\)$'
     with pytest.raises(InvalidSignatureError, match=expected):
-        Dependencies().resolve(NoHint)
+        Dependencies().resolve(NoHint)  # type: ignore[nuke-di]
 
 
 def test_optional_client() -> None:
     expected = r'^Argument "db" of "OptionalClient.__init__" is Database \| None, a client cannot be optional'
     with pytest.raises(InvalidSignatureError, match=expected):
-        Dependencies().resolve(OptionalClient)
+        Dependencies().resolve(OptionalClient)  # type: ignore[nuke-di]
 
 
 def test_positional_only_client() -> None:
     with pytest.raises(InvalidSignatureError, match=r'^Argument "db" of "PositionalOnly.__init__" is positional-only'):
-        Dependencies().resolve(PositionalOnly)
+        Dependencies().resolve(PositionalOnly)  # type: ignore[nuke-di]
 
 
 def test_unresolvable_forward_reference() -> None:
@@ -194,15 +194,15 @@ def test_dataclass_client() -> None:
 def test_failed_resolution_leaves_no_stale_path() -> None:
     dep = Dependencies()
     with pytest.raises(InvalidSignatureError):
-        dep.resolve(Checkout)
+        dep.resolve(Checkout)  # type: ignore[nuke-di]
 
     with pytest.raises(InvalidSignatureError, match=r"\(resolving NoHint\)$"):
-        dep.resolve(NoHint)
+        dep.resolve(NoHint)  # type: ignore[nuke-di]
 
 
 def test_generic_argument_is_named_in_full() -> None:
     with pytest.raises(InvalidSignatureError, match=r'^Argument "sizes" of "Batches.__init__" is list\[int\], which'):
-        Dependencies().resolve(Batches)
+        Dependencies().resolve(Batches)  # type: ignore[nuke-di]
 
 
 @pytest.mark.parametrize(
@@ -237,7 +237,7 @@ def test_inject_class_is_not_part_of_a_cycle() -> None:
 
 def test_callable_and_empty_tuple_are_named_as_written() -> None:
     with pytest.raises(InvalidSignatureError, match=r" is Callable\[\[int\], str\], which"):
-        Dependencies().resolve(Callbacks)
+        Dependencies().resolve(Callbacks)  # type: ignore[nuke-di]
 
     class AnyCallback(Client):
         def __init__(self, on_any: Callable[..., int]) -> None:
@@ -248,9 +248,9 @@ def test_callable_and_empty_tuple_are_named_as_written() -> None:
             self.empty = empty
 
     with pytest.raises(InvalidSignatureError, match=r" is Callable\[\.\.\., int\], which"):
-        Dependencies().resolve(AnyCallback)
+        Dependencies().resolve(AnyCallback)  # type: ignore[nuke-di]
     with pytest.raises(InvalidSignatureError, match=r" is tuple\[\(\)\], which"):
-        Dependencies().resolve(EmptyTuple)
+        Dependencies().resolve(EmptyTuple)  # type: ignore[nuke-di]
 
 
 def test_nested_inject_keeps_the_outer_path() -> None:
@@ -269,7 +269,7 @@ def test_nested_inject_keeps_the_outer_path() -> None:
     async def outer_handler(outer: Outer) -> None: ...
 
     with pytest.raises(InvalidSignatureError, match=r"\(resolving outer_handler -> Outer -> Retries\)$"):
-        dep.inject(outer_handler)
+        dep.inject(outer_handler)  # type: ignore[nuke-di]
 
 
 class Alpha(Client):
@@ -290,8 +290,8 @@ class Gamma(Client):
 def test_longer_cycle_names_the_whole_path() -> None:
     dep = Dependencies()
     with pytest.raises(CircularDependencyError, match=r"^Circular dependency: Alpha -> Beta -> Gamma -> Alpha$"):
-        dep.resolve(Alpha)
+        dep.resolve(Alpha)  # type: ignore[nuke-di]
 
     # The failed resolution left nothing behind: the next one reports its own path
     with pytest.raises(CircularDependencyError, match=r"^Circular dependency: Beta -> Gamma -> Alpha -> Beta$"):
-        dep.resolve(Beta)
+        dep.resolve(Beta)  # type: ignore[nuke-di]

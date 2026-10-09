@@ -527,3 +527,92 @@ funkcji albo zaimportowana pod `TYPE_CHECKING` — błędem `InvalidSignatureErr
 Gdy błąd pochodzi z `inject()`, ścieżka zaczyna się od funkcji:
 `(resolving handler -> Checkout -> Profiles)`. W [workerze lub jobie](workers-and-jobs.md)
 każdy z tych błędów kończy uruchomienie kodem wyjścia `1`, zanim cokolwiek się połączy.
+
+## <a id="checking-the-tree-with-mypy"></a>Sprawdzanie drzewa przez mypy
+
+`nuke_di.mypy` to wtyczka mypy, która znajduje te błędy podczas sprawdzania typów przez mypy, zanim
+uruchomi się proces czy test. Włącza się ją w `pyproject.toml`:
+
+```toml
+[tool.mypy]
+plugins = ["nuke_di.mypy"]
+```
+
+Przy każdym `resolve()`, `inject()`, `@job` i `@worker` wtyczka przechodzi przez `__init__` każdego
+klienta, którego zbudowałoby to wywołanie, tak jak robi to kontener, i zgłasza to, co zgłosiłby kontener,
+z tym samym komunikatem:
+
+```python
+# tree.py
+from typing import Protocol, reveal_type
+
+from nuke_di import DI, Client, job
+
+
+class Postgres(Client):
+    pass
+
+
+class UserRepository(Protocol):
+    async def get(self, user_id: int) -> str: ...
+
+
+class Profiles(Client):
+    def __init__(self, pg: Postgres, users: UserRepository) -> None:
+        self.pg, self.users = pg, users
+
+
+class Checkout(Client):
+    def __init__(self, profiles: Profiles) -> None:
+        self.profiles = profiles
+
+
+class Orders(Client):
+    def __init__(self, payments: "Payments") -> None:
+        self.payments = payments
+
+
+class Payments(Client):
+    def __init__(self, orders: Orders) -> None:
+        self.orders = orders
+
+
+async def greet(user_id: int, pg: Postgres) -> str:
+    return f"Hello, user-{user_id}!"
+
+
+DI.resolve(Checkout)
+reveal_type(DI.inject(greet))
+
+
+@job
+async def settle(orders: Orders) -> None:
+    pass
+```
+
+```console
+$ mypy tree.py
+tree.py:39: error: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)  [nuke-di]
+tree.py:40: note: Revealed type is "def (user_id: int) -> typing.Coroutine[Any, Any, str]"
+tree.py:43: error: Circular dependency: settle -> Orders -> Payments -> Orders  [nuke-di]
+Found 2 errors in 1 file (checked 1 source file)
+```
+
+- Sprawdzany jest każdy wiersz powyższej tabeli, również cykle, a także argument bez adnotacji typu
+  w funkcji przekazanej do `inject()`, `@job` lub `@worker`. Błąd jest zgłaszany przy wywołaniu, które
+  by go zgłosiło, ze ścieżką od tego wywołania; drzewo z kilkoma błędami zgłasza je wszystkie, podczas
+  gdy kontener zatrzymuje się na pierwszym.
+- `inject()` zwraca funkcję bez jej argumentów-klientów, czyli typ budowanego przez siebie `partial`:
+  powyżej `def (user_id: int) -> Coroutine[Any, Any, str]` zamiast
+  `Callable[..., Coroutine[Any, Any, str]]`. Argument występujący po argumencie-kliencie staje się
+  wyłącznie nazwany (keyword-only), bo wartość pozycyjna trafiłaby na miejsce klienta.
+- Pozostaje kontenerowi: adnotacja typu, której nie da się wyewaluować w czasie działania, a którą mypy
+  i tak ewaluuje; klasa w zmiennej typu `type[...]`, która może zawierać podklasę z innym `__init__`;
+  udekorowane lub przeciążone `__init__`; `inject()` klasy; trasy i handlery integracji z FastAPI,
+  Litestar i FastStream; typ, którego mypy nie zna, np. klasa z biblioteki bez adnotacji typów.
+- Zamierzony błąd, w teście tego błędu, wycisza się przez `# type: ignore[nuke-di]`.
+- Działa z mypy 1.13 i nowszym, z pamięcią podręczną (cache) i bez niej: zmiana klienta głęboko
+  w drzewie powoduje ponowne sprawdzenie wywołań tego drzewa. Demon mypy, `dmypy`, może przeoczyć
+  taką zmianę aż do ponownego uruchomienia.
+- Pyright nie ma API wtyczek. Z Pyright te same błędy znajduje
+  [test, który wstrzykuje każdy punkt wejścia](testing.md).
