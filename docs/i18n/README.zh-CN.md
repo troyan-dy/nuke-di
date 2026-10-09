@@ -607,6 +607,8 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 | `timings`            | 最近一次 `connect()` 的每个客户端一个 `ClientTiming`；见[启动耗时](#startup-timings)。 |
 | `graph()`            | 已解析客户端的 `Graph`，含依赖和层，带 `to_mermaid()`；见[依赖图](#the-graph)。 |
 
+`inject()` 的结果保留函数的返回类型，但其余参数不带类型：类型检查器无法从签名中减去客户端参数。
+
 `resolve`、`inject`、`mock`、`override` 和 `flush` 只能在容器未连接时使用：
 整棵树在启动之前就已构建完成。
 
@@ -2109,7 +2111,7 @@ nuke-di 1.8.0 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 ·
 
 ```bash
 make install   # uv sync --locked
-make check     # ruff, mypy and tests, as in CI
+make check     # ruff, mypy, pyright and tests, as in CI
 make cov       # tests with a coverage report (terminal + htmlcov/)
 make test-all  # tests on Python 3.11-3.14
 ```

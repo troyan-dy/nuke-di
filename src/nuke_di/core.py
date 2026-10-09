@@ -369,9 +369,10 @@ class Dependencies:
         return partial(func, **signature)
 
     # Typed like `unittest.mock.create_autospec`: an autospec mock is `Any`, so a test reaches its
-    # `return_value` and `assert_awaited_once_with` under a strict type checker; a fake keeps its own type
+    # `return_value` and `assert_awaited_once_with` under a strict type checker; a Replacement of your own
+    # keeps its type
     @overload
-    def mock(self, cls: type[CT]) -> Any: ...
+    def mock(self, cls: type[CT], new: None = None) -> Any: ...
 
     @overload
     def mock(self, cls: type[CT], new: CT) -> CT: ...
@@ -405,7 +406,7 @@ class Dependencies:
         return self._replacements[cls]
 
     @overload
-    def override(self, cls: type[CT]) -> contextlib.AbstractContextManager[Any]: ...
+    def override(self, cls: type[CT], new: None = None) -> contextlib.AbstractContextManager[Any]: ...
 
     @overload
     def override(self, cls: type[CT], new: CT) -> contextlib.AbstractContextManager[CT]: ...
@@ -429,7 +430,7 @@ class Dependencies:
         if cls in self._replacements:
             raise ConnectError(f"{name} already has a replacement")
 
-        replacement = self.mock(cls) if new is None else self.mock(cls, new)
+        replacement = self.mock(cls, new)
         entry: tuple[type[NotSingletonClient], NotSingletonClient] = (cls, replacement)
         self._overrides.append(entry)
         try:

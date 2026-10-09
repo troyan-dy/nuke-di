@@ -590,6 +590,8 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 | `timings`            | 直近の `connect()` のクライアントごとの `ClientTiming`。[起動時間](#startup-timings)を参照。 |
 | `graph()`            | 解決済みクライアントの `Graph`。依存とレイヤーを持ち、`to_mermaid()` 付き。[依存グラフ](#the-graph)を参照。 |
 
+`inject()` の結果は関数の戻り値の型を保ちますが、残りの引数は型付けされません。型チェッカーはシグネチャからクライアント引数を差し引けないからです。
+
 `resolve`、`inject`、`mock`、`override`、`flush` は、コンテナが切断されている間しか使えません。ツリー全体は起動前に構築されます。
 
 ```python
@@ -1981,7 +1983,7 @@ dependency-injector の Cython 製 `get()` が約 70 ns 速く、これはどの
 
 ```bash
 make install   # uv sync --locked
-make check     # ruff, mypy and tests, as in CI
+make check     # ruff, mypy, pyright and tests, as in CI
 make cov       # tests with a coverage report (terminal + htmlcov/)
 make test-all  # tests on Python 3.11-3.14
 ```

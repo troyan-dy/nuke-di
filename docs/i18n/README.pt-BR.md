@@ -627,6 +627,9 @@ quando precisar de isolamento, por exemplo nos testes.
 | `timings`            | Um `ClientTiming` por cliente do último `connect()`; veja [Tempos de inicialização](#startup-timings). |
 | `graph()`            | Um `Graph` dos clientes resolvidos com suas dependências e camadas, `to_mermaid()` incluído; veja [O grafo](#the-graph). |
 
+O resultado de `inject()` mantém o tipo de retorno da função, enquanto seus argumentos restantes
+ficam sem tipo: um verificador de tipos não consegue subtrair os argumentos cliente de uma assinatura.
+
 `resolve`, `inject`, `mock`, `override` e `flush` só funcionam enquanto o container está desconectado:
 a árvore inteira é construída antes da inicialização.
 
@@ -2152,7 +2155,7 @@ com o método, está em [docs/benchmarks.md](../benchmarks.md#comparison-with-ot
 
 ```bash
 make install   # uv sync --locked
-make check     # ruff, mypy and tests, as in CI
+make check     # ruff, mypy, pyright and tests, as in CI
 make cov       # tests with a coverage report (terminal + htmlcov/)
 make test-all  # tests on Python 3.11-3.14
 ```

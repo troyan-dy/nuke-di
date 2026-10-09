@@ -18,11 +18,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- `Dependencies.mock(cls)` and `override(cls)` without a fake are typed `Any`, as `unittest.mock.create_autospec`
-  is, so `db.fetch_user.return_value = ...` and `db.fetch_user.assert_awaited_once_with(...)` from the README
-  "Testing" examples pass `mypy --strict` and pyright; `mock(cls, fake)` and `override(cls, fake)` keep the type
-  of the class. `tests/test_typing.py` checks the examples under `mypy --strict`
-  ([#53](https://github.com/troyan-dy/nuke-di/issues/53)).
+- `Dependencies.mock(cls)` and `override(cls)` without a Replacement of your own are typed `Any`, as
+  `unittest.mock.create_autospec` is, so `db.fetch_user.return_value = ...` and
+  `db.fetch_user.assert_awaited_once_with(...)` from the README "Testing" examples pass `mypy --strict` and
+  pyright; `mock(cls, new)` and `override(cls, new)` keep the type of the class. `tests/test_typing.py` runs
+  `mypy --strict` over the Python blocks of the README "Testing" section, laid out as the files they name, so
+  a README edit that breaks them fails CI ([#53](https://github.com/troyan-dy/nuke-di/issues/53)).
 - `Dependencies.inject(func)` keeps the return type of `func`: `await injected(42)` is a `str` for a handler
   that returns one, not `Any`. The arguments of the result stay untyped, a type checker cannot subtract the
   client arguments from a signature ([#62](https://github.com/troyan-dy/nuke-di/issues/62)).

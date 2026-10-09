@@ -627,6 +627,9 @@ gdy potrzebujesz izolacji, np. w testach.
 | `timings`            | Po jednym `ClientTiming` na klienta ostatniego `connect()`; zob. [Czasy startu](#startup-timings). |
 | `graph()`            | `Graph` rozwiązanych klientów z ich zależnościami i warstwami, wraz z `to_mermaid()`; zob. [Graf](#the-graph). |
 
+Wynik `inject()` zachowuje typ zwracany funkcji, a jej pozostałe argumenty pozostają bez typów:
+sprawdzacz typów nie potrafi odjąć argumentów-klientów od sygnatury.
+
 `resolve`, `inject`, `mock`, `override` i `flush` działają tylko wtedy, gdy kontener jest rozłączony:
 całe drzewo buduje się przed startem.
 
@@ -2153,7 +2156,7 @@ Cythonie, o około 70 ns, czego żadna aplikacja nie zauważy. Pełna tabela z m
 
 ```bash
 make install   # uv sync --locked
-make check     # ruff, mypy and tests, as in CI
+make check     # ruff, mypy, pyright and tests, as in CI
 make cov       # tests with a coverage report (terminal + htmlcov/)
 make test-all  # tests on Python 3.11-3.14
 ```

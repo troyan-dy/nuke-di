@@ -628,6 +628,9 @@ cuando necesites aislamiento, por ejemplo en las pruebas.
 | `timings`            | Un `ClientTiming` por cliente del último `connect()`; ver [Tiempos de arranque](#startup-timings). |
 | `graph()`            | Un `Graph` de los clientes resueltos con sus dependencias y capas, `to_mermaid()` incluido; ver [El grafo](#the-graph). |
 
+El resultado de `inject()` conserva el tipo de retorno de la función, mientras que sus argumentos
+restantes quedan sin tipar: un verificador de tipos no puede restar los argumentos cliente de una firma.
+
 `resolve`, `inject`, `mock`, `override` y `flush` solo funcionan mientras el contenedor está
 desconectado: todo el árbol se construye antes del arranque.
 
@@ -2156,7 +2159,7 @@ el doble por petición. En una raíz en caché gana el `get()` en Cython de depe
 
 ```bash
 make install   # uv sync --locked
-make check     # ruff, mypy and tests, as in CI
+make check     # ruff, mypy, pyright and tests, as in CI
 make cov       # tests with a coverage report (terminal + htmlcov/)
 make test-all  # tests on Python 3.11-3.14
 ```
