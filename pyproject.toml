@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "1.11.3"
+version = "1.11.4"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
@@ -96,7 +96,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "examples", "docs/i18n", "CHANGELOG.md", "README.md", "LICENSE"]
+include = ["src", "tests", "examples", "docs/guide", "docs/i18n", "CHANGELOG.md", "README.md", "LICENSE"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nuke_di"]

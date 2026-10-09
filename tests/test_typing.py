@@ -1,6 +1,6 @@
 """
-The public API under `mypy --strict`, as a user's test file sees it: the README "Testing" examples
-have to pass without a `type: ignore`, so they are checked straight from README.md.
+The public API under `mypy --strict`, as a user's test file sees it: the examples of the "Testing" guide
+page have to pass without a `type: ignore`, so they are checked straight from docs/guide/testing.md.
 """
 
 import re
@@ -11,12 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_readme_translations import readme, split
+from tests.test_readme_translations import document, split
 
 pytest.importorskip("mypy")
 
-# The README blocks that the "Testing" blocks build on, by content, at the file each one names in its
-# first line; the Quick start block has no name
+# The blocks that the "Testing" blocks build on, by content, at the file each one names in its first line:
+# the Quick start of README.md, which has no name, and the modules of the "Workers and jobs" page
 QUICK_START = "quick_start.py"
 MODULES = [
     "class UserService(Client):",  # Quick start: Database, UserService, handler
@@ -93,15 +93,10 @@ def test_override(deps: Dependencies) -> None:
 """
 
 
-def python_blocks(section: str | None = None) -> list[str]:
+def python_blocks(text: str) -> list[str]:
     """
-    The Python code blocks of README.md, of one `## ` section when given, without the fences.
+    The Python code blocks of a Markdown document, without the fences.
     """
-    text = readme()
-    if section is not None:
-        start = text.index(f"\n## {section}\n")
-        end = text.find("\n## ", start + 1)
-        text = text[start:end]
     blocks = []
     for block in split(text)[1]:
         lines = textwrap.dedent(block).splitlines()
@@ -116,8 +111,10 @@ def strict_mypy(root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, capture_output=True, text=True, check=False, cwd=root)  # noqa: S603 - fixed command
 
 
-def test_readme_testing_examples_pass_strict_mypy(tmp_path: Path) -> None:
-    blocks = python_blocks()
+def test_testing_guide_examples_pass_strict_mypy(tmp_path: Path) -> None:
+    # The guide page first: README.md has blocks with the same markers, in a single-file sync.py, which would
+    # otherwise be found first and laid out at the wrong path
+    blocks = python_blocks(document(page="workers-and-jobs")) + python_blocks(document())
     for marker in MODULES:
         block = next(block for block in blocks if marker in block)
         first = block.splitlines()[0]
@@ -127,7 +124,7 @@ def test_readme_testing_examples_pass_strict_mypy(tmp_path: Path) -> None:
     for package in tmp_path.glob("app/**/"):
         (package / "__init__.py").touch()
 
-    examples = python_blocks("Testing")
+    examples = python_blocks(document(page="testing"))
     assert examples
     for number, block in enumerate(examples, start=1):
         header = ""
