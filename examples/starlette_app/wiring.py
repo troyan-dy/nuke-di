@@ -5,7 +5,7 @@ Clients for a framework without a nuke-di integration; aiohttp, Sanic or any oth
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from nuke_di import DI, Dependencies
+from nuke_di import DI
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import Response
@@ -19,8 +19,7 @@ class Wiring:
     Wraps handlers that take clients into plain endpoints, and connects the clients for the life of the app.
     """
 
-    def __init__(self, container: Dependencies = DI) -> None:
-        self._container = container
+    def __init__(self) -> None:
         self._handlers: list[Handler] = []
         self._injected: dict[Handler, Handler] = {}
 
@@ -37,6 +36,6 @@ class Wiring:
     async def lifespan(self, app: Starlette) -> AsyncIterator[None]:
         # Resolved on every startup: the container forgets its clients on disconnect, and a test replaces
         # a client with override() before the app starts
-        self._injected = {handler: self._container.inject(handler) for handler in self._handlers}
-        async with self._container:
+        self._injected = {handler: DI.inject(handler) for handler in self._handlers}
+        async with DI:
             yield

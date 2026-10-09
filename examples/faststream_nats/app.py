@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import Annotated
 
 from faststream import Depends, FastStream, Header
@@ -8,7 +9,7 @@ from nuke_di.faststream import setup
 from faststream_nats.clients import Database, Ledger
 from faststream_nats.messages import Order, Receipt
 
-broker = NatsBroker("nats://localhost:4222")
+broker = NatsBroker(os.environ.get("NATS_URL", "nats://localhost:4222"))
 app = FastStream(broker)
 setup(app)  # clients connect before the broker starts, disconnect after it stops
 

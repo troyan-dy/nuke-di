@@ -1,7 +1,7 @@
 # Examples
 
 Runnable scenarios for `nuke-di`, from a one-file script to a service with an API, a queue worker and a
-cron job. Every example is a small package with its own README: what the scenario is, how to run it, the
+scheduled job. Every example is a small package with its own README: what the scenario is, how to run it, the
 real output, and a test that shows how to check it.
 
 ## How to run

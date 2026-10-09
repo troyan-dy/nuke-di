@@ -8,7 +8,7 @@ with one line.
 | File               | What it holds                                                               |
 |--------------------|-----------------------------------------------------------------------------|
 | `clients.py`       | `Settings`, a `@client_dataclass(frozen=True)`, and `Database` / `Cache` that depend on it |
-| `main.py`          | A job that prints the settings it got and checks that everyone shares them  |
+| `show.py`          | A job that prints the settings it got and checks that everyone shares them  |
 | `test_settings.py` | `Settings` replaced with `di.mock()` and `di.override()`, the environment read with `monkeypatch` |
 
 | Variable       | Default                      |
@@ -21,18 +21,18 @@ with one line.
 
 ```console
 $ cd examples
-$ uv run python -m settings.main
+$ uv run python -m settings.show
 database: connected to postgresql://localhost/app, pool of 5
 cache: connected, debug=False
-main: Settings(database_url='postgresql://localhost/app', pool_size=5, debug=False)
-main: one Settings for everyone: True
+show: Settings(database_url='postgresql://localhost/app', pool_size=5, debug=False)
+show: one Settings for everyone: True
 database: disconnected
 cache: disconnected
-$ DATABASE_URL=postgresql://db.internal/shop POOL_SIZE=20 DEBUG=1 uv run python -m settings.main
+$ DATABASE_URL=postgresql://db.internal/shop POOL_SIZE=20 DEBUG=1 uv run python -m settings.show
 database: connected to postgresql://db.internal/shop, pool of 20
 cache: connected, debug=True
-main: Settings(database_url='postgresql://db.internal/shop', pool_size=20, debug=True)
-main: one Settings for everyone: True
+show: Settings(database_url='postgresql://db.internal/shop', pool_size=20, debug=True)
+show: one Settings for everyone: True
 database: disconnected
 cache: disconnected
 ```
@@ -40,11 +40,11 @@ cache: disconnected
 A bad value fails the run while the tree is built, before any client connects:
 
 ```console
-$ POOL_SIZE=0 uv run python -m settings.main 2>/dev/null
+$ POOL_SIZE=0 uv run python -m settings.show 2>/dev/null
 $ echo $?
 1
-$ POOL_SIZE=0 uv run python -m settings.main 2>&1 | head -n 1
-Settings.__init__ raised ValueError (resolving main -> Settings): POOL_SIZE must be at least 1, got 0
+$ POOL_SIZE=0 uv run python -m settings.show 2>&1 | head -n 1
+Settings.__init__ raised ValueError (resolving show -> Settings): POOL_SIZE must be at least 1, got 0
 ```
 
 ## Test

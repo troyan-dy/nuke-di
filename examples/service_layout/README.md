@@ -72,8 +72,8 @@ $ uv run python -m service_layout.workers.outbox
 broker: connected
 database: connected
 outbox: relaying
-outbox: published order 1
-outbox: published order 2
+outbox: published row 1 to orders
+outbox: published row 2 to orders
 ^C
 outbox: stopped
 database: disconnected

@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,6 +27,8 @@ async def test_heartbeat_reports_the_received_messages(capsys: pytest.CaptureFix
     task = asyncio.create_task(heartbeat(inbox, interval=0.01))
     await asyncio.sleep(0.05)
     task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
 
     assert "heartbeat: alive, 1 messages received" in capsys.readouterr().out
 

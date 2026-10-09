@@ -50,7 +50,9 @@ class Settings(Client):
 
 class Database(Client):
     """
-    SQLite keeps the example self-contained; a real service wraps its Postgres driver the same way.
+    SQLite keeps the example self-contained; a real service wraps its Postgres driver the same way. The
+    sqlite3 calls block the event loop for the length of a query on a local file; an async driver, such as
+    asyncpg, does not.
     """
 
     def __init__(self, settings: Settings) -> None:

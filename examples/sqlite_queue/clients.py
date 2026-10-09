@@ -10,6 +10,9 @@ from nuke_di import Client
 class Database(Client):
     """
     One sqlite3 connection: the path is read in __init__, the file is opened in connect().
+
+    sqlite3 blocks the event loop for the length of a query, which a local file keeps under a millisecond;
+    a queue on a database server takes an async driver, such as asyncpg, wrapped the same way.
     """
 
     def __init__(self) -> None:

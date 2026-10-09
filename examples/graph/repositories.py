@@ -17,4 +17,6 @@ class OrderRepository(Client):
         self.cache = cache
 
     async def create(self, user: str) -> int:
-        return await self.pg.insert_order(user)
+        order_id = await self.pg.insert_order(user)
+        await self.cache.invalidate(f"orders:{user}")
+        return order_id

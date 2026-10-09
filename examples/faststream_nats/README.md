@@ -20,6 +20,8 @@ Start NATS once:
 docker run -d --rm --name nats -p 4222:4222 nats:2.10
 ```
 
+Both processes connect to `$NATS_URL`, `nats://localhost:4222` by default.
+
 The `faststream run` command needs the `faststream[cli]` extra, so the app runs itself with
 `asyncio.run(app.run())`:
 
@@ -112,5 +114,10 @@ $ uv run pytest -q faststream_nats
 - The test starts the app with `TestApp` inside `TestNatsBroker`: the test broker alone runs no app
   hooks, so the clients would not connect. The app module holds one broker for every test, so the tests
   that start it run one after another, never two at once.
-- `publish.py` is a `@job` with a NATS connection wrapped as a `Client`; `--count` and `--customer-id`
-  come from its signature.
+- `publish.py` is a `@job` with a NATS connection wrapped as a `Client`: the address is read in `__init__`,
+  the broker is made in `connect()`. With `max_reconnect_attempts=1` a NATS that is down fails the job in a
+  couple of seconds instead of nats-py retrying until `CONNECT_TIMEOUT_SECONDS`. `--count` and
+  `--customer-id` come from its signature.
+- Nothing here is specific to NATS but the broker class: with `KafkaBroker`, `RabbitBroker` or `RedisBroker`
+  of FastStream the subscribers and `setup(app)` stay the same, and the tests swap `TestNatsBroker` for the
+  test broker of that class.

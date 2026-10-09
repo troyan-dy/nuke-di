@@ -1,8 +1,9 @@
 """
-The examples in examples/ keep working: the tests of every example pass, and its programs run with
-the output their README shows. Every example runs in a process of its own, from examples/, as its
-README tells a reader to run it. The examples on NATS run when a server listens on localhost:4222,
-as in CI; the web servers are left to the tests of their examples, since uvicorn is not installed.
+The examples in examples/ keep working: the tests of every example pass, and its programs run with the
+exit code and the key lines of output their README shows. Every example runs in a process of its own, from
+examples/, as its README tells a reader to run it. The examples on NATS run when a server listens on
+localhost:4222, as in CI; the web servers are left to the tests of their examples, since uvicorn is not
+installed.
 """
 
 import os
@@ -22,13 +23,30 @@ import pytest
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 NAMES = sorted(path.parent.name for path in EXAMPLES.glob("*/__init__.py"))
 TIMEOUT = 60
+# What the examples and the library read from the environment: a test sets them, never whoever runs the tests
+CONFIGURATION = {
+    "DATABASE_URL",
+    "DEBUG",
+    "HTTP_TIMEOUT_SECONDS",
+    "NATS_URL",
+    "OUTBOX_POLL_SECONDS",
+    "POOL_SIZE",
+    "PYPI_URL",
+    "QUEUE_DB",
+    "SERVICE_DB",
+    "SQLITE_PATH",
+    "CONNECT_CONCURRENCY",
+    "CONNECT_TIMEOUT_SECONDS",
+    "DISCONNECT_TIMEOUT_SECONDS",
+    "SHUTDOWN_GRACE_SECONDS",
+}
 
 
 def environment(**extra: str) -> dict[str, str]:
-    # Coverage of the outer run must not follow into the example processes, and the variables the examples
-    # read must not come from the environment of whoever runs the tests
-    read = {"DATABASE_URL", "POOL_SIZE", "DEBUG", "CONNECT_TIMEOUT_SECONDS", "SHUTDOWN_GRACE_SECONDS", "NATS_URL"}
-    env = {key: value for key, value in os.environ.items() if not key.startswith("COV_CORE_") and key not in read}
+    # Coverage of the outer run must not follow into the example processes either
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("COV_CORE_") and key not in CONFIGURATION
+    }
     env.update(PYTHONUNBUFFERED="1", **extra)
     return env
 
@@ -104,8 +122,8 @@ PROGRAMS = [
     ),
     Program("cli_job.export", ("--since", "yesterday"), exit_code=2, output=("invalid date value: 'yesterday'",)),
     Program("http_job.versions", exit_code=2, output=("the following arguments are required: -p/--package",)),
-    Program("settings.main", output=("main: one Settings for everyone: True",)),
-    Program("settings.main", env={"POOL_SIZE": "0"}, exit_code=1, output=("POOL_SIZE must be at least 1, got 0",)),
+    Program("settings.show", output=("show: one Settings for everyone: True",)),
+    Program("settings.show", env={"POOL_SIZE": "0"}, exit_code=1, output=("POOL_SIZE must be at least 1, got 0",)),
     Program("not_singleton.main", output=("same HttpSession: False",)),
     Program("dataclass_clients.main", output=("placed order 1",)),
     Program("graph.show", output=("  Notifications --> Checkout",)),
@@ -202,8 +220,12 @@ class Running:
     def wait_for(self, text: str) -> None:
         deadline = time.monotonic() + TIMEOUT
         while text not in self.output:
-            # The reader ends with the output of the process, so nothing more can come
-            if not self._reader.is_alive() or time.monotonic() > deadline:
+            # The reader ends with the output of the process, so nothing more can come once it has ended;
+            # the output is read once more, as the last line may have come just before the end
+            finished = not self._reader.is_alive()
+            if text in self.output:
+                return
+            if finished or time.monotonic() > deadline:
                 pytest.fail(f"{text!r} never appeared in:\n{self.output}")
             time.sleep(0.05)
 

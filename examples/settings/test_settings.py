@@ -2,7 +2,7 @@ import pytest
 from nuke_di import Dependencies
 
 from settings.clients import Cache, Database, Settings
-from settings.main import main
+from settings.show import show
 
 
 async def test_every_client_gets_the_test_settings(di: Dependencies) -> None:
@@ -15,7 +15,7 @@ async def test_every_client_gets_the_test_settings(di: Dependencies) -> None:
 
 async def test_the_job_with_override(di: Dependencies, capsys: pytest.CaptureFixture[str]) -> None:
     with di.override(Settings, Settings(database_url="sqlite://", pool_size=2)):
-        injected = di.inject(main)
+        injected = di.inject(show)
         async with di:
             await injected()
 

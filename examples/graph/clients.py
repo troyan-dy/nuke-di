@@ -27,6 +27,9 @@ class Redis(Client):
     async def disconnect(self) -> None:
         print("redis: disconnected")
 
+    async def invalidate(self, key: str) -> None:
+        pass  # a stand-in for DEL key
+
 
 class Kafka(Client):
     async def connect(self) -> None:

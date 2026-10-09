@@ -15,7 +15,7 @@ async def relay(outbox: Outbox, broker: Broker, settings: Settings, shutdown: Sh
         for row in rows:  # a started batch is finished: every row is published once and marked sent
             await broker.publish(row.topic, row.payload)
             await outbox.mark_sent(row.id)
-            print(f"outbox: published order {row.payload['order_id']}")
+            print(f"outbox: published row {row.id} to {row.topic}")
         if not rows:
             # Sleep until the next poll, but wake up at once on SIGTERM
             with contextlib.suppress(TimeoutError):
