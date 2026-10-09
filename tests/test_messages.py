@@ -160,7 +160,8 @@ def test_init_error_of_a_root_has_no_path() -> None:
 
 
 @pytest.mark.parametrize(
-    ("cls", "name"), [(Settings, "Settings"), (int, "int"), (type(None), "None"), ("Database", "'Database'")]
+    ("cls", "name"),
+    [(Settings, "Settings"), (int, "int"), (type(None), "None"), ("Database", "'Database'"), ({}, r"\{\}")],
 )
 def test_resolve_refuses_what_is_not_a_client(cls: Any, name: str) -> None:
     with pytest.raises(
@@ -185,6 +186,30 @@ def test_a_non_client_argument_is_named_with_the_path() -> None:
         match=r'^Argument "settings" of "Reports.__init__" is Settings, which is not a client \(resolving Reports\)$',
     ):
         Dependencies().resolve(Reports)
+
+
+async def test_a_non_client_on_a_connected_container_gets_the_state_error() -> None:
+    deps = Dependencies()
+    deps.resolve(Database)
+    await deps.connect()
+
+    with pytest.raises(ConnectError, match=r"^resolve\(\{\}\): the container is already connected"):
+        deps.resolve({})  # type: ignore[arg-type]
+    with pytest.raises(ConnectError, match=r"^resolve\(int\): the container is already connected"):
+        deps.resolve(int)  # type: ignore[type-var]
+    await deps.disconnect()
+
+
+def test_mock_and_override_refuse_what_is_not_a_client() -> None:
+    deps = Dependencies()
+
+    with pytest.raises(
+        InvalidSignatureError, match=r"^Settings is not a client: subclass Client or NotSingletonClient$"
+    ):
+        deps.mock(Settings)  # type: ignore[type-var]
+    with pytest.raises(InvalidSignatureError, match=r"^int is not a client"), deps.override(int):  # type: ignore[type-var]
+        pass
+    assert not deps.clients
 
 
 def test_a_non_client_is_refused_before_connect() -> None:

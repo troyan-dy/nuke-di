@@ -2148,51 +2148,66 @@ Wypisuje tabelę Markdown z medianą i p95 powtórzeń oraz liczbą na jednego k
 
 ```console
 $ uv run python benchmarks/run.py --only resolve --size 100
-nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 11f5919 · N = 100 · 20 repeats
+nuke-di 1.11.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 6c2ae10 · N = 100 · 20 repeats
 
-| Scenario        | Shape |   N |  Median |     p95 | Per client |
-|-----------------|-------|----:|--------:|--------:|-----------:|
-| resolve(), cold | wide  | 100 |  636 µs |  672 µs |    6.36 µs |
-| resolve(), warm | wide  | 100 | 99.5 ns |  126 ns |            |
-| resolve(), cold | deep  | 100 |  814 µs | 1.01 ms |    8.14 µs |
-| resolve(), warm | deep  | 100 | 96.4 ns | 97.1 ns |            |
-| resolve(), cold | mixed | 100 |  845 µs |  986 µs |    8.45 µs |
-| resolve(), warm | mixed | 100 |  101 ns |  116 ns |            |
+| Scenario                                         | Shape          |   N |  Median |     p95 | Per client |
+|--------------------------------------------------|----------------|----:|--------:|--------:|-----------:|
+| resolve(), cold                                  | wide           | 100 |  416 µs |  496 µs |    4.16 µs |
+| resolve(), second container, classes seen before | wide           | 100 |  142 µs |  183 µs |    1.42 µs |
+| resolve(), warm                                  | wide           | 100 | 84.8 ns | 97.0 ns |            |
+| resolve(), cold                                  | deep           | 100 |  397 µs |  547 µs |    3.97 µs |
+| resolve(), second container, classes seen before | deep           | 100 |  129 µs |  150 µs |    1.29 µs |
+| resolve(), warm                                  | deep           | 100 | 87.5 ns | 90.3 ns |            |
+| resolve(), cold                                  | mixed          | 100 |  535 µs |  690 µs |    5.35 µs |
+| resolve(), second container, classes seen before | mixed          | 100 |  147 µs |  184 µs |    1.47 µs |
+| resolve(), warm                                  | mixed          | 100 | 92.0 ns | 93.9 ns |            |
+| resolve(), cold                                  | wide, strings  | 100 |  709 µs |  802 µs |    7.09 µs |
+| resolve(), second container, classes seen before | wide, strings  | 100 |  141 µs |  296 µs |    1.41 µs |
+| resolve(), cold                                  | deep, strings  | 100 |  737 µs | 1.18 ms |    7.37 µs |
+| resolve(), second container, classes seen before | deep, strings  | 100 |  134 µs |  152 µs |    1.34 µs |
+| resolve(), cold                                  | mixed, strings | 100 | 1.16 ms | 1.47 ms |    11.6 µs |
+| resolve(), second container, classes seen before | mixed, strings | 100 |  159 µs |  178 µs |    1.59 µs |
 ```
 
 `--size N` i `--repeat K` ustawiają rozmiar drzewa i liczbę powtórzeń, `--only` wybiera scenariusz
 (`resolve`, `connect`, `inject`, `not_singleton`, `overrides`, `fastapi`, `import`, `memory`), a
 `--json PATH` zapisuje liczby razem z wersją Pythona, platformą i commitem do późniejszego porównania.
 [docs/benchmarks.md](../benchmarks.md) objaśnia każdy scenariusz i zapisuje punkt odniesienia dla Pythona
-3.11–3.14, zmierzony na Apple M2 Pro: `resolve()` kosztuje 6–12 µs na klienta, więc drzewo z 1000 klientów
-powstaje w mniej niż 15 ms; `connect()` dokłada 12–18 µs na klienta w warstwie i 0,1–0,2 ms na warstwę;
-handler FastAPI, który dostaje klienta przez `nuke-di`, kosztuje tyle samo co handler ze zwykłym
-`Depends()`; `import nuke_di` trwa 26–35 ms, głównie przez `asyncio`. CI uruchamia zestaw jako test
+3.11–3.14, zmierzony na Apple M2 Pro z `nuke-di` 1.11.1: `resolve()` kosztuje 4–7 µs na klienta, więc
+drzewo z 1000 klientów powstaje w mniej niż 6 ms; drugi kontener w procesie, czyli to, co płaci każdy test
+po pierwszym, rozwiązuje te same klasy według liczby z cache, 1,1–1,7 µs na klienta, także z adnotacjami
+w postaci napisów; `connect()` dokłada 9–15 µs na klienta w warstwie i około 0,1 ms na warstwę; handler
+FastAPI, który dostaje klienta przez `nuke-di`, kosztuje tyle samo co handler ze zwykłym `Depends()`;
+`import nuke_di` trwa 28–36 ms, głównie przez `asyncio`. CI uruchamia zestaw jako test
 dymny, bez progu: runner GitHuba jest zbyt hałaśliwy, by na nim blokować.
 
 `benchmarks/compare.py` przepuszcza te same drzewa przez dishka, wireup, dependency-injector i injector,
-rejestrując te same klasy tak, jak robi to każda biblioteka: zimny kontener z rozwiązanym korzeniem,
-ponowne pobranie korzenia i jedno żądanie FastAPI przez integrację każdej biblioteki. Biblioteki są w
+rejestrując te same klasy tak, jak robi to każda biblioteka: zimny kontener z rozwiązanym korzeniem na
+klasach nowych dla procesu, ponowne pobranie korzenia i jedno żądanie FastAPI przez integrację każdej
+biblioteki. Biblioteki są w
 grupie zależności `compare`:
 
 ```console
 $ uv run python benchmarks/compare.py --size 100 --summary
-nuke-di 1.8.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit e766c7b · N = 100 · 20 repeats
-nuke-di 1.8.0 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+nuke-di 1.11.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 6c2ae10 · N = 100 · 20 repeats
+nuke-di 1.11.1 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 
-| Lower is better                                   | nuke-di       | dishka          | wireup          | dependency-injector | injector        |
-|---------------------------------------------------|--------------:|----------------:|----------------:|--------------------:|----------------:|
-| Cold start: a container and a tree of 100 clients | **830 µs**    | 12.5 ms (15.1×) | 20.5 ms (24.7×) | 930 µs (1.1×)       | 1.33 ms (1.6×)  |
-| A cached root                                     | 101 ns (2.6×) | 263 ns (6.8×)   | 101 ns (2.6×)   | **38.8 ns**         | 1.25 µs (32.3×) |
-| A FastAPI request with a client                   | **104 µs**    | 105 µs (1.0×)   | 217 µs (2.1×)   | 216 µs (2.1×)       | —               |
+| Lower is better                                          | nuke-di        | dishka          | wireup          | dependency-injector | injector        |
+|----------------------------------------------------------|---------------:|----------------:|----------------:|--------------------:|----------------:|
+| Cold start: a container and a tree of 100 clients        | **541 µs**     | 12.9 ms (23.8×) | 20.0 ms (37.0×) | 1.05 ms (1.9×)      | 1.34 ms (2.5×)  |
+| Cold start: the same 100 clients with string annotations | 1.27 ms (1.2×) | 13.7 ms (12.6×) | 21.4 ms (19.6×) | **1.09 ms**         | 1.47 ms (1.3×)  |
+| A cached root                                            | 94.1 ns (2.5×) | 261 ns (7.1×)   | 92.6 ns (2.5×)  | **37.0 ns**         | 1.18 µs (31.9×) |
+| A FastAPI request with a client                          | **103 µs**     | 107 µs (1.0×)   | 206 µs (2.0×)   | 221 µs (2.2×)       | —               |
 ```
 
 ![nuke-di against other DI libraries: lower is better](../benchmarks/compare.png)
 
-Czy więc `nuke-di` jest najszybszy? Przy budowaniu drzewa i w żądaniu FastAPI tak: dishka i wireup płacą
-przy starcie 15–25 razy więcej za walidację grafu przy tworzeniu kontenera, a wireup i dependency-injector
-dwa razy więcej na każde żądanie. Na korzeniu z cache wygrywa `get()` dependency-injector napisany w
-Cythonie, o około 70 ns, czego żadna aplikacja nie zauważy. Pełna tabela z metodą jest w
+Czy więc `nuke-di` jest najszybszy? Przy budowaniu drzewa z prawdziwymi adnotacjami typów i w żądaniu
+FastAPI tak: dependency-injector i injector budują drzewo 2–2,5 razy dłużej, dishka i wireup 24–37 razy
+dłużej przez walidację grafu przy tworzeniu kontenera, a wireup i dependency-injector płacą dwa razy więcej
+na każde żądanie. Z adnotacjami w postaci napisów dependency-injector, który nie czyta żadnych adnotacji,
+jest o jedną piątą szybszy od `nuke-di`. Na korzeniu z cache `nuke-di` idzie łeb w łeb z wireup, a `get()`
+dependency-injector napisany w Cythonie wygrywa o około 50 ns, czego żadna aplikacja nie zauważy. Pełna tabela z metodą jest w
 [docs/benchmarks.md](../benchmarks.md#comparison-with-other-libraries).
 
 ## <a id="development"></a>Rozwój
