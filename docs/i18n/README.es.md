@@ -643,6 +643,41 @@ async def main() -> None:
         deps.resolve(Cache)  # ConnectError: already connected
 ```
 
+El contenedor puede resolver de forma segura desde varios hilos: un bloqueo por contenedor serializa `resolve`, `inject`,
+`mock`, `override` y `flush`, así que un singleton pedido por dos hilos a la vez se construye una sola vez.
+`connect()` y `disconnect()` pertenecen a un solo bucle de eventos.
+
+```python
+import threading
+
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    instances = 0
+
+    def __init__(self) -> None:
+        type(self).instances += 1
+
+
+class Orders(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+deps = Dependencies()
+threads = [threading.Thread(target=deps.resolve, args=(Orders,)) for _ in range(8)]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join()
+print("instances:", Postgres.instances, "clients:", len(deps.connect_clients))
+```
+
+```text
+instances: 1 clients: 2
+```
+
 ## <a id="workers-and-jobs"></a>Workers y jobs
 
 Una función asíncrona se convierte en el programa principal de un proceso con un solo decorador:

@@ -642,6 +642,41 @@ async def main() -> None:
         deps.resolve(Cache)  # ConnectError: already connected
 ```
 
+The container is safe to resolve from several threads: one lock per container serializes `resolve`,
+`inject`, `mock`, `override` and `flush`, so a singleton asked for by two threads at once is built once.
+`connect()` and `disconnect()` belong to one event loop.
+
+```python
+import threading
+
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    instances = 0
+
+    def __init__(self) -> None:
+        type(self).instances += 1
+
+
+class Orders(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+deps = Dependencies()
+threads = [threading.Thread(target=deps.resolve, args=(Orders,)) for _ in range(8)]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join()
+print("instances:", Postgres.instances, "clients:", len(deps.connect_clients))
+```
+
+```text
+instances: 1 clients: 2
+```
+
 ## Workers and jobs
 
 An async function becomes the main program of a process with one decorator:

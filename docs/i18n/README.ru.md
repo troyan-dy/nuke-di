@@ -642,6 +642,41 @@ async def main() -> None:
         deps.resolve(Cache)  # ConnectError: already connected
 ```
 
+Контейнер безопасно использовать из нескольких потоков: один замок на контейнер сериализует `resolve`,
+`inject`, `mock`, `override` и `flush`, поэтому синглтон, запрошенный двумя потоками одновременно, создаётся
+один раз. `connect()` и `disconnect()` принадлежат одному циклу событий.
+
+```python
+import threading
+
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    instances = 0
+
+    def __init__(self) -> None:
+        type(self).instances += 1
+
+
+class Orders(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+deps = Dependencies()
+threads = [threading.Thread(target=deps.resolve, args=(Orders,)) for _ in range(8)]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join()
+print("instances:", Postgres.instances, "clients:", len(deps.connect_clients))
+```
+
+```text
+instances: 1 clients: 2
+```
+
 ## <a id="workers-and-jobs"></a>Воркеры и джобы
 
 Асинхронная функция становится основной программой процесса с помощью одного декоратора:

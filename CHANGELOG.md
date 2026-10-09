@@ -6,6 +6,22 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.10.2] - 2026-10-09
+
+### Added
+
+- CI runs the tests that need no framework on free-threaded CPython 3.14t with `PYTHON_GIL=0`, as
+  `make test-free-threaded` does ([#32](https://github.com/troyan-dy/nuke-di/issues/32)).
+
+### Fixed
+
+- `resolve()`, `inject()`, `mock()`, `override()` and `flush()` are serialized by one reentrant lock per
+  container, so a singleton asked for by two threads at once is built once instead of twice, and a resolve in
+  one thread no longer reports the path of another as a `CircularDependencyError`. The lock is not held inside
+  an `override()` block, and `connect()` / `disconnect()` stay unlocked: they belong to one event loop. A
+  resolved singleton is still handed out without the lock, on purpose, so the warm path costs what it did; see "The container" in
+  the README ([#32](https://github.com/troyan-dy/nuke-di/issues/32)).
+
 ## [1.10.1] - 2026-10-09
 
 ### Added
@@ -335,7 +351,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.10.1...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.10.2...HEAD
+[1.10.2]: https://github.com/troyan-dy/nuke-di/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/troyan-dy/nuke-di/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/troyan-dy/nuke-di/compare/v1.9.2...v1.10.0
 [1.9.2]: https://github.com/troyan-dy/nuke-di/compare/v1.9.1...v1.9.2
