@@ -361,13 +361,37 @@ lifespan は接続済みのコンテナの内側で動くので、接続時間�
 
 依存グラフは実行中のプロセスの中にしか存在しません。上の `DEBUG` ログだけが、エントリーポイントがどのクライアントを
 引き込み、それぞれがどのレイヤーで接続するかを示す場所です。`graph()` は同じ絵をデータとして返します。`connect()` の前でも
-後でも呼べます。ここでは[レイヤー](#layers)の例のクライアントを使います。
+後でも呼べます。以下は[レイヤー](#layers)の例のクライアントから `connect()` を外したものです。
 
 ```python
+# graph.py
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    pass
+
+
+class Redis(Client):
+    pass
+
+
+class Payments(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+class Checkout(Client):
+    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
+        self.pg, self.redis, self.payments = pg, redis, payments
+
+
 deps = Dependencies()
 deps.resolve(Checkout)
-for node in deps.graph().nodes:
+nodes = {node.name: node for node in deps.graph().nodes}
+for node in nodes.values():
     print(f"{node.name:<8} layer {node.layer}  needs {list(node.dependencies)}")
+print("shared:", nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"])
 print(deps.graph().to_mermaid())
 ```
 
@@ -377,6 +401,7 @@ Postgres layer 0  needs []
 Redis    layer 0  needs []
 Payments layer 1  needs ['pg']
 Checkout layer 2  needs ['pg', 'redis', 'payments']
+shared: True
 graph BT
   subgraph layer0 [layer 0]
     Postgres
@@ -416,7 +441,8 @@ graph BT
 ```
 
 `Graph.nodes` は解決済みのクライアントごとに 1 つの `Node` を解決順に持つので、クライアントは自分の依存の後に来ます。
-これはスナップショットで、`flush()` で空になります。
+これはスナップショットで、`flush()` で空になります。ただし、開いている `override()` ブロックの Replacement は残り、どの `flush()` にも
+耐えます。
 
 | `Node` のフィールド | 値 |
 |---------------------|----|
@@ -430,8 +456,7 @@ graph BT
 `NotSingletonClient` はインスタンスごとに 1 つのノードになり、名前はすべて同じです。`to_mermaid()` は 2 つ目から番号を
 付けます（`Session`、`Session_2`）。Replacement はレイヤーの外に破線の枠で描かれ、代わりに置かれたオブジェクトの名前が
 付きます：`Postgres: AsyncMock`。ノードは同一性で比較されるので、
-`nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"]` は 2 つの利用側が同じシングルトンを
-共有していることを示します。
+上の `shared: True` は `Checkout` と `Payments` が同じ `Postgres` を受け取ったことを示します。
 
 ### <a id="when-a-client-fails-to-connect"></a>クライアントの接続に失敗した場合
 
@@ -1841,8 +1866,8 @@ $ pytest -q test_wiring.py
 2 passed in 0.05s
 ```
 
-`inject()` の後に `Dependencies().graph().to_mermaid()` を出力すると、そのエントリーポイントの[依存グラフ](#the-graph)が
-README 用に得られます。
+コンテナを保持すれば、そのエントリーポイントの[依存グラフ](#the-graph)が README 用に得られます：
+`deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`。
 
 **ワーカーをテストする。** `Shutdown.set()` は SIGTERM と同じ働きをします。
 

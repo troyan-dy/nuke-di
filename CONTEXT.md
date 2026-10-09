@@ -25,7 +25,7 @@ A set of client instances with the same height in the dependency graph: clients 
 _Avoid_: Level, tier, depth
 
 **Graph**:
-Every client the container has resolved so far, with who depends on whom and the Layer of each. A snapshot: empty after a flush. Resolution of one root builds that root's tree; the container holds the graph, because singletons are shared between trees.
+Every client the container has resolved so far, with who depends on whom and the Layer of each. A snapshot: a flush empties it, apart from the Replacements of open Override blocks. Resolution of one root builds that root's tree; the container holds the graph, because singletons are shared between trees.
 _Avoid_: Tree (for the whole container), DAG, node, edge
 
 **Client timing**:

@@ -371,14 +371,38 @@ worker 或 job 会在 [`Run.clients`](#startup-metrics-and-structured-logs) 中�
 ### <a id="the-graph"></a>依赖图
 
 依赖图只存在于运行中的进程里：上面的 `DEBUG` 日志是唯一能看到一个入口点拉入哪些客户端、
-每个客户端在哪一层连接的地方。`graph()` 把同一幅图作为数据返回，在 `connect()` 之前或之后都可以，
-这里用的是[层](#layers)一节示例中的客户端：
+每个客户端在哪一层连接的地方。`graph()` 把同一幅图作为数据返回，在 `connect()` 之前或之后都可以。
+下面是[层](#layers)一节示例中的客户端，去掉了它们的 `connect()`：
 
 ```python
+# graph.py
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    pass
+
+
+class Redis(Client):
+    pass
+
+
+class Payments(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+class Checkout(Client):
+    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
+        self.pg, self.redis, self.payments = pg, redis, payments
+
+
 deps = Dependencies()
 deps.resolve(Checkout)
-for node in deps.graph().nodes:
+nodes = {node.name: node for node in deps.graph().nodes}
+for node in nodes.values():
     print(f"{node.name:<8} layer {node.layer}  needs {list(node.dependencies)}")
+print("shared:", nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"])
 print(deps.graph().to_mermaid())
 ```
 
@@ -388,6 +412,7 @@ Postgres layer 0  needs []
 Redis    layer 0  needs []
 Payments layer 1  needs ['pg']
 Checkout layer 2  needs ['pg', 'redis', 'payments']
+shared: True
 graph BT
   subgraph layer0 [layer 0]
     Postgres
@@ -426,7 +451,7 @@ graph BT
 ```
 
 `Graph.nodes` 为每个已解析的客户端保存一个 `Node`，按解析顺序排列，因此客户端排在它的依赖之后。
-它是一个快照：`flush()` 会清空它。
+它是一个快照：`flush()` 会清空它，但仍然打开的 `override()` 块的 Replacement 会留下，它们经得起任何一次 `flush()`。
 
 | `Node` 字段    | 值 |
 |----------------|----|
@@ -439,8 +464,7 @@ graph BT
 
 `NotSingletonClient` 的每个实例各占一个节点，名字相同；`to_mermaid()` 从第二个开始编号
 （`Session`、`Session_2`）。Replacement 画在层之外，带虚线边框，并标出代替它的对象名：`Postgres: AsyncMock`。
-节点按标识比较，因此 `nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"]`
-说明两个使用方共享同一个单例。
+节点按标识比较，因此上面的 `shared: True` 说明 `Checkout` 和 `Payments` 拿到的是同一个 `Postgres`。
 
 ### <a id="when-a-client-fails-to-connect"></a>客户端连接失败时
 
@@ -1971,7 +1995,8 @@ $ pytest -q test_wiring.py
 2 passed in 0.05s
 ```
 
-在 `inject()` 之后打印 `Dependencies().graph().to_mermaid()`，就能得到该入口点的[依赖图](#the-graph)，放进它的 README。
+保留容器，就能得到该入口点的[依赖图](#the-graph)，放进它的 README：
+`deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`。
 
 **测试 worker。** `Shutdown.set()` 的作用与 SIGTERM 相同：
 

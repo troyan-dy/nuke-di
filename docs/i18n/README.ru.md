@@ -383,14 +383,38 @@ Orders   layer 1  connect 0.00s ok   disconnect 0.00s ok
 
 Граф зависимостей существует только внутри работающего процесса: лог `DEBUG` выше — единственное
 место, где видно, каких клиентов тянет entrypoint и в каком слое каждый из них подключается.
-`graph()` возвращает ту же картину данными, до `connect()` или после него, на клиентах из
-примера про [слои](#layers):
+`graph()` возвращает ту же картину данными, до `connect()` или после него. Клиенты из примера про
+[слои](#layers), без их `connect()`:
 
 ```python
+# graph.py
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    pass
+
+
+class Redis(Client):
+    pass
+
+
+class Payments(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+class Checkout(Client):
+    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
+        self.pg, self.redis, self.payments = pg, redis, payments
+
+
 deps = Dependencies()
 deps.resolve(Checkout)
-for node in deps.graph().nodes:
+nodes = {node.name: node for node in deps.graph().nodes}
+for node in nodes.values():
     print(f"{node.name:<8} layer {node.layer}  needs {list(node.dependencies)}")
+print("shared:", nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"])
 print(deps.graph().to_mermaid())
 ```
 
@@ -400,6 +424,7 @@ Postgres layer 0  needs []
 Redis    layer 0  needs []
 Payments layer 1  needs ['pg']
 Checkout layer 2  needs ['pg', 'redis', 'payments']
+shared: True
 graph BT
   subgraph layer0 [layer 0]
     Postgres
@@ -439,7 +464,8 @@ graph BT
 ```
 
 `Graph.nodes` хранит по одному `Node` на разрешённый клиент в порядке разрешения, поэтому клиент
-идёт после своих зависимостей. Это снимок: `flush()` опустошает его.
+идёт после своих зависимостей. Это снимок: `flush()` опустошает его, кроме Replacement-ов открытых
+блоков `override()`, которые переживают любой `flush()`.
 
 | Поле `Node`    | Значение |
 |----------------|----------|
@@ -453,8 +479,7 @@ graph BT
 `NotSingletonClient` получает по узлу на экземпляр, все с одним именем; `to_mermaid()` нумерует их
 со второго (`Session`, `Session_2`). Replacement рисуется вне слоёв, с пунктирной рамкой и именем
 объекта на его месте: `Postgres: AsyncMock`. Узлы сравниваются по идентичности, поэтому
-`nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"]` говорит, что два
-потребителя делят один синглтон.
+`shared: True` выше говорит, что `Checkout` и `Payments` получили один и тот же `Postgres`.
 
 ### <a id="when-a-client-fails-to-connect"></a>Если клиент не смог подключиться
 
@@ -2007,8 +2032,8 @@ $ pytest -q test_wiring.py
 2 passed in 0.05s
 ```
 
-Напечатайте `Dependencies().graph().to_mermaid()` после `inject()`, чтобы получить [граф](#the-graph)
-entrypoint-а для его README.
+Сохраните контейнер, чтобы получить [граф](#the-graph) entrypoint-а для его README:
+`deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`.
 
 **Воркер.** `Shutdown.set()` делает то же, что сделал бы SIGTERM:
 

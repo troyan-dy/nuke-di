@@ -383,14 +383,38 @@ należy do twojego kodu.
 
 Graf zależności istnieje tylko wewnątrz działającego procesu: log `DEBUG` powyżej to jedyne miejsce,
 które pokazuje, jakich klientów ściąga punkt wejścia i w której warstwie każdy z nich się łączy.
-`graph()` zwraca ten sam obraz jako dane, przed `connect()` albo po nim, na klientach z przykładu o
-[warstwach](#layers):
+`graph()` zwraca ten sam obraz jako dane, przed `connect()` albo po nim. Klienci z przykładu o
+[warstwach](#layers), bez swojego `connect()`:
 
 ```python
+# graph.py
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    pass
+
+
+class Redis(Client):
+    pass
+
+
+class Payments(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+class Checkout(Client):
+    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
+        self.pg, self.redis, self.payments = pg, redis, payments
+
+
 deps = Dependencies()
 deps.resolve(Checkout)
-for node in deps.graph().nodes:
+nodes = {node.name: node for node in deps.graph().nodes}
+for node in nodes.values():
     print(f"{node.name:<8} layer {node.layer}  needs {list(node.dependencies)}")
+print("shared:", nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"])
 print(deps.graph().to_mermaid())
 ```
 
@@ -400,6 +424,7 @@ Postgres layer 0  needs []
 Redis    layer 0  needs []
 Payments layer 1  needs ['pg']
 Checkout layer 2  needs ['pg', 'redis', 'payments']
+shared: True
 graph BT
   subgraph layer0 [layer 0]
     Postgres
@@ -439,7 +464,8 @@ graph BT
 ```
 
 `Graph.nodes` trzyma po jednym `Node` na rozwiązanego klienta, w kolejności rozwiązywania, więc klient
-jest po swoich zależnościach. To zrzut: `flush()` go opróżnia.
+jest po swoich zależnościach. To zrzut: `flush()` go opróżnia, poza Replacement otwartych bloków
+`override()`, które przetrwają każdy `flush()`.
 
 | Pole `Node`    | Wartość |
 |----------------|---------|
@@ -453,8 +479,7 @@ jest po swoich zależnościach. To zrzut: `flush()` go opróżnia.
 `NotSingletonClient` dostaje po węźle na instancję, wszystkie o tej samej nazwie; `to_mermaid()` numeruje je
 od drugiego (`Session`, `Session_2`). Replacement jest rysowany poza warstwami, z przerywaną ramką i nazwą
 obiektu na jego miejscu: `Postgres: AsyncMock`. Węzły porównują się przez tożsamość, więc
-`nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"]` mówi, że dwaj konsumenci
-dzielą jeden singleton.
+`shared: True` powyżej mówi, że `Checkout` i `Payments` dostali ten sam `Postgres`.
 
 ### <a id="when-a-client-fails-to-connect"></a>Gdy klient nie może się połączyć
 
@@ -2005,8 +2030,8 @@ $ pytest -q test_wiring.py
 2 passed in 0.05s
 ```
 
-Wypisz `Dependencies().graph().to_mermaid()` po `inject()`, aby dostać [graf](#the-graph) punktu wejścia
-do jego README.
+Zachowaj kontener, aby dostać [graf](#the-graph) punktu wejścia do jego README:
+`deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`.
 
 **Worker.** `Shutdown.set()` robi to samo, co zrobiłby SIGTERM:
 
