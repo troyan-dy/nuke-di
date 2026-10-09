@@ -6,6 +6,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-10-09
+
 ### Changed
 
 - The autospec Replacement of `mock(cls)` and `override(cls)` is created with `instance=True`: it stands in
@@ -317,7 +319,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.9.2...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/troyan-dy/nuke-di/compare/v1.9.2...v1.10.0
 [1.9.2]: https://github.com/troyan-dy/nuke-di/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/troyan-dy/nuke-di/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/troyan-dy/nuke-di/compare/v1.8.0...v1.9.0
