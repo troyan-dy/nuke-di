@@ -183,3 +183,46 @@ def test_failure_deep_in_a_chain_closes_every_frame(
     assert dep._resolving == []
     with pytest.raises(CircularDependencyError, match=r"^Circular dependency: Loop -> LoopLink -> Loop$"):
         dep.resolve(Loop)
+
+
+def test_failed_resolve_inside_an_init_closes_only_its_own_frames() -> None:
+    """
+    A client's `__init__` that resolves on its own and swallows the failure: the failed tree's frames come off the
+    path, the frames of the outer resolve stay on it, and the outer resolve completes.
+    """
+    dep = Dependencies()
+    failing = chain(3, name="Bad", bottom=Unbuildable)
+
+    class Leaf(Client):
+        pass
+
+    class Swallower(Client):
+        def __init__(self, leaf: Leaf) -> None:
+            self.errors: list[str] = []
+            self.paths: list[list[type[NotSingletonClient]]] = []
+            for cls in (Loop, failing[-1]):
+                try:
+                    dep.resolve(cls)
+                except BaseException as exc:
+                    self.errors.append(str(exc))
+                self.paths.append(list(dep._resolving))
+
+    class Top(Client):
+        def __init__(self, swallower: Swallower) -> None:
+            self.swallower = swallower
+
+    top = dep.resolve(Top)
+
+    assert top.swallower.errors == [
+        "Circular dependency: Top -> Loop -> LoopLink -> Loop",
+        "Unbuildable.__init__ raised ValueError (resolving Top -> Bad2 -> Bad1 -> Bad0 -> Unbuildable): no pool",
+    ]
+    # The `__init__` runs with its consumer on the path, and each failure left it there
+    assert top.swallower.paths == [[Top], [Top]]
+    assert dep._resolving == []
+    assert dep._resolving_set == set()
+    assert [type(client) for client in dep.connect_clients] == [Leaf, Swallower, Top]
+    assert dep.clients[Top] is top
+
+    with pytest.raises(CircularDependencyError, match=r"^Circular dependency: Loop -> LoopLink -> Loop$"):
+        dep.resolve(Loop)

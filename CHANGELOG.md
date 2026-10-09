@@ -8,18 +8,20 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- `resolve()` builds a tree on a stack of frames of its own instead of one recursion level per layer, so a tree
-  of any depth resolves under the default recursion limit: a chain of 500 clients raised `RecursionError` on 3.11
+- `resolve()` builds a tree on a stack of frames of its own instead of a call per client of a chain, so a chain
+  of any length resolves under the default recursion limit: a chain of 500 clients raised `RecursionError` on 3.11
   and one of 1000 on 3.14, and the tests resolve a chain of 2000. The path of a resolve, its cycle check and every
   error message are unchanged, a failure leaves no frame open, and a client's `__init__` that resolves from the
   same container still re-enters it. `benchmarks/run.py` no longer raises the recursion limit;
-  `benchmarks/compare.py` still does, for dishka, wireup, injector and, on 3.11, dependency-injector. The chain
-  gets cheaper per client where a call per level cost the most: 1000 clients resolve in 3.95 ms instead of
-  4.50 ms cold and 1.36 ms instead of 1.47 ms in a second container on 3.11, 4.71 ms instead of 4.77 ms and
-  1.35 ms instead of 1.39 ms on 3.14; the wide tree of 1000 stays within the noise of the runs, 4.30 against
-  4.14 ms cold and 1.65 against 1.60 ms in a second container on 3.11, 4.58 against 4.41 ms and 1.48 against
-  1.55 ms on 3.14 (`benchmarks/run.py --only resolve`, three interleaved runs of 20 repeats each)
-  ([#35](https://github.com/troyan-dy/nuke-di/issues/35)).
+  `benchmarks/compare.py` still does, for dishka, wireup, injector and, on 3.11, dependency-injector. The saving
+  is smaller than the 2–3 µs per client the issue expected: a chain of 1000 clients resolves in 3.95 ms instead
+  of 4.50 ms cold and 1.36 ms instead of 1.47 ms in a second container on 3.11, 0.4–0.55 µs and 0.1–0.15 µs per
+  client, and in 4.71 ms instead of 4.77 ms and 1.35 ms instead of 1.39 ms on 3.14, about 0.05 µs. On 3.11 the
+  dict comprehension of the old code was a second Python frame per client of a chain, until PEP 709 inlined
+  comprehensions in 3.12, which is also why the old limit was about half as long on 3.11. The wide tree of 1000
+  is unchanged within a few percent either way: 4.30 against 4.14 ms cold and 1.65 against 1.60 ms in a second
+  container on 3.11, 4.58 against 4.41 ms and 1.48 against 1.55 ms on 3.14 (`benchmarks/run.py --only resolve`,
+  three interleaved runs of 20 repeats each) ([#35](https://github.com/troyan-dy/nuke-di/issues/35)).
 
 ## [1.11.0] - 2026-10-09
 

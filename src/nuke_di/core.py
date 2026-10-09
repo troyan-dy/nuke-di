@@ -353,22 +353,22 @@ class Dependencies:
 
         # Not always 0: a client's `__init__` that resolves on its own runs inside its consumer's frame, and only the
         # frames opened from here are this call's to close
-        depth = len(self._resolving)
+        opened = len(self._resolving)
         try:
             return cast(CT, self._resolve_tree(cls))
         except BaseException:
             # The frames a failure leaves open are off the path, as a recursion's `finally` would leave them: the next
             # resolve sees no stale cycle and names a path of its own
-            self._resolving_set.difference_update(self._resolving[depth:])
-            del self._resolving[depth:]
+            self._resolving_set.difference_update(self._resolving[opened:])
+            del self._resolving[opened:]
             raise
 
     def _resolve_tree(self, cls: type[NotSingletonClient]) -> NotSingletonClient:
         """
         Build `cls` and its dependencies, each before its consumer, on a stack of frames instead of the call stack.
 
-        A call per level would stop a chain at the recursion limit, a few hundred clients deep; the frames grow as deep
-        as the tree. A frame is a client whose arguments are being resolved, and `_resolving` is the class of every
+        A call per client of a chain would stop it at the recursion limit, a few hundred clients long; the frames grow
+        with the chain. A frame is a client whose arguments are being resolved, and `_resolving` is the class of every
         open frame, outermost first, so the cycle check and the path in errors are what a recursion had.
         """
         resolving, resolving_set = self._resolving, self._resolving_set
@@ -706,7 +706,8 @@ class Dependencies:
 
 # A client waiting for a dependency in `_resolve_tree()`: its class, the arguments of its `__init__` to fill with
 # clients, the clients found so far, the arguments left (an iterator: the index of the next one) and the argument the
-# dependency fills
+# dependency fills. A plain tuple, for speed: on 3.14 a NamedTuple cost a chain 10-13% per client and methods that
+# open and close a frame 8-10%, measured.
 _Frame = tuple[
     type[NotSingletonClient],
     dict[str, type[NotSingletonClient]],

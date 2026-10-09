@@ -90,8 +90,8 @@ connected.
   out where it means nothing (a cache hit, the fixed cost of an autospec mock).
 - Garbage collection is paused while a sample runs, as `timeit` does, and one untimed warm-up pays the
   one-off costs, e.g. the lazy import of `unittest.mock` by `mock()`.
-- `resolve()` builds a tree on a stack of frames of its own, not one recursion level per layer, so a tree
-  of any depth resolves under the default recursion limit and the runner leaves the limit alone
+- `resolve()` builds a tree on a stack of frames of its own, not with a call per client of a chain, so a
+  chain of any length resolves under the default recursion limit and the runner leaves the limit alone
   ([#35](https://github.com/troyan-dy/nuke-di/issues/35)). The baseline below predates it: the recursion of
   1.9.0 stopped a chain at about 400 clients on Python 3.11 and 800 on 3.12 and later, and the runner
   raised the limit for its deep trees. `benchmarks/compare.py` still raises it, for the libraries that recurse.
