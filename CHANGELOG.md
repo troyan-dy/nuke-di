@@ -6,6 +6,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-10-09
+
 ### Changed
 
 - `resolve()` builds a tree on a stack of frames of its own instead of a call per client of a chain, so a chain
@@ -394,7 +396,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.11.1...HEAD
+[1.11.1]: https://github.com/troyan-dy/nuke-di/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/troyan-dy/nuke-di/compare/v1.10.2...v1.11.0
 [1.10.2]: https://github.com/troyan-dy/nuke-di/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/troyan-dy/nuke-di/compare/v1.10.0...v1.10.1
