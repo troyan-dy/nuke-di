@@ -14,8 +14,6 @@ import pytest
 from tests.test_readme_translations import anchors, split
 
 ROOT = Path(__file__).resolve().parent.parent
-BLOB_URL = "https://github.com/troyan-dy/nuke-di/blob/master/"
-RAW_URL = "https://raw.githubusercontent.com/troyan-dy/nuke-di/master/"
 SKILL = ROOT / "skills" / "nuke-di" / "SKILL.md"
 
 
@@ -28,6 +26,7 @@ def load() -> ModuleType:
 
 
 llms = load()
+BLOB_URL, RAW_URL = llms.BLOB_URL, llms.RAW_URL
 
 
 @pytest.mark.parametrize("name", ["llms.txt", "llms-full.txt"])

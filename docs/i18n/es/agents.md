@@ -74,7 +74,7 @@ Dos archivos en la raíz del repositorio, generados a partir de las páginas en 
 | Archivo | Contenido |
 |---------|-----------|
 | [`llms.txt`](../../../llms.txt) | Un índice en el formato [llms.txt](https://llmstxt.org): qué es `nuke-di` y qué no hace, un enlace a cada página |
-| [`llms-full.txt`](../../../llms-full.txt) | El README y la guía completa en un solo archivo, unos 16k tokens |
+| [`llms-full.txt`](../../../llms-full.txt) | El README y la guía completa en un solo archivo, unos 26k tokens |
 
 Dale a un agente la URL raw, `https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt`,
 y leerá el manual completo con una sola petición.

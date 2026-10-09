@@ -43,7 +43,7 @@ A run passes when all four do:
 | `agent tests` | `pytest` over the project, the agent's own tests included, passes |
 | `hidden`      | the task's tests of [`hidden/`](hidden/), copied in after the agent finished, pass |
 | `mypy`        | mypy with the `nuke_di.mypy` plugin runs and reports no `[nuke-di]` error |
-| `shapes`      | no rejected design is found in the code: `NotSingletonClient`, `bind` / `provide` / `register` on a container, a loop in `connect()` that retries, catches or sleeps, a loop anywhere that catches and sleeps, an `AsyncClient` / `ClientSession` / pool created in `__init__`, `tenacity` or `backoff` |
+| `shapes`      | no rejected design is found in the code: `NotSingletonClient`, `bind()` or `bind` / `provide` / `register` on a container, a module-level function that returns a client or a connection (a provider), a loop in `connect()` that retries, catches or sleeps, a loop anywhere that catches and sleeps, an `AsyncClient` / `ClientSession` / pool created in `__init__`, `tenacity` or `backoff` |
 
 ## Results
 

@@ -13,3 +13,5 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+# The results of `evaluate.py --model reference`, a check of the graders
+benchmarks/agents/results/*-reference.json

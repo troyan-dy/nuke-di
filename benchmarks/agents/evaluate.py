@@ -32,6 +32,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -278,20 +279,49 @@ def retries(connect: ast.AsyncFunctionDef) -> list[tuple[int, str]]:
     return found
 
 
+# What a provider function hands out besides a client class of the project
+PROVIDED = {"AsyncClient", "ClientSession", "Pool", "Redis", "Engine", "AsyncEngine", "Connection"}
+
+
+def client_classes(trees: Iterable[ast.Module]) -> set[str]:
+    """The names of the classes that derive from Client, directly or through another class of the project."""
+    bases = {
+        node.name: {ast.unparse(base).rsplit(".", 1)[-1] for base in node.bases}
+        for tree in trees
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef)
+    }
+    clients = {"Client"}
+    while grown := {cls for cls, parents in bases.items() if parents & clients} - clients:
+        clients |= grown
+    return clients - {"Client"}
+
+
 def shapes(project: Path) -> list[str]:
     """
     The designs nuke-di rejects, found in the code of the project (tests included): one line per finding.
     """
     found: list[str] = []
+    trees: dict[Path, ast.Module] = {}
     for path in python_files(project):
-        source = path.read_text(encoding="utf-8")
         try:
-            tree = ast.parse(source)
+            trees[path] = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError:
             found.append(f"{path.name}: does not parse")
-            continue
+    provided = PROVIDED | client_classes(trees.values())
+    for path, tree in trees.items():
+        source = path.read_text(encoding="utf-8")
         name = path.relative_to(project)
+        if not path.name.startswith("test_") and path.name != "conftest.py":
+            for function in tree.body:
+                # A module-level function that hands out a client or a connection: a provider (ADR-0005)
+                if isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef) and function.returns is not None:
+                    returned = set(re.findall(r"\w+", ast.unparse(function.returns)))
+                    if returned & provided:
+                        found.append(f"{name}:{function.lineno}: a provider function {function.name}() (ADR-0005)")
         for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "bind":
+                found.append(f"{name}:{node.lineno}: bind() (ADR-0008)")
             if isinstance(node, ast.Name | ast.Attribute):
                 ident = node.id if isinstance(node, ast.Name) else node.attr
                 if ident == "NotSingletonClient":
@@ -432,7 +462,7 @@ def main() -> None:
         for condition in args.conditions
     ]
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        futures = [pool.submit(one, *run_, args.workdir, env, args.model, args.regrade) for run_ in runs]
+        futures = [pool.submit(one, *spec, args.workdir, env, args.model, args.regrade) for spec in runs]
         results = [future.result() for future in futures]
 
     stamp = datetime.date.today().isoformat()
