@@ -165,6 +165,15 @@ def test_mermaid_draws_a_replacement_outside_the_layers_with_a_dashed_border() -
     )
 
 
+def test_mermaid_names_the_mock_class_of_an_autospec_replacement() -> None:
+    # An autospec mock reports the spec as its __class__, which would label it "Postgres: Postgres"
+    deps = Dependencies()
+    deps.mock(Postgres)
+    deps.resolve(Payments)
+
+    assert '  Postgres["Postgres: MagicMock"]\n' in deps.graph().to_mermaid()
+
+
 def test_mermaid_numbers_the_instances_of_a_not_singleton_client() -> None:
     deps = Dependencies()
     deps.resolve(Orders)

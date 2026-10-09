@@ -48,7 +48,7 @@ class Graph:
 
         for node in self.nodes:
             if node.replacement is not None:
-                lines.append(f'  {ids[node]}["{node.name}: {sname(node.replacement)}"]')
+                lines.append(f'  {ids[node]}["{node.name}: {type(node.replacement).__name__}"]')
                 lines.append(f"  style {ids[node]} stroke-dasharray: 5 5")
 
         layers = sorted({node.layer for node in self.nodes if node.layer is not None})
