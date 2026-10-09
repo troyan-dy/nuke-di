@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_readme_translations import guide, readme, split
+from tests.test_readme_translations import document, split
 
 pytest.importorskip("mypy")
 
@@ -111,8 +111,10 @@ def strict_mypy(root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, capture_output=True, text=True, check=False, cwd=root)  # noqa: S603 - fixed command
 
 
-def test_readme_testing_examples_pass_strict_mypy(tmp_path: Path) -> None:
-    blocks = python_blocks(guide("workers-and-jobs")) + python_blocks(readme())
+def test_testing_guide_examples_pass_strict_mypy(tmp_path: Path) -> None:
+    # The guide page first: README.md has blocks with the same markers, in a single-file sync.py, which would
+    # otherwise be found first and laid out at the wrong path
+    blocks = python_blocks(document(page="workers-and-jobs")) + python_blocks(document())
     for marker in MODULES:
         block = next(block for block in blocks if marker in block)
         first = block.splitlines()[0]
@@ -122,7 +124,7 @@ def test_readme_testing_examples_pass_strict_mypy(tmp_path: Path) -> None:
     for package in tmp_path.glob("app/**/"):
         (package / "__init__.py").touch()
 
-    examples = python_blocks(guide("testing"))
+    examples = python_blocks(document(page="testing"))
     assert examples
     for number, block in enumerate(examples, start=1):
         header = ""

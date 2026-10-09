@@ -194,7 +194,7 @@ sync: would upsert 3 rows into users
 postgres: disconnected
 ```
 
-`--help` はシグネチャと docstring から生成されます。
+`--help` はシグネチャと docstring から生成されます（Python 3.13 以降では `-d DAY, --day DAY` ではなく `-d, --day DAY` と表示されます）。
 
 ```console
 $ python sync.py --help
@@ -230,7 +230,7 @@ $ echo $?
 
 ## <a id="fastapi"></a>FastAPI
 
-パスオペレーションは型ヒントでクライアントを受け取ります。ハンドラーごとの `Depends` も `inject()` も不要です。`Database` と `UserService` は[クイックスタート](#quick-start)のクライアントで、`app/clients.py` に置かれています。
+パスオペレーションは型ヒントでクライアントを受け取ります。ハンドラーごとの `Depends` も `inject()` も不要です。`app/clients.py` には[クイックスタート](#quick-start)の `Database` クラスと `UserService` クラスを、`main()` を除いて置いています。
 
 ```bash
 pip install "nuke-di[fastapi]"

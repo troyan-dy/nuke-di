@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/nuke-di)](https://pypi.org/project/nuke-di/)
 [![Python](https://img.shields.io/pypi/pyversions/nuke-di)](https://pypi.org/project/nuke-di/)
 [![CI](https://github.com/troyan-dy/nuke-di/actions/workflows/ci.yml/badge.svg)](https://github.com/troyan-dy/nuke-di/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](docs/guide/development.md)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/development.md)
 [![License](https://img.shields.io/pypi/l/nuke-di)](LICENSE)
 
 **English** · [Русский](https://github.com/troyan-dy/nuke-di/blob/master/docs/i18n/README.ru.md) · [简体中文](https://github.com/troyan-dy/nuke-di/blob/master/docs/i18n/README.zh-CN.md) · [Español](https://github.com/troyan-dy/nuke-di/blob/master/docs/i18n/README.es.md) · [Português (Brasil)](https://github.com/troyan-dy/nuke-di/blob/master/docs/i18n/README.pt-BR.md) · [日本語](https://github.com/troyan-dy/nuke-di/blob/master/docs/i18n/README.ja.md) · [Polski](https://github.com/troyan-dy/nuke-di/blob/master/docs/i18n/README.pl.md)
@@ -126,7 +126,7 @@ nuke-di 1.11.1 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 �
 | A FastAPI request with a client                          | **103 µs**     | 107 µs (1.0×)   | 206 µs (2.0×)   | 221 µs (2.2×)       | —               |
 ```
 
-![nuke-di against other DI libraries: lower is better](docs/benchmarks/compare.png)
+![nuke-di against other DI libraries: lower is better](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/benchmarks/compare.png)
 
 So, is `nuke-di` the fastest? At building a tree with real type hints and at a FastAPI request, yes:
 dependency-injector and injector take 2–2.5 times as long for the tree, dishka and wireup 24–37 times as
@@ -136,7 +136,7 @@ On a cached root `nuke-di` is level with wireup, and the Cython `get()` of depen
 50 ns, a difference no application notices.
 
 On its own, `resolve()` costs 4–7 µs per client, so a tree of 1000 clients is built in under 6 ms, and
-`connect()` adds 9–15 µs per client in a layer. [docs/benchmarks.md](docs/benchmarks.md) explains every
+`connect()` adds 9–15 µs per client in a layer. [docs/benchmarks.md](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md) explains every
 scenario, records the baseline on Python 3.11–3.14 and has the whole comparison with its method.
 
 ## A job with command-line arguments
@@ -213,7 +213,8 @@ sync: would upsert 3 rows into users
 postgres: disconnected
 ```
 
-`--help` is generated from the signature and the docstring:
+`--help` is generated from the signature and the docstring (Python 3.13+ prints `-d, --day DAY` instead of
+`-d DAY, --day DAY`):
 
 ```console
 $ python sync.py --help
@@ -246,12 +247,13 @@ $ echo $?
 ```
 
 `@worker` does the same for a process that runs until SIGTERM, with a graceful shutdown. Both are
-described in [Workers and jobs](docs/guide/workers-and-jobs.md).
+described in [Workers and jobs](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md).
 
 ## FastAPI
 
 A path operation takes a client by its type hint, with no `Depends` and no `inject()` per handler.
-`Database` and `UserService` are the clients of the [Quick start](#quick-start), in `app/clients.py`:
+`app/clients.py` holds the `Database` and `UserService` classes of the [Quick start](#quick-start), without its
+`main()`:
 
 ```bash
 pip install "nuke-di[fastapi]"
@@ -338,25 +340,25 @@ $ pytest -q tests/test_api.py
 1 passed in 0.23s
 ```
 
-Routers, websockets and the app's own lifespan are covered in [FastAPI](docs/guide/fastapi.md);
-[Litestar](docs/guide/litestar.md) and [FastStream](docs/guide/faststream.md) work the same way.
+Routers, websockets and the app's own lifespan are covered in [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md);
+[Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md) and [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md) work the same way.
 
 ## Documentation
 
-- [Clients](docs/guide/clients.md): `Client` and `NotSingletonClient`, the lifecycle, dataclass clients,
+- [Clients](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md): `Client` and `NotSingletonClient`, the lifecycle, dataclass clients,
   layers, startup timings, the dependency graph, connect and resolution errors
-- [The container](docs/guide/container.md): `Dependencies` and the global `DI`, `resolve()`, `inject()`,
+- [The container](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/container.md): `Dependencies` and the global `DI`, `resolve()`, `inject()`,
   `mock()`, `override()`
-- [Workers and jobs](docs/guide/workers-and-jobs.md): `@job` and `@worker`, command-line parameters,
+- [Workers and jobs](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md): `@job` and `@worker`, command-line parameters,
   `Shutdown`, the grace period, background tasks, exit codes, hooks, Kubernetes
-- Frameworks: [FastAPI](docs/guide/fastapi.md), [Litestar](docs/guide/litestar.md),
-  [FastStream](docs/guide/faststream.md)
-- [Testing](docs/guide/testing.md): `mock()`, `override()`, the pytest fixtures, checking the wiring
-- [Configuration](docs/guide/configuration.md): timeouts, concurrency and the grace period
-- [Errors](docs/guide/errors.md): every exception and when it is raised
-- [Benchmarks](docs/benchmarks.md): every scenario, the baseline on Python 3.11–3.14 and the comparison
+- Frameworks: [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md),
+  [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md)
+- [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md): `mock()`, `override()`, the pytest fixtures, checking the wiring
+- [Configuration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/configuration.md): timeouts, concurrency and the grace period
+- [Errors](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/errors.md): every exception and when it is raised
+- [Benchmarks](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md): every scenario, the baseline on Python 3.11–3.14 and the comparison
   with other libraries
-- [Development](docs/guide/development.md): the checks, coverage and releases
+- [Development](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/development.md): the checks, coverage and releases
 
 ## License
 

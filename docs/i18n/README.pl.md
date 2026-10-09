@@ -213,7 +213,8 @@ sync: would upsert 3 rows into users
 postgres: disconnected
 ```
 
-`--help` jest generowane z sygnatury i docstringu:
+`--help` jest generowane z sygnatury i docstringu (Python 3.13+ wypisuje `-d, --day DAY` zamiast
+`-d DAY, --day DAY`):
 
 ```console
 $ python sync.py --help
@@ -251,7 +252,8 @@ rozdział [Workery i joby](pl/workers-and-jobs.md).
 ## <a id="fastapi"></a>FastAPI
 
 Operacja ścieżki (path operation) przyjmuje klienta po adnotacji typu, bez `Depends` i bez `inject()` w każdym handlerze.
-`Database` i `UserService` to klienci ze [Szybkiego startu](#quick-start), w pliku `app/clients.py`:
+Plik `app/clients.py` zawiera klasy `Database` i `UserService` ze [Szybkiego startu](#quick-start), bez jego
+`main()`:
 
 ```bash
 pip install "nuke-di[fastapi]"

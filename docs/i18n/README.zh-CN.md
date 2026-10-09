@@ -203,7 +203,7 @@ sync: would upsert 3 rows into users
 postgres: disconnected
 ```
 
-`--help` 根据函数签名和 docstring 自动生成：
+`--help` 根据函数签名和 docstring 自动生成（Python 3.13+ 输出的是 `-d, --day DAY`，而不是 `-d DAY, --day DAY`）：
 
 ```console
 $ python sync.py --help
@@ -241,7 +241,7 @@ $ echo $?
 ## <a id="fastapi"></a>FastAPI
 
 路径操作通过类型提示接收客户端，每个处理函数都不需要 `Depends`，也不需要 `inject()`。
-`Database` 和 `UserService` 是[快速开始](#quick-start)中的客户端，位于 `app/clients.py`：
+`app/clients.py` 中是[快速开始](#quick-start)里的 `Database` 和 `UserService` 类，不包括其中的 `main()`：
 
 ```bash
 pip install "nuke-di[fastapi]"

@@ -14,10 +14,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   libraries, a job with command-line arguments and a FastAPI app, each with its real output. The full
   documentation moved, unchanged, into a guide of one page per topic in `docs/guide/` (clients, the container,
   workers and jobs, FastAPI, Litestar, FastStream, testing, configuration, errors, development), linked from the
-  README "Documentation" section and translated into the same six languages in `docs/i18n/<language>/`.
-  `tests/test_readme_translations.py` checks the guide pages and their translations as it checks the README,
-  and that a link to a section of another page lands on a heading. The error for a client used as a pydantic
-  type points to `docs/guide/fastapi.md`.
+  README "Documentation" section and translated into the same six languages in `docs/i18n/<language>/`. The
+  example run of `benchmarks/run.py` moved into `docs/benchmarks.md`. The README links to the guide by
+  absolute URLs, so they also work on PyPI. `tests/test_readme_translations.py` checks the guide pages and their
+  translations as it checks the README, that a link to a section of another page lands on a heading, and that
+  a translation links to the pages of its own language. The error for a client used as a pydantic type links
+  to the FastAPI guide page.
 
 ## [1.11.2] - 2026-10-09
 

@@ -213,7 +213,8 @@ sync: would upsert 3 rows into users
 postgres: disconnected
 ```
 
-O `--help` é gerado a partir da assinatura e da docstring:
+O `--help` é gerado a partir da assinatura e da docstring (no Python 3.13+ aparece `-d, --day DAY` em vez
+de `-d DAY, --day DAY`):
 
 ```console
 $ python sync.py --help
@@ -251,7 +252,8 @@ descritos em [Workers e jobs](pt-BR/workers-and-jobs.md).
 ## <a id="fastapi"></a>FastAPI
 
 Uma operação de rota recebe um cliente pelo seu type hint, sem `Depends` e sem `inject()` em cada handler.
-`Database` e `UserService` são os clientes do [Início rápido](#quick-start), em `app/clients.py`:
+`app/clients.py` contém as classes `Database` e `UserService` do [Início rápido](#quick-start), sem o seu
+`main()`:
 
 ```bash
 pip install "nuke-di[fastapi]"
