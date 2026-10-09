@@ -190,7 +190,7 @@ async def test_zero_timeout_expires_before_the_client_runs(caplog: pytest.LogCap
         await dep.connect()
     assert isinstance(exc_info.value.__cause__, TimeoutError)
     assert dep.timings[0].connect_outcome == "timed_out"
-    assert "Timeout occurred connecting client Untouched" in caplog.text
+    assert "Untouched did not connect within 0s (CONNECT_TIMEOUT_SECONDS)" in caplog.text
     assert not Untouched.touched
 
     dep = Dependencies(settings=DependenciesSettings(disconnect_timeout=0))
@@ -199,7 +199,7 @@ async def test_zero_timeout_expires_before_the_client_runs(caplog: pytest.LogCap
     Untouched.touched = False
     await dep.disconnect()
     assert dep.timings[0].disconnect_outcome == "timed_out"
-    assert "Timeout occurred disconnecting client Untouched" in caplog.text
+    assert "Untouched did not disconnect within 0s (DISCONNECT_TIMEOUT_SECONDS)" in caplog.text
     assert not Untouched.touched
 
 

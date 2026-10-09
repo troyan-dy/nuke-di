@@ -501,12 +501,12 @@ asyncio.run(main())
 
 ```text
 postgres: connected
-Error occurred connecting client Kafka
+Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 Traceback (most recent call last):
   ...
 OSError: broker kafka-1:9092 is unreachable
 postgres: disconnected
-Error occurred connecting client Kafka <- OSError('broker kafka-1:9092 is unreachable')
+Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable <- OSError('broker kafka-1:9092 is unreachable')
 connected: False
 ```
 
@@ -555,11 +555,17 @@ for root in (Checkout, Orders):
         Dependencies().resolve(root)
     except InvalidSignatureError as exc:
         print(f"{type(exc).__name__}: {exc}")
+
+try:
+    Dependencies().resolve(UserRepository)  # a type checker refuses this line, and so does the container
+except InvalidSignatureError as exc:
+    print(f"{type(exc).__name__}: {exc}")
 ```
 
 ```text
 InvalidSignatureError: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)
 CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
+InvalidSignatureError: UserRepository is not a client: subclass Client or NotSingletonClient
 ```
 
 `__init__` の引数は、型ヒントがクライアントであればクライアントで埋められます。それ以外の引数にはデフォルト値が必要で、その値はそのまま使われます。次の場合は `InvalidSignatureError` で失敗します。
@@ -570,6 +576,8 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 | クライアントではない型                | `is UserRepository, which is not a client`        |
 | `Client \| None`                      | `is Postgres \| None, a client cannot be optional` |
 | 位置専用（`/`）のクライアント         | `is positional-only, a client is passed by keyword` |
+
+そもそもクライアントではないクラスを `resolve()` で、または注入される関数の引数として求めると、何かが構築される前に `UserRepository is not a client: subclass Client or NotSingletonClient` で失敗します。
 
 互いに循環して依存するクライアントは、`InvalidSignatureError` のサブクラスである `CircularDependencyError` で失敗します。評価できない型ヒント（関数の内部で定義されたクラスや、`TYPE_CHECKING` の下でインポートされたクラスなど）は、その旨を示す `InvalidSignatureError` で失敗します。エラーが `inject()` から発生した場合、経路は関数から始まります：`(resolving handler -> Checkout -> Profiles)`。[ワーカーやジョブ](#workers-and-jobs)では、いずれの場合も何かが接続される前に、終了コード `1` で実行が失敗します。
 
@@ -600,7 +608,7 @@ async def main() -> None:
     injected = deps.inject(handler)  # build the tree
     async with deps:  # connect
         await injected(42)
-        deps.resolve(Cache)  # ConnectError: already connected
+        deps.resolve(Cache)  # ConnectError: resolve(Cache): the container is already connected; ...
 ```
 
 ## <a id="workers-and-jobs"></a>ワーカーとジョブ
@@ -1440,19 +1448,19 @@ async def publish(kafka: Kafka) -> None: ...
 $ uvicorn app.broken:app
 INFO:     Started server process [81379]
 INFO:     Waiting for application startup.
-Error occurred connecting client Kafka
+Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 Traceback (most recent call last):
   ...
 OSError: broker kafka-1:9092 is unreachable
 ERROR:    Traceback (most recent call last):
   ...
-nuke_di.errors.ConnectError: Error occurred connecting client Kafka
+nuke_di.errors.ConnectError: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
   ...
-RuntimeError: nuke-di clients failed to start: Error occurred connecting client Kafka
+RuntimeError: nuke-di clients failed to start: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 
 ERROR:    Application startup failed. Exiting.
 $ echo $?
@@ -1916,7 +1924,7 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 | `InitializeDependencyError` | クライアントの `__init__` が例外を送出した                |
 | `ConnectError`              | クライアントの `connect()` が例外を送出した、またはコンテナの状態が不正（接続後の解決、解決済みクライアントのモック、解決済みクライアントを持つコンテナでの override など） |
 | `ConnectTimeoutError`       | クライアントの `connect()` が `CONNECT_TIMEOUT_SECONDS` を超えた |
-| `InvalidSignatureError`     | クライアントの `__init__` にクライアントではない必須引数がある、`inject()` に型ヒントのない引数を持つ関数が渡された、またはエントリーポイントのパラメータがサポートされない型であるかフラグが衝突している。[ツリーを構築できない場合](#when-the-tree-cannot-be-built)を参照 |
+| `InvalidSignatureError`     | クライアントの `__init__` にクライアントではない必須引数がある、`inject()` に型ヒントのない引数を持つ関数が渡された、`resolve()` にクライアントではないクラスが渡された、またはエントリーポイントのパラメータがサポートされない型であるかフラグが衝突している。[ツリーを構築できない場合](#when-the-tree-cannot-be-built)を参照 |
 | `CircularDependencyError`   | クライアント同士が循環して依存している。`InvalidSignatureError` のサブクラス |
 | `UsageError`                | ワーカーやジョブのコマンドラインがパラメータと一致しない。`Run.error` に記録され、終了コードは `2` |
 

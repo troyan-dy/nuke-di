@@ -274,7 +274,9 @@ async def test_failed_connect_fails_startup_and_forgets_clients() -> None:
     app = make_app(deps)
     broker_of(app).subscriber("broken")(broken)
 
-    with pytest.raises(RuntimeError, match=r"nuke-di clients failed to start: Error occurred connecting client Broken"):
+    with pytest.raises(
+        RuntimeError, match=r"nuke-di clients failed to start: Broken.connect\(\) raised OSError: unreachable"
+    ):
         async with TestNatsBroker(broker_of(app)), TestApp(app):
             pass
 

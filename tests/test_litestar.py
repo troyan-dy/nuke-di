@@ -338,7 +338,7 @@ def test_failed_connect_fails_startup_and_forgets_clients() -> None:
         with TestClient(app):
             pass
 
-    assert info.group_contains(RuntimeError, match=r"nuke-di clients failed to start: .* client Broken")
+    assert info.group_contains(RuntimeError, match=r"nuke-di clients failed to start: Broken.connect\(\) raised")
 
     assert not deps.connected
     assert deps.connect_clients == []
