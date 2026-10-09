@@ -20,9 +20,11 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - A `disconnect()` cancelled from outside (an ASGI server tearing down the lifespan, a second signal) left
   the container with `connected=False` but its clients, layers and timings still registered, so the next
   `connect()` would have reconnected the half-disconnected instances and `resolve()` would have handed them
-  out. The container is now flushed whichever way `disconnect()` ends, and the cancellation waits for the
-  `disconnect()` coroutines of the running layer to finish their own cancellation before it propagates; the
-  rollback of a failed `connect()` behaves the same ([#37](https://github.com/troyan-dy/nuke-di/issues/37)).
+  out. The container is now flushed whichever way `disconnect()` ends. A client whose `disconnect()` raises
+  `CancelledError` of its own, re-raising the cancellation of a task it awaited for instance, no longer stops
+  `disconnect()` there: the rest of its layer and the layers below are still disconnected, and the client is
+  recorded as `cancelled`. The rollback of a failed `connect()` behaves the same
+  ([#37](https://github.com/troyan-dy/nuke-di/issues/37)).
 
 ## [1.9.0] - 2026-10-09
 

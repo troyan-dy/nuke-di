@@ -201,8 +201,9 @@ class Dependencies:
 
         try:
             for layer in reversed(self._group_by_layer(clients)):
-                # A cancelled disconnect still waits for the clients of the layer to finish their own cancellation;
-                # a client that fails is logged by _disconnect_client, so the group never fails on its own
+                # A client whose disconnect() ends in a CancelledError of its own made gather() raise it out of here,
+                # skipping the rest; a TaskGroup ignores a cancelled child and finishes the layer. A client that fails
+                # with an Exception is logged by _disconnect_client, so only a cancellation ends the group early
                 async with asyncio.TaskGroup() as group:
                     for client in layer:
                         group.create_task(self._disconnect_client(client, limiter))

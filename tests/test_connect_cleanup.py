@@ -57,6 +57,18 @@ class Top(Recorded):
         self.broken = broken
 
 
+class SelfCancelling(Recorded):
+    """
+    Ends its disconnect() in a CancelledError of its own, as a client re-raising the cancellation of a task it awaited.
+    """
+
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+    async def disconnect(self) -> None:
+        raise asyncio.CancelledError
+
+
 class Interrupted(Recorded):
     """
     Records that its disconnect() saw the cancellation and got to finish it.
@@ -157,7 +169,7 @@ async def test_cancelled_disconnect_waits_for_the_layer_and_flushes() -> None:
     assert dep.connect_clients == []
     assert dep.clients == {}
 
-    # The next connect() starts from a fresh tree, not from the half-disconnected clients
+    # The next connect() starts from a fresh graph, not from the half-disconnected clients
     dep.resolve(Redis)
     async with dep:
         assert [type(client) for client in dep.connect_clients] == [Redis]
@@ -181,3 +193,20 @@ async def test_cancelled_rollback_flushes() -> None:
     assert dep.connected is False
     assert dep.connect_clients == []
     assert dep.clients == {}
+
+
+async def test_client_cancelling_itself_does_not_stop_disconnect() -> None:
+    dep = Dependencies()
+    dep.resolve(SelfCancelling)
+    dep.resolve(Sibling)
+    await dep.connect()
+
+    # Returns normally: the rest of the layer and the layer below are still disconnected
+    await dep.disconnect()
+
+    assert recorder.disconnected == ["Sibling", "Postgres"]
+    assert dep.connected is False
+    assert dep.connect_clients == []
+    assert dep.clients == {}
+    [timing] = [timing for timing in dep.timings if timing.name == "SelfCancelling"]
+    assert timing.disconnect_outcome == "cancelled"
