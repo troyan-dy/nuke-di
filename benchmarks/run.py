@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import gc
 import importlib.util
+import itertools
 import json
 import platform
 import statistics
@@ -22,13 +23,14 @@ import subprocess
 import sys
 import time
 import tracemalloc
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, make_dataclass
 from datetime import UTC, datetime
 from functools import partial
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, cast
+from types import ModuleType
+from typing import Any, Protocol, cast
 
 from nuke_di import Client, Dependencies, NotSingletonClient
 
@@ -107,36 +109,87 @@ class Tree:
     root: type[Client]
     # Every client of the tree, dependencies before their consumers; the first one is a leaf
     clients: list[type[Client]]
+    # The module of the classes when their type hints are strings, see client(); None for real type hints
+    module: ModuleType | None = None
+
+    def discard(self) -> None:
+        """
+        Unregister the module, so the trees built per sample do not pile up in `sys.modules`; the generated
+        `__init__` keeps a reference to its globals, which is all `get_type_hints()` needs afterwards.
+        """
+        if self.module is not None:
+            del sys.modules[self.module.__name__]
 
 
-def client(name: str, deps: Sequence[type[NotSingletonClient]] = (), base: type = Client) -> type[Client]:
+def client(
+    name: str, deps: Sequence[type[NotSingletonClient]] = (), base: type = Client, module: ModuleType | None = None
+) -> type[Client]:
     """
     A client class whose `__init__` takes `deps` by type hint, as a user would write it.
+
+    With `module`, the type hints are the names of the dependencies as strings, which is what
+    `from __future__ import annotations` makes of every annotation, and the class belongs to `module`:
+    `dataclass` builds `__init__` with the globals of the class's module, which is where `get_type_hints()`
+    evaluates the strings later, so the module holds every class of the tree under its name.
     """
-    fields = [(f"dep{number}", cls) for number, cls in enumerate(deps)]
-    return cast(type[Client], make_dataclass(name, fields, bases=(base,), eq=False, repr=False))
+    if module is None:
+        fields = [(f"dep{number}", cls) for number, cls in enumerate(deps)]
+        return cast(type[Client], make_dataclass(name, fields, bases=(base,), eq=False, repr=False))
+
+    strings = [(f"dep{number}", cls.__name__) for number, cls in enumerate(deps)]
+    if sys.version_info >= (3, 12):
+        cls = make_dataclass(name, strings, bases=(base,), eq=False, repr=False, module=module.__name__)
+    else:
+        # 3.11 has no `module` argument and takes the module from the namespace
+        cls = make_dataclass(
+            name, strings, bases=(base,), eq=False, repr=False, namespace={"__module__": module.__name__}
+        )
+    setattr(module, name, cls)
+    return cast(type[Client], cls)
 
 
-def wide(n: int) -> Tree:
+_modules = itertools.count()
+
+
+def new_module(strings: bool) -> ModuleType | None:
+    """
+    Where the classes of one tree are made: nowhere for real type hints; for string hints a module of their
+    own, registered in `sys.modules` as the module of a real code base is, because `dataclass` finds the
+    globals of `__init__` there, and wireup imports the module of a class to evaluate its hints.
+    """
+    if not strings:
+        return None
+    module = ModuleType(f"benchmarks.strings{next(_modules)}")
+    sys.modules[module.__name__] = module
+    return module
+
+
+class Shape(Protocol):
+    def __call__(self, n: int, strings: bool = False) -> Tree: ...
+
+
+def wide(n: int, strings: bool = False) -> Tree:
     """
     One root that declares `n - 1` clients with no dependencies: two layers.
     """
-    leaves = [client(f"Wide{number}") for number in range(n - 1)]
-    root = client("WideRoot", leaves)
-    return Tree(root, [*leaves, root])
+    module = new_module(strings)
+    leaves = [client(f"Wide{number}", module=module) for number in range(n - 1)]
+    root = client("WideRoot", leaves, module=module)
+    return Tree(root, [*leaves, root], module)
 
 
-def deep(n: int) -> Tree:
+def deep(n: int, strings: bool = False) -> Tree:
     """
     A chain of `n` clients: `n` layers.
     """
+    module = new_module(strings)
     clients: list[type[Client]] = []
     for number in range(n):
-        clients.append(client(f"Deep{number}", clients[-1:]))
-    return Tree(clients[-1], clients)
+        clients.append(client(f"Deep{number}", clients[-1:], module=module))
+    return Tree(clients[-1], clients, module)
 
 
-def mixed(n: int) -> Tree:
+def mixed(n: int, strings: bool = False) -> Tree:
     """
     A pyramid of `n` clients, 1, 2, 4, ... wide from the top; every client depends on two or three of the
     level below, so the levels share their dependencies like a diamond. About log2(n) layers.
@@ -150,19 +203,27 @@ def mixed(n: int) -> Tree:
     if total < n:
         widths.append(n - total)
 
+    module = new_module(strings)
     clients: list[type[Client]] = []
     below: list[type[Client]] = []
     for level, width in reversed(list(enumerate(widths))):
         current = []
         for number in range(width):
             deps = dict.fromkeys(below[(2 * number + offset) % len(below)] for offset in range(3)) if below else {}
-            current.append(client(f"Mixed{level}_{number}", list(deps)))
+            current.append(client(f"Mixed{level}_{number}", list(deps), module=module))
         clients += current
         below = current
-    return Tree(below[0], clients)
+    return Tree(below[0], clients, module)
 
 
-SHAPES: dict[str, Callable[[int], Tree]] = {"wide": wide, "deep": deep, "mixed": mixed}
+SHAPES: dict[str, Shape] = {"wide": wide, "deep": deep, "mixed": mixed}
+
+
+def shape_label(shape: str, strings: bool) -> str:
+    """
+    The Shape column of a tree: `wide, strings` for the string-annotation variant.
+    """
+    return f"{shape}, strings" if strings else shape
 
 
 def allow_recursion(n: int) -> None:
@@ -173,7 +234,27 @@ def allow_recursion(n: int) -> None:
 # Scenarios
 
 
-def cold_resolve(root: type[Client]) -> float:
+COLD = "resolve(), cold"
+SEEN = "resolve(), second container, classes seen before"
+
+
+def cold_resolve(build: Callable[[], Tree]) -> float:
+    """
+    `resolve()` of a root on a fresh container, the classes never resolved before: `build` makes them for
+    every sample, outside the timing, so nothing a process keeps per class (#29) can serve them.
+    """
+    tree = build()
+    try:
+        return measure(Dependencies().resolve, 1, tree.root)
+    finally:
+        tree.discard()
+
+
+def seen_resolve(root: type[Client]) -> float:
+    """
+    `resolve()` of a root on a fresh container, the classes resolved before in this process: what every
+    test of a session pays after the first one.
+    """
     return measure(Dependencies().resolve, 1, root)
 
 
@@ -182,15 +263,23 @@ def warm_resolve(deps: Dependencies, root: type[Client]) -> float:
 
 
 def resolve_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
-    for shape, build in SHAPES.items():
-        for n in sizes:
-            tree = build(n)
-            yield Result("resolve(), cold", shape, n, collect(partial(cold_resolve, tree.root), repeat))
+    for strings in (False, True):
+        for shape, build in SHAPES.items():
+            for n in sizes:
+                samples = collect(partial(cold_resolve, partial(build, n, strings)), repeat)
+                yield Result(COLD, shape_label(shape, strings), n, samples)
 
-            deps = Dependencies()
-            deps.resolve(tree.root)
-            samples = collect(partial(warm_resolve, deps, tree.root), repeat)
-            yield Result("resolve(), warm", shape, n, samples, per_client=False)
+                # The warm-up of collect() is the first container, the samples are the second one and on
+                tree = build(n, strings)
+                yield Result(SEEN, shape_label(shape, strings), n, collect(partial(seen_resolve, tree.root), repeat))
+
+                if strings:
+                    # The cache hit does not read the hints
+                    continue
+                deps = Dependencies()
+                deps.resolve(tree.root)
+                samples = collect(partial(warm_resolve, deps, tree.root), repeat)
+                yield Result("resolve(), warm", shape, n, samples, per_client=False)
 
 
 async def cycle(deps: Dependencies) -> float:
@@ -220,17 +309,23 @@ async def ideal(clients: list[NotSingletonClient]) -> float:
         gc.enable()
 
 
-def connect_sample(roots: list[type[Client]], library: list[float], direct: list[float]) -> float:
+Reference = Callable[[list[Any]], Awaitable[float]]
+
+
+def connect_sample(
+    roots: list[type[Client]], library: list[float], direct: list[float], reference: Reference = ideal
+) -> float:
     """
-    One connect and disconnect of a container with `roots` resolved, then the same clients awaited directly;
-    the sample is the difference, the two figures go into `library` and `direct`.
+    One connect and disconnect of a container with `roots` resolved, then the same clients through
+    `reference` without the container; the sample is the difference, the two figures go into `library`
+    and `direct`.
     """
     deps = Dependencies()
     for root in roots:
         deps.resolve(root)
     clients = list(deps.connect_clients)
     library.append(asyncio.run(cycle(deps)))
-    direct.append(asyncio.run(ideal(clients)))
+    direct.append(asyncio.run(reference(clients)))
     return library[-1] - direct[-1]
 
 
@@ -240,6 +335,130 @@ def one_layer(n: int) -> list[type[Client]]:
 
 def chain(n: int) -> list[type[Client]]:
     return [deep(n).root]
+
+
+# An application: clients whose connect() and disconnect() take the time a real connection does, in a tree
+# with slack between its branches, so the wall time is what a startup and a shutdown take and the layers
+# of the container, which wait for the slowest client of each, show against the critical path (#28)
+
+
+class Sleeper(Client):
+    """
+    A client whose connect() and disconnect() sleep for a fixed time.
+    """
+
+    connect_seconds = 0.0
+    disconnect_seconds = 0.0
+    # The clients this one depends on, for the schedule without the container
+    dependencies: tuple["Sleeper", ...] = ()
+
+    async def connect(self) -> None:
+        await asyncio.sleep(self.connect_seconds)
+
+    async def disconnect(self) -> None:
+        await asyncio.sleep(self.disconnect_seconds)
+
+
+class Settings(Sleeper):
+    connect_seconds = 0.001
+
+
+class Postgres(Sleeper):
+    connect_seconds = 0.030
+    disconnect_seconds = 0.005
+
+    def __init__(self, settings: Settings) -> None:
+        self.dependencies = (settings,)
+
+
+class Redis(Sleeper):
+    connect_seconds = 0.020
+    disconnect_seconds = 0.002
+
+    def __init__(self, settings: Settings) -> None:
+        self.dependencies = (settings,)
+
+
+class Kafka(Sleeper):
+    connect_seconds = 0.060
+    disconnect_seconds = 0.010
+
+    def __init__(self, settings: Settings) -> None:
+        self.dependencies = (settings,)
+
+
+class Repository(Sleeper):
+    connect_seconds = 0.015
+    disconnect_seconds = 0.001
+
+    def __init__(self, postgres: Postgres) -> None:
+        self.dependencies = (postgres,)
+
+
+class Users(Sleeper):
+    connect_seconds = 0.010
+    disconnect_seconds = 0.001
+
+    def __init__(self, repository: Repository, redis: Redis) -> None:
+        self.dependencies = (repository, redis)
+
+
+class Consumer(Sleeper):
+    connect_seconds = 0.005
+    disconnect_seconds = 0.005
+
+    def __init__(self, kafka: Kafka) -> None:
+        self.dependencies = (kafka,)
+
+
+class Api(Sleeper):
+    connect_seconds = 0.002
+    disconnect_seconds = 0.001
+
+    def __init__(self, users: Users, consumer: Consumer) -> None:
+        self.dependencies = (users, consumer)
+
+
+APPLICATION = "application: 8 clients, connect() of 1–60 ms"  # noqa: RUF001
+
+
+async def after(
+    tasks: dict[int, asyncio.Task[None]], others: Iterable[Sleeper], step: Callable[[], Awaitable[None]]
+) -> None:
+    """
+    `step()` once the tasks of `others` are done.
+    """
+    for other in others:
+        await tasks[id(other)]
+    await step()
+
+
+async def critical_path(clients: list[Sleeper]) -> float:
+    """
+    The same coroutines without the layers: every connect() starts as soon as the client's dependencies are
+    connected and every disconnect() as soon as its consumers are disconnected, so the wall time is the
+    longest chain of the tree, what a schedule by dependency rather than by layer would give.
+    """
+    consumers: dict[int, list[Sleeper]] = {id(client): [] for client in clients}
+    for client in clients:
+        for dependency in client.dependencies:
+            consumers[id(dependency)].append(client)
+
+    gc.disable()
+    try:
+        started = time.perf_counter()
+        connects: dict[int, asyncio.Task[None]] = {}
+        # Dependencies before consumers, as the container resolved them, so every task finds what it waits for
+        for client in clients:
+            connects[id(client)] = asyncio.create_task(after(connects, client.dependencies, client.connect))
+        await asyncio.gather(*connects.values())
+        disconnects: dict[int, asyncio.Task[None]] = {}
+        for client in reversed(clients):
+            disconnects[id(client)] = asyncio.create_task(after(disconnects, consumers[id(client)], client.disconnect))
+        await asyncio.gather(*disconnects.values())
+        return time.perf_counter() - started
+    finally:
+        gc.enable()
 
 
 def connect_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
@@ -252,6 +471,14 @@ def connect_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
             yield Result("connect() + disconnect()", shape, n, library[1:])
             yield Result("connect() + disconnect(), ideal: coroutines awaited directly", shape, n, direct[1:])
             yield Result("connect() + disconnect(), overhead above the ideal", shape, n, overhead)
+
+    # The sleeps are the figure here, not the scheduling, so nothing is per client
+    library, direct = [], []
+    lost = collect(partial(connect_sample, [Api], library, direct, critical_path), repeat)
+    yield Result("connect() + disconnect(), wall time", APPLICATION, 8, library[1:], per_client=False)
+    ideal_path = "connect() + disconnect(), ideal: the critical path, no layer barriers"
+    yield Result(ideal_path, APPLICATION, 8, direct[1:], per_client=False)
+    yield Result("connect() + disconnect(), lost at the layer barriers", APPLICATION, 8, lost, per_client=False)
 
 
 class Database(Client):
@@ -288,9 +515,17 @@ def not_singleton_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
     }
     for shape, base in bases.items():
         for n in sizes:
-            session = client("Session", base=base)
-            root = client("Root", [client(f"Consumer{number}", [session]) for number in range(n)])
-            yield Result("resolve(), cold", shape, n, collect(partial(cold_resolve, root), repeat))
+            yield Result(COLD, shape, n, collect(partial(cold_resolve, partial(consumers, base, n)), repeat))
+
+
+def consumers(base: type, n: int) -> Tree:
+    """
+    One root over `n` consumers of one `Session`, a `Client` or a `NotSingletonClient`.
+    """
+    session = client("Session", base=base)
+    middle = [client(f"Consumer{number}", [session]) for number in range(n)]
+    root = client("Root", middle)
+    return Tree(root, [session, *middle, root])
 
 
 def mock_cycle(deps: Dependencies, leaf: type[Client], root: type[Client]) -> None:

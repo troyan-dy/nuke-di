@@ -6,6 +6,19 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The benchmark suite measures what real code pays: `resolve(), cold` of the wide, deep and mixed trees with
+  string annotations (`wide, strings` and so on), the classes `from __future__ import annotations` produces,
+  which cost about twice the real-type figure; `resolve(), second container, classes seen before`, a fresh
+  `Dependencies()` for classes resolved earlier in the process, what every test of a session pays and the
+  row a per-class cache would change; and an `application` connect shape of 8 clients whose `connect()` and
+  `disconnect()` sleep for 1–60 ms, with the wall time of the container against the critical path of the
+  same coroutines, so the time lost at the layer barriers shows. `benchmarks/compare.py` runs the
+  string-annotation trees through every library as an extra row of the cold-start summary; the baseline
+  and the comparison in `docs/benchmarks.md` are retaken
+  ([#38](https://github.com/troyan-dy/nuke-di/issues/38)).
+
 ## [1.9.0] - 2026-10-09
 
 ### Added
