@@ -629,6 +629,39 @@ async def main() -> None:
         deps.resolve(Cache)  # ConnectError: resolve(Cache): the container is already connected; ...
 ```
 
+容器可以安全地从多个线程解析：每个容器一把锁串行化 `resolve`、`inject`、`mock`、`override` 和 `flush`，因此两个线程同时请求的单例只构建一次。`connect()` 和 `disconnect()` 属于同一个事件循环。
+
+```python
+import threading
+
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    instances = 0
+
+    def __init__(self) -> None:
+        type(self).instances += 1
+
+
+class Orders(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+deps = Dependencies()
+threads = [threading.Thread(target=deps.resolve, args=(Orders,)) for _ in range(8)]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join()
+print("instances:", Postgres.instances, "clients:", len(deps.connect_clients))
+```
+
+```text
+instances: 1 clients: 2
+```
+
 ## <a id="workers-and-jobs"></a>worker 与 job
 
 只需一个装饰器，异步函数就能成为一个进程的主程序：
