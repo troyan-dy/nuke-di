@@ -14,7 +14,7 @@ async def main() -> None:
         print(f"{type(exc).__name__}: {exc}")
         print(f"__cause__: {exc.__cause__!r}")
     for t in deps.timings:
-        print(f"{t.name:<8} layer {t.layer}  connect {t.connect_outcome}  disconnect {t.disconnect_outcome}")
+        print(f"{t.name:<8} connect {t.connect_outcome}  disconnect {t.disconnect_outcome}")
 
 
 if __name__ == "__main__":

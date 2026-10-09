@@ -32,8 +32,8 @@ spec:
     metadata:
       labels: {app: service-layout-api}
     spec:
-      # uvicorn drains requests for up to 5s, then the lifespan disconnects 4 layers
-      # (Settings, Database, Outbox, Orders): 5 + DISCONNECT_TIMEOUT_SECONDS 5 x 4 layers = 25 <= 30
+      # uvicorn drains requests for up to 5s, then the lifespan disconnects a chain of 4 clients
+      # (Orders, Outbox, Database, Settings): 5 + DISCONNECT_TIMEOUT_SECONDS 5 x 4 = 25 <= 30
       terminationGracePeriodSeconds: 30
       containers:
         - name: api
@@ -64,8 +64,8 @@ spec:
     metadata:
       labels: {app: service-layout-outbox}
     spec:
-      # SIGTERM sets Shutdown: the worker finishes its batch within SHUTDOWN_GRACE_SECONDS 10, then 3 layers
-      # (Settings + Broker + Shutdown, Database, Outbox) disconnect: 10 + 5 x 3 = 25 <= 30
+      # SIGTERM sets Shutdown: the worker finishes its batch within SHUTDOWN_GRACE_SECONDS 10, then a chain
+      # of 3 clients (Outbox, Database, Settings) disconnects: 10 + 5 x 3 = 25 <= 30
       terminationGracePeriodSeconds: 30
       containers:
         - name: outbox

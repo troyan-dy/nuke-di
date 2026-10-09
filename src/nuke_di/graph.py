@@ -20,8 +20,6 @@ class Node:
     cls: type[NotSingletonClient]
     # `Client` rather than `NotSingletonClient`
     singleton: bool
-    # The Layer the client connects in; None for a Replacement, which is never connected
-    layer: int | None
     # The object registered with `mock()` or `override()` in place of `cls`; None for a real client
     replacement: object | None
     # The clients of the `__init__` arguments, by argument name; left out of repr(), which would otherwise
@@ -36,7 +34,7 @@ class Node:
 @dataclass(frozen=True, eq=False)
 class Graph:
     """
-    Every client a container has resolved, with who depends on whom and the Layer of each: a snapshot.
+    Every client a container has resolved, with who depends on whom: a snapshot.
 
     Compares by identity, like its nodes.
     """
@@ -46,8 +44,8 @@ class Graph:
 
     def to_mermaid(self) -> str:
         """
-        A Mermaid flowchart: the layers as subgraphs, an arrow from every dependency to its consumer,
-        a Replacement outside the layers with a dashed border.
+        A Mermaid flowchart, bottom to top: an arrow from every dependency to its consumer, a Replacement with a
+        dashed border.
         """
         ids = self._ids()
         lines = ["graph BT"]
@@ -56,15 +54,9 @@ class Graph:
             if node.replacement is not None:
                 lines.append(f'  {ids[node]}["{node.name}: {type(node.replacement).__name__}"]')
                 lines.append(f"  style {ids[node]} stroke-dasharray: 5 5")
-
-        layers = sorted({node.layer for node in self.nodes if node.layer is not None})
-        for layer in layers:
-            lines.append(f"  subgraph layer{layer} [layer {layer}]")
-            for node in self.nodes:
-                if node.layer == layer:
-                    label = "" if ids[node] == node.name else f"[{node.name}]"
-                    lines.append(f"    {ids[node]}{label}")
-            lines.append("  end")
+            else:
+                label = "" if ids[node] == node.name else f"[{node.name}]"
+                lines.append(f"  {ids[node]}{label}")
 
         for node in self.nodes:
             for dependency in node.dependencies.values():

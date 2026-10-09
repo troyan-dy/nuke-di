@@ -54,7 +54,7 @@ def test_graph_lists_the_resolved_clients_in_resolution_order() -> None:
     assert [node.name for node in deps.graph().nodes] == ["Postgres", "Redis", "Payments", "Checkout"]
 
 
-def test_node_knows_its_class_layer_and_singleton() -> None:
+def test_node_knows_its_class_and_singleton() -> None:
     deps = Dependencies()
     deps.resolve(Checkout)
     nodes = by_name(deps.graph())
@@ -62,7 +62,6 @@ def test_node_knows_its_class_layer_and_singleton() -> None:
     assert nodes["Postgres"].cls is Postgres
     assert nodes["Postgres"].singleton is True
     assert nodes["Postgres"].replacement is None
-    assert [nodes[name].layer for name in ("Postgres", "Redis", "Payments", "Checkout")] == [0, 0, 1, 2]
 
 
 def test_dependencies_are_keyed_by_init_argument_and_shared_between_consumers() -> None:
@@ -98,11 +97,8 @@ def test_replacement_node_shows_the_expected_class_and_the_object_in_its_place()
 
     assert nodes["Postgres"].cls is Postgres
     assert nodes["Postgres"].replacement is pg
-    assert nodes["Postgres"].layer is None
     assert nodes["Postgres"].singleton is True
     assert nodes["Payments"].dependencies["pg"] is nodes["Postgres"]
-    # A Replacement is never connected, so the consumer does not sit above it
-    assert nodes["Payments"].layer == 0
 
 
 async def test_graph_is_allowed_while_connected() -> None:
@@ -121,22 +117,16 @@ def test_graph_is_empty_after_flush() -> None:
     assert deps.graph().nodes == ()
 
 
-def test_mermaid_groups_the_layers_and_points_from_dependency_to_consumer() -> None:
+def test_mermaid_points_from_dependency_to_consumer() -> None:
     deps = Dependencies()
     deps.resolve(Checkout)
 
     assert deps.graph().to_mermaid() == (
         "graph BT\n"
-        "  subgraph layer0 [layer 0]\n"
-        "    Postgres\n"
-        "    Redis\n"
-        "  end\n"
-        "  subgraph layer1 [layer 1]\n"
-        "    Payments\n"
-        "  end\n"
-        "  subgraph layer2 [layer 2]\n"
-        "    Checkout\n"
-        "  end\n"
+        "  Postgres\n"
+        "  Redis\n"
+        "  Payments\n"
+        "  Checkout\n"
         "  Postgres --> Payments\n"
         "  Postgres --> Checkout\n"
         "  Redis --> Checkout\n"
@@ -144,7 +134,7 @@ def test_mermaid_groups_the_layers_and_points_from_dependency_to_consumer() -> N
     )
 
 
-def test_mermaid_draws_a_replacement_outside_the_layers_with_a_dashed_border() -> None:
+def test_mermaid_draws_a_replacement_with_a_dashed_border() -> None:
     deps = Dependencies()
     deps.mock(Postgres, AsyncMock())
     deps.resolve(Payments)
@@ -153,9 +143,7 @@ def test_mermaid_draws_a_replacement_outside_the_layers_with_a_dashed_border() -
         "graph BT\n"
         '  Postgres["Postgres: AsyncMock"]\n'
         "  style Postgres stroke-dasharray: 5 5\n"
-        "  subgraph layer0 [layer 0]\n"
-        "    Payments\n"
-        "  end\n"
+        "  Payments\n"
         "  Postgres --> Payments\n"
     )
 
@@ -176,14 +164,10 @@ def test_mermaid_numbers_the_instances_of_a_not_singleton_client() -> None:
 
     assert deps.graph().to_mermaid() == (
         "graph BT\n"
-        "  subgraph layer0 [layer 0]\n"
-        "    Session\n"
-        "    Session_2[Session]\n"
-        "  end\n"
-        "  subgraph layer1 [layer 1]\n"
-        "    Orders\n"
-        "    Reports\n"
-        "  end\n"
+        "  Session\n"
+        "  Orders\n"
+        "  Session_2[Session]\n"
+        "  Reports\n"
         "  Session --> Orders\n"
         "  Session_2 --> Reports\n"
     )
@@ -268,7 +252,6 @@ def test_a_client_appended_to_connect_clients_by_hand_has_no_dependencies() -> N
     deps.connect_clients.append(Postgres())
     nodes = by_name(deps.graph())
 
-    assert nodes["Postgres"].layer == 0
     assert dict(nodes["Postgres"].dependencies) == {}
 
 
@@ -285,9 +268,9 @@ def test_mermaid_ids_stay_unique_next_to_a_class_named_like_a_numbered_instance(
     deps.resolve(Audit)
     mermaid = deps.graph().to_mermaid()
 
-    assert "    Session\n" in mermaid
-    assert "    Session_2\n" in mermaid
-    assert "    Session_3[Session]\n" in mermaid
+    assert "  Session\n" in mermaid
+    assert "  Session_2\n" in mermaid
+    assert "  Session_3[Session]\n" in mermaid
     assert "  Session_3 --> Audit\n" in mermaid
     assert "  Session_2 --> Audit\n" in mermaid
 

@@ -153,7 +153,7 @@ class Run:
 5. Run the entrypoint function as a task.
 6. Wait until the task ends, a Background task fails, or a Shutdown begins.
 7. On Shutdown, set `Shutdown` and wait up to `SHUTDOWN_GRACE_SECONDS` for the task to end on its own. Then cancel it and await it.
-8. Stop `BackgroundTasks`: cancel and await its tasks. This happens before the container disconnects, because the supervisor itself sits in layer 0 and would otherwise outlive the clients its tasks use.
+8. Stop `BackgroundTasks`: cancel and await its tasks. This happens before the container disconnects, because the supervisor depends on no client, so it would otherwise disconnect without waiting for the clients its tasks use.
 9. `DI.disconnect()`, with `DISCONNECT_TIMEOUT_SECONDS` per client.
 10. Remove the signal handlers. Set `finished_at` and `exit_code`, then call every `on_finish`.
 11. `sys.exit(exit_code)`.
@@ -202,7 +202,7 @@ Under the `nuke_di` logger:
 
 Both are floats; negative values raise `ValueError`.
 
-In the worst case a Run stops in `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers`. With the defaults, a two-layer tree takes the whole Kubernetes default `terminationGracePeriodSeconds` of 30 seconds. The README should give this formula so that deeper trees can tune the timeouts or the grace period.
+In the worst case a Run stops in `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies`. With the defaults, a chain of two clients takes the whole Kubernetes default `terminationGracePeriodSeconds` of 30 seconds. The README should give this formula so that deeper trees can tune the timeouts or the grace period.
 
 ## Changes to existing behavior
 

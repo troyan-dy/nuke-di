@@ -12,7 +12,7 @@ logging.getLogger("asyncio").setLevel(logging.WARNING)  # keep only the records 
 async def main() -> None:
     deps = Dependencies()
     injected = deps.inject(place_order)
-    async with deps:  # the DEBUG log names every layer and the clients in it
+    async with deps:  # the DEBUG log names every client as it starts, with how many have connected
         print("placed order", await injected(42))
 
 

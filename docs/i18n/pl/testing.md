@@ -92,7 +92,7 @@ Zasady:
   zarejestrowany; `mock(cls, other)` i `override(cls)` zgłaszają `ConnectError: Database already has a
   replacement`.
 - **Zamienniki nie są łączone.** Ich `connect()` / `disconnect()` nigdy nie są wywoływane i nie
-  biorą one udziału w [warstwach](clients.md#layers).
+  biorą one udziału w [kolejności łączenia](clients.md#connect-order).
 - **Jak długo żyje zamiennik.** Zamiennik z `mock()` znika przy następnym `flush()`, także tym
   na końcu `disconnect()`: test, który łączy kontener więcej niż raz, powinien użyć
   `override()`, którego zamiennik przetrwa każde `flush()` aż do końca bloku. Wyjątek wewnątrz

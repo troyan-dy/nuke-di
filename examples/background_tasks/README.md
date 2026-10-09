@@ -23,7 +23,7 @@ $ uv run python -m background_tasks.worker
 INFO  nuke_di.run: Starting worker background_tasks.worker.process
 inbox: connected
 cache: connected, v1
-INFO  nuke_di.core: Connected 4 clients in 1 layer in 0.00s (slowest: Shutdown 0.00s, Inbox 0.00s, BackgroundTasks 0.00s)
+INFO  nuke_di.core: Connected 4 clients in 0.00s (slowest: Shutdown 0.00s, Inbox 0.00s, BackgroundTasks 0.00s)
 worker: message-1 with cache v1
 worker: message-2 with cache v1
 heartbeat: alive, 2 messages received
@@ -52,7 +52,7 @@ $ uv run python -m background_tasks.worker --fail-after 2
 INFO  nuke_di.run: Starting worker background_tasks.worker.process
 inbox: connected
 cache: connected, v1
-INFO  nuke_di.core: Connected 4 clients in 1 layer in 0.00s (slowest: Shutdown 0.00s, Inbox 0.00s, BackgroundTasks 0.00s)
+INFO  nuke_di.core: Connected 4 clients in 0.00s (slowest: Shutdown 0.00s, Inbox 0.00s, BackgroundTasks 0.00s)
 worker: message-1 with cache v1
 worker: message-2 with cache v1
 heartbeat: alive, 2 messages received

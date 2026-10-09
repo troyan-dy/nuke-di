@@ -20,9 +20,9 @@ async def test_metrics_of_a_failed_run(capsys: pytest.CaptureFixture[str]) -> No
         finished_at=started + datetime.timedelta(seconds=1.5),
         exit_code=1,
         clients=[
-            ClientTiming("Postgres", 0, connect=0.1, connect_outcome="ok", disconnect=0.0, disconnect_outcome="ok"),
-            ClientTiming("Kafka", 0, connect=1.0, connect_outcome="timed_out"),
-            ClientTiming("Orders", 1),  # never started: no line
+            ClientTiming("Postgres", connect=0.1, connect_outcome="ok", disconnect=0.0, disconnect_outcome="ok"),
+            ClientTiming("Kafka", connect=1.0, connect_outcome="timed_out"),
+            ClientTiming("Orders"),  # never started: no line
         ],
     )
 
@@ -31,9 +31,9 @@ async def test_metrics_of_a_failed_run(capsys: pytest.CaptureFixture[str]) -> No
     assert capsys.readouterr().out.splitlines() == [
         'job_duration_seconds{job="app.jobs.export"} 1.500',
         'job_exit_code{job="app.jobs.export"} 1',
-        'client_connect_seconds{job="app.jobs.export",client="Postgres",layer="0",outcome="ok"} 0.100',
-        'client_disconnect_seconds{job="app.jobs.export",client="Postgres",layer="0",outcome="ok"} 0.000',
-        'client_connect_seconds{job="app.jobs.export",client="Kafka",layer="0",outcome="timed_out"} 1.000',
+        'client_connect_seconds{job="app.jobs.export",client="Postgres",outcome="ok"} 0.100',
+        'client_disconnect_seconds{job="app.jobs.export",client="Postgres",outcome="ok"} 0.000',
+        'client_connect_seconds{job="app.jobs.export",client="Kafka",outcome="timed_out"} 1.000',
     ]
 
 
@@ -44,7 +44,6 @@ def test_json_formatter_keeps_the_structured_fields() -> None:
             "levelname": "WARNING",
             "msg": "slow",
             "client": "Kafka",
-            "layer": 0,
             "duration": 0.61234,
         }
     )
@@ -54,7 +53,6 @@ def test_json_formatter_keeps_the_structured_fields() -> None:
         "logger": "nuke_di.core",
         "message": "slow",
         "client": "Kafka",
-        "layer": 0,
         "duration": 0.6123,
     }
 

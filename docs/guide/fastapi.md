@@ -102,7 +102,8 @@ What happened:
    global `DI`, and wrapped the app's lifespan.
 2. `@app.get` saw `users: UserService` and only recorded it; nothing was built on import.
 3. On startup the lifespan resolved the clients of the routes the app serves, its own and those of
-   the routers it includes, and connected them, layer by layer. On shutdown it disconnected them.
+   the routers it includes, and connected them, each after its dependencies. On shutdown it
+   disconnected them.
 4. A request to `/users/42` got the connected `UserService`. `/me` went through the dependency
    `current_user`, which takes `db: Database` the same way.
 

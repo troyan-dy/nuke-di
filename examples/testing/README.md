@@ -28,7 +28,7 @@ test function with a one-line docstring.
 | A `@worker` stopped by a fake that calls `Shutdown.set()` | `test_worker_stops_on_shutdown` | Test the loop of a worker: `set()` does what SIGTERM would do |
 | `Dependencies().inject(entrypoint)`, parametrized | `test_entrypoint_resolves` | One test in CI checks the wiring of every entrypoint, no infrastructure needed |
 | The same `inject()` on a broken `__init__` | `test_wiring_catches_a_broken_init` | Shows what the wiring test catches: the error a real run would print |
-| `deps.graph()`: layers and dependencies | `test_graph` | Assert on which clients an entrypoint pulls in and in which layer they connect |
+| `deps.graph()`: clients and dependencies | `test_graph` | Assert on which clients an entrypoint pulls in and what each one needs |
 | `deps.graph()` with a mock | `test_graph_shows_replacements` | Check that a test really replaced the client it meant to |
 
 ## Run

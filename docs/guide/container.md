@@ -11,14 +11,14 @@ when you need isolation, e.g. in tests.
 |----------------------|-------------------------------------------------------------------------|
 | `resolve(cls)`       | Build `cls` and its dependency tree. Idempotent for `Client`.           |
 | `inject(func)`       | Return `functools.partial(func, ...)` with client arguments bound. Every argument of `func` except `*args` / `**kwargs` must have a type hint. |
-| `connect()`          | Call `connect()` on every resolved client, layer by layer.              |
-| `disconnect()`       | Call `disconnect()` layer by layer in reverse, then `flush()` the container. |
+| `connect()`          | Call `connect()` on every resolved client, each after its dependencies. |
+| `disconnect()`       | Call `disconnect()` on every client, each after its consumers, then `flush()` the container. |
 | `async with`         | `connect()` on enter, `disconnect()` on exit.                           |
 | `mock(cls, new=None)`| Register a Replacement for `cls` (an autospec mock by default) until the next `flush()`. Must come before `cls` is resolved. |
 | `override(cls, new=None)` | A Replacement for the duration of a `with` block, then `flush()`; see [Testing](testing.md). |
 | `flush()`            | Forget every resolved client.                                           |
 | `timings`            | One `ClientTiming` per client of the last `connect()`; see [Startup timings](clients.md#startup-timings). |
-| `graph()`            | A `Graph` of the resolved clients with their dependencies and layers, `to_mermaid()` included; see [The graph](clients.md#the-graph). |
+| `graph()`            | A `Graph` of the resolved clients with their dependencies, `to_mermaid()` included; see [The graph](clients.md#the-graph). |
 
 The result of `inject()` keeps the return type of the function, while its remaining arguments are
 untyped: a type checker cannot subtract the client arguments from a signature.

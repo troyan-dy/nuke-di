@@ -106,7 +106,7 @@ $ python -m app.jobs.sync
 INFO  nuke_di.run: Starting job app.jobs.sync.sync
 postgres: connected
 warehouse: connected
-INFO  nuke_di.core: Connected 4 clients in 1 layer in 0.00s (slowest: Warehouse 0.00s, Postgres 0.00s, Shutdown 0.00s)
+INFO  nuke_di.core: Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)
 postgres: upserted 3 rows into users
 postgres: upserted 3 rows into orders
 postgres: disconnected
@@ -375,7 +375,7 @@ queue: disconnected
 
 クライアントの接続中にシグナルが届いた場合は起動が中止され、すでに接続済みのクライアントは切断されます。
 
-最悪の場合、プロセスが停止するまでに `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers` かかります。デフォルト値のままだと、2 レイヤーのツリーだけで Kubernetes のデフォルトの `terminationGracePeriodSeconds` である 30 秒を使い切ってしまいます。ツリーがもっと深い場合は、タイムアウトを短くするか猶予期間を長くしてください。
+最悪の場合、プロセスが停止するまでに `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies` かかります。デフォルト値のままだと、2 つのクライアントの連鎖だけで Kubernetes のデフォルトの `terminationGracePeriodSeconds` である 30 秒を使い切ってしまいます。ツリーがもっと深い場合は、タイムアウトを短くするか猶予期間を長くしてください。
 
 ## <a id="background-tasks"></a>バックグラウンドタスク
 
@@ -533,7 +533,7 @@ from app.clients import Postgres, Warehouse
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        fields = {key: getattr(record, key) for key in ("run", "client", "layer", "duration") if hasattr(record, key)}
+        fields = {key: getattr(record, key) for key in ("run", "client", "duration") if hasattr(record, key)}
         return json.dumps({"level": record.levelname, "message": record.getMessage(), **fields})
 
 
@@ -561,7 +561,7 @@ $ python -m app.jobs.startup
 {"level": "INFO", "message": "Starting job app.jobs.startup.startup", "run": "app.jobs.startup.startup"}
 postgres: connected
 warehouse: connected
-{"level": "INFO", "message": "Connected 4 clients in 1 layer in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00015945796621963382}
+{"level": "INFO", "message": "Connected 4 clients in 0.00s (slowest: Postgres 0.00s, Shutdown 0.00s, Warehouse 0.00s)", "run": "app.jobs.startup.startup", "duration": 0.00022179202642291784}
 startup: done
 postgres: disconnected
 warehouse: disconnected
@@ -576,7 +576,6 @@ metric: Warehouse connect=0.000s ok
 |------------|-------------------------------------------------------------------------------|
 | `run`      | ワーカーやジョブの内側で出るすべてのレコード（コンテナのものを含む）：実行の名前 |
 | `client`   | 1 つのクライアントに関するすべてのレコード：解決、接続、切断、失敗            |
-| `layer`    | クライアントの接続や切断に関するすべてのレコードと `Connecting layer`         |
 | `duration` | 秒数：接続または切断したクライアント、起動の要約、終了した実行                |
 
 どの実行も自分の `Shutdown` と `BackgroundTasks` クライアントを接続するので、それらも
@@ -617,7 +616,7 @@ spec:
     metadata:
       labels: {app: consumer}
     spec:
-      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × layers
+      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × longest chain
       containers:
         - name: consumer
           image: registry.example.com/app:1.0

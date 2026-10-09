@@ -11,14 +11,14 @@
 |----------------------|-------------------------------------------------------------------------|
 | `resolve(cls)`       | 构建 `cls` 及其依赖树。对 `Client` 是幂等的。                           |
 | `inject(func)`       | 返回已绑定客户端参数的 `functools.partial(func, ...)`。除 `*args` / `**kwargs` 外，`func` 的每个参数都必须有类型提示。 |
-| `connect()`          | 逐层对每个已解析的客户端调用 `connect()`。                              |
-| `disconnect()`       | 逐层逆序调用 `disconnect()`，然后对容器执行 `flush()`。                 |
+| `connect()`          | 对每个已解析的客户端调用 `connect()`，每个都在其依赖之后。              |
+| `disconnect()`       | 对每个客户端调用 `disconnect()`，每个都在其使用方之后，然后对容器执行 `flush()`。 |
 | `async with`         | 进入时调用 `connect()`，退出时调用 `disconnect()`。                     |
 | `mock(cls, new=None)`| 为 `cls` 注册一个替换对象（默认为 autospec mock），有效期到下一次 `flush()` 为止。必须在 `cls` 被解析之前调用。 |
 | `override(cls, new=None)` | 仅在 `with` 块内有效的替换对象，块结束后执行 `flush()`；参见[测试](testing.md)。 |
 | `flush()`            | 丢弃所有已解析的客户端。                                                |
 | `timings`            | 最近一次 `connect()` 的每个客户端一个 `ClientTiming`；见[启动耗时](clients.md#startup-timings)。 |
-| `graph()`            | 已解析客户端的 `Graph`，含依赖和层，带 `to_mermaid()`；见[依赖图](clients.md#the-graph)。 |
+| `graph()`            | 已解析客户端的 `Graph`，含依赖，带 `to_mermaid()`；见[依赖图](clients.md#the-graph)。 |
 
 `inject()` 的结果保留函数的返回类型，但其余参数不带类型：类型检查器无法从签名中减去客户端参数。
 
