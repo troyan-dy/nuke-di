@@ -633,10 +633,6 @@ ficam sem tipo: um verificador de tipos não consegue subtrair os argumentos cli
 `resolve`, `inject`, `mock`, `override` e `flush` só funcionam enquanto o container está desconectado:
 a árvore inteira é construída antes da inicialização.
 
-O container pode resolver a partir de várias threads: um lock por container serializa `resolve`, `inject`,
-`mock`, `override` e `flush`, então um singleton pedido por duas threads ao mesmo tempo é construído uma
-única vez. `connect()` e `disconnect()` pertencem a um único event loop.
-
 ```python
 async def main() -> None:
     deps = Dependencies()
@@ -644,6 +640,41 @@ async def main() -> None:
     async with deps:  # connect
         await injected(42)
         deps.resolve(Cache)  # ConnectError: already connected
+```
+
+O container pode resolver com segurança a partir de várias threads: um lock por container serializa `resolve`, `inject`,
+`mock`, `override` e `flush`, então um singleton pedido por duas threads ao mesmo tempo é construído uma
+única vez. `connect()` e `disconnect()` pertencem a um único event loop.
+
+```python
+import threading
+
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    instances = 0
+
+    def __init__(self) -> None:
+        type(self).instances += 1
+
+
+class Orders(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+deps = Dependencies()
+threads = [threading.Thread(target=deps.resolve, args=(Orders,)) for _ in range(8)]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join()
+print("instances:", Postgres.instances, "clients:", len(deps.connect_clients))
+```
+
+```text
+instances: 1 clients: 2
 ```
 
 ## <a id="workers-and-jobs"></a>Workers e jobs

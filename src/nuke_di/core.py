@@ -59,9 +59,12 @@ class Dependencies:
     `resolve()`, `inject()`, `mock()`, `override()` and `flush()` are safe to call from several threads: one lock per
     container serializes them, so a singleton asked for by two threads at once is built once and a resolve in one
     thread never sees the path of another as a cycle. The lock is reentrant, for a client whose `__init__` resolves
-    from the same container, and is not held inside an `override()` block, only while the block registers its
-    Replacement and flushes on exit; a block of one container is not meant to be shared by threads, its exit flushes
-    what the others resolved. `connect()` and `disconnect()` are not locked: they belong to one event loop.
+    from the same container in the same thread (an `__init__` that waits for another thread to resolve from the
+    container deadlocks). It is not held inside an `override()` block, only while the block registers its
+    Replacement and flushes on exit, so other threads resolve meanwhile and the exit flushes what they resolved.
+    `connect()` and `disconnect()` are not locked: they belong to one event loop; they flip `connected` and take
+    their snapshot of the clients under the lock, so a resolve in flight either completes before a connect() and is
+    connected, or fails after it.
     """
 
     clients: OrderedDict[type[NotSingletonClient], NotSingletonClient] = field(default_factory=OrderedDict)
@@ -107,10 +110,10 @@ class Dependencies:
         await self.disconnect()
 
     def flush(self) -> None:
-        if self.connected is True:
-            raise ConnectError("already connected")
-
         with self._lock:
+            if self.connected is True:
+                raise ConnectError("already connected")
+
             self.clients = OrderedDict()
             self.connect_clients = []
             self._layers = {}
@@ -128,12 +131,15 @@ class Dependencies:
         self.flush()
 
     async def connect(self) -> None:
-        if self.connected is True:
-            raise ConnectError("already connected")
+        with self._lock:
+            if self.connected is True:
+                raise ConnectError("already connected")
 
-        self.connected = True
+            # Flipped and snapshotted together: a thread inside resolve() finishes before or fails after, never
+            # leaves a client that this connect() does not see
+            self.connected = True
+            layers = self._group_by_layer(self.connect_clients)
         limiter = self._limiter()
-        layers = self._group_by_layer(self.connect_clients)
         self._timings = {
             id(client): ClientTiming(sname(client), self._layer(client)) for layer in layers for client in layer
         }
@@ -231,11 +237,13 @@ class Dependencies:
         await self._disconnect_layers(connected)
 
     async def _disconnect_layers(self, clients: list[NotSingletonClient]) -> None:
-        self.connected = False
+        with self._lock:
+            self.connected = False
+            layers = self._group_by_layer(clients)
         limiter = self._limiter()
 
         try:
-            for layer in reversed(self._group_by_layer(clients)):
+            for layer in reversed(layers):
                 # A client whose disconnect() ends in a CancelledError of its own made gather() raise it out of here,
                 # skipping the rest; a TaskGroup ignores a cancelled child and finishes the layer. A client that fails
                 # with an Exception is logged by _disconnect_client, so only a cancellation ends the group early
@@ -298,6 +306,9 @@ class Dependencies:
             return cast(CT, inst)
 
         with self._lock:
+            # Checked again under the lock, where connect() flips it
+            if self.connected is True:
+                raise ConnectError("already connected")
             return self._resolve(cls)
 
     def _resolve(self, cls: type[CT]) -> CT:
@@ -331,13 +342,13 @@ class Dependencies:
             logger.exception("Error occurred during initialize client %s", name, extra=fields(client=name))
             raise InitializeDependencyError(f"Error occurred during initialize client {name}") from e
 
-        if isclient(cls):
-            self.clients[cls] = inst
-
         # One layer above the highest dependency; mocks are not connected, so they do not count
         self._layers[id(inst)] = 1 + max((self._layers.get(id(d), -1) for d in init.values()), default=-1)
         self._dependencies[id(inst)] = {key: (arguments[key], dep) for key, dep in init.items()}
         self.connect_clients.append(inst)
+        # Published last: the lock-free lookup of resolve() hands out a singleton that the container accounts for
+        if isclient(cls):
+            self.clients[cls] = inst
         return inst
 
     def graph(self) -> Graph:
@@ -448,10 +459,9 @@ class Dependencies:
         note: `func` may be a function or a class. The result keeps the return type of `func`; its remaining
         arguments are not typed, a type checker cannot subtract the client arguments from a signature.
         """
-        if self.connected is True:
-            raise ConnectError("already connected")
-
         with self._lock:
+            if self.connected is True:
+                raise ConnectError("already connected")
             signature = self._inspect(func)
         return partial(func, **signature)
 
@@ -468,11 +478,11 @@ class Dependencies:
         """
         Register a Replacement for `cls`, an autospec mock by default; `flush()` drops it.
         """
-        if self.connected is True:
-            raise ConnectError("already connected")
-
         name = sname(cls)
         with self._lock:
+            if self.connected is True:
+                raise ConnectError("already connected")
+
             current = self._replacements.get(cls)
             if current is not None:
                 if new is not None and new is not current:
@@ -507,12 +517,11 @@ class Dependencies:
         The container must have no resolved clients on entry and is flushed on exit,
         so nothing resolved with the Replacement outlives the block.
         """
-        if self.connected is True:
-            raise ConnectError("already connected")
-
         name = sname(cls)
         # The lock covers the registration only: the block runs the caller's code, which resolves on its own
         with self._lock:
+            if self.connected is True:
+                raise ConnectError("already connected")
             if self.connect_clients:
                 # Flushing them on exit would silently drop what the caller resolved before the block
                 resolved = ", ".join(sorted(map(sname, self.connect_clients)))

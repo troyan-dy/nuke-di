@@ -6,19 +6,19 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- CI runs the tests that need no framework on free-threaded CPython 3.14t with `PYTHON_GIL=0`, as
+  `make test-free-threaded` does ([#32](https://github.com/troyan-dy/nuke-di/issues/32)).
+
 ### Fixed
 
 - `resolve()`, `inject()`, `mock()`, `override()` and `flush()` are serialized by one reentrant lock per
   container, so a singleton asked for by two threads at once is built once instead of twice, and a resolve in
   one thread no longer reports the path of another as a `CircularDependencyError`. The lock is not held inside
   an `override()` block, and `connect()` / `disconnect()` stay unlocked: they belong to one event loop. A
-  resolved singleton is still handed out without the lock, at the same cost as before; see "The container" in
+  resolved singleton is still handed out without the lock, on purpose, so the warm path costs what it did; see "The container" in
   the README ([#32](https://github.com/troyan-dy/nuke-di/issues/32)).
-
-### Added
-
-- CI runs the tests that need no framework on free-threaded CPython 3.14t with `PYTHON_GIL=0`, as
-  `make test-free-threaded` does ([#32](https://github.com/troyan-dy/nuke-di/issues/32)).
 
 ## [1.10.1] - 2026-10-09
 

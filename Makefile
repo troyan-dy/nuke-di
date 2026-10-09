@@ -46,7 +46,7 @@ test-all: ## Run tests on every supported Python version
 
 .PHONY: test-free-threaded
 test-free-threaded: ## Run the tests that need no framework on free-threaded Python 3.14t with the GIL off, as CI does
-	PYTHON_GIL=0 uv run --python 3.14t --isolated --no-dev --with pytest --with pytest-asyncio pytest -p no:cacheprovider \
+	PYTHON_GIL=0 uv run --python 3.14t --isolated --no-default-groups --with pytest --with pytest-asyncio pytest -p no:cacheprovider \
 		--ignore=tests/test_fastapi.py --ignore=tests/test_litestar.py --ignore=tests/test_faststream.py \
 		--ignore=tests/test_benchmarks.py --ignore=tests/test_typing.py
 

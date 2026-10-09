@@ -633,10 +633,6 @@ sprawdzacz typów nie potrafi odjąć argumentów-klientów od sygnatury.
 `resolve`, `inject`, `mock`, `override` i `flush` działają tylko wtedy, gdy kontener jest rozłączony:
 całe drzewo buduje się przed startem.
 
-Kontener można bezpiecznie używać z kilku wątków: jedna blokada na kontener serializuje `resolve`, `inject`,
-`mock`, `override` i `flush`, więc singleton zażądany przez dwa wątki naraz jest budowany raz.
-`connect()` i `disconnect()` należą do jednej pętli zdarzeń.
-
 ```python
 async def main() -> None:
     deps = Dependencies()
@@ -644,6 +640,41 @@ async def main() -> None:
     async with deps:  # connect
         await injected(42)
         deps.resolve(Cache)  # ConnectError: already connected
+```
+
+Kontener można bezpiecznie używać z kilku wątków: jedna blokada na kontener serializuje `resolve`, `inject`,
+`mock`, `override` i `flush`, więc singleton zażądany przez dwa wątki naraz jest budowany raz.
+`connect()` i `disconnect()` należą do jednej pętli zdarzeń.
+
+```python
+import threading
+
+from nuke_di import Client, Dependencies
+
+
+class Postgres(Client):
+    instances = 0
+
+    def __init__(self) -> None:
+        type(self).instances += 1
+
+
+class Orders(Client):
+    def __init__(self, pg: Postgres) -> None:
+        self.pg = pg
+
+
+deps = Dependencies()
+threads = [threading.Thread(target=deps.resolve, args=(Orders,)) for _ in range(8)]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join()
+print("instances:", Postgres.instances, "clients:", len(deps.connect_clients))
+```
+
+```text
+instances: 1 clients: 2
 ```
 
 ## <a id="workers-and-jobs"></a>Workery i joby

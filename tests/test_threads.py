@@ -2,7 +2,10 @@
 The container resolves from several threads at once: one instance per singleton, no false cycles.
 """
 
+import asyncio
 import copy
+import sys
+import sysconfig
 import threading
 import time
 from collections.abc import Callable
@@ -44,7 +47,7 @@ class ConsumerB(Client):
         self.shared = shared
 
 
-class Transient(NotSingletonClient):
+class PerConsumer(NotSingletonClient):
     def __init__(self, shared: Shared) -> None:
         self.shared = shared
 
@@ -96,7 +99,7 @@ def test_threads_resolving_different_trees_see_no_false_cycle() -> None:
     deps = Dependencies()
 
     results = run_threads(
-        [lambda: deps.resolve(ConsumerA), lambda: deps.resolve(ConsumerB), lambda: deps.resolve(Transient)] * THREADS
+        [lambda: deps.resolve(ConsumerA), lambda: deps.resolve(ConsumerB), lambda: deps.resolve(PerConsumer)] * THREADS
     )
 
     assert not any(isinstance(result, Exception) for result in results), results
@@ -111,7 +114,7 @@ def test_threads_injecting_share_the_instance() -> None:
     def handler_a(consumer: ConsumerA) -> ConsumerA:
         return consumer
 
-    def handler_b(consumer: ConsumerB, transient: Transient) -> ConsumerB:
+    def handler_b(consumer: ConsumerB, per_consumer: PerConsumer) -> ConsumerB:
         return consumer
 
     results = run_threads([lambda: deps.inject(handler_a)(), lambda: deps.inject(handler_b)()] * THREADS)
@@ -228,3 +231,69 @@ def test_connected_container_rejects_resolve_from_a_thread() -> None:
     results = run_threads([lambda: deps.resolve(ConsumerB)])
 
     assert isinstance(results[0], ConnectError)
+
+
+async def test_connect_waits_for_a_resolve_in_flight() -> None:
+    """
+    connect() flips `connected` and takes its snapshot under the lock: a thread inside resolve() finishes first and
+    its clients are connected, instead of being appended after the snapshot and left out.
+    """
+    deps = Dependencies()
+    started = threading.Event()
+
+    class Waits(Client):
+        def __init__(self, slow: Slow) -> None:
+            started.set()
+            time.sleep(SLEEP)
+            self.slow = slow
+
+    thread = threading.Thread(target=deps.resolve, args=(Waits,))
+    thread.start()
+    started.wait()
+    await deps.connect()
+    thread.join()
+
+    assert [type(client) for client in deps.connect_clients] == [Slow, Waits]
+    assert len(deps.timings) == 2 and all(timing.connect_outcome == "ok" for timing in deps.timings)
+    await deps.disconnect()
+
+
+def test_resolve_refused_when_connect_flips_the_flag_while_it_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    The race itself: resolve() passed its first check, then connect() took the lock and flipped `connected`
+    before resolve() got it. Played deterministically by a lock that flips the flag as it is acquired.
+    """
+    deps = Dependencies()
+    lock = deps._lock
+
+    class FlipsOnAcquire:
+        def __enter__(self) -> None:
+            lock.__enter__()
+            deps.connected = True
+
+        def __exit__(self, *args: Any) -> None:
+            lock.__exit__(*args)
+
+    monkeypatch.setattr(deps, "_lock", FlipsOnAcquire())
+
+    with pytest.raises(ConnectError, match="already connected"):
+        deps.resolve(ConsumerA)
+    assert not deps.connect_clients
+
+
+async def test_resolve_after_a_concurrent_connect_is_refused() -> None:
+    deps = Dependencies()
+    deps.resolve(ConsumerA)
+    loop = asyncio.get_running_loop()
+
+    await deps.connect()
+    result = await loop.run_in_executor(None, run_threads, [lambda: deps.resolve(ConsumerB)])
+
+    assert isinstance(result[0], ConnectError)
+    await deps.disconnect()
+
+
+@pytest.mark.skipif(not sysconfig.get_config_var("Py_GIL_DISABLED"), reason="a build with the GIL")
+def test_the_gil_is_off_on_a_free_threaded_build() -> None:
+    # The free-threaded CI job runs with PYTHON_GIL=0: the threads of this module really run in parallel there
+    assert not sys._is_gil_enabled()  # pyright: ignore[reportAttributeAccessIssue]  # 3.13+, pyright checks 3.11
