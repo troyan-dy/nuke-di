@@ -633,6 +633,10 @@ untyped: a type checker cannot subtract the client arguments from a signature.
 `resolve`, `inject`, `mock`, `override` and `flush` only work while the container is disconnected:
 the whole tree is built before startup.
 
+The container is safe to resolve from several threads: one lock per container serializes `resolve`,
+`inject`, `mock`, `override` and `flush`, so a singleton asked for by two threads at once is built once.
+`connect()` and `disconnect()` belong to one event loop.
+
 ```python
 async def main() -> None:
     deps = Dependencies()

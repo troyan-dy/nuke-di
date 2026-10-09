@@ -634,6 +634,10 @@ restantes quedan sin tipar: un verificador de tipos no puede restar los argument
 `resolve`, `inject`, `mock`, `override` y `flush` solo funcionan mientras el contenedor está
 desconectado: todo el árbol se construye antes del arranque.
 
+El contenedor puede resolver desde varios hilos: un bloqueo por contenedor serializa `resolve`, `inject`,
+`mock`, `override` y `flush`, así que un singleton pedido por dos hilos a la vez se construye una sola vez.
+`connect()` y `disconnect()` pertenecen a un solo bucle de eventos.
+
 ```python
 async def main() -> None:
     deps = Dependencies()

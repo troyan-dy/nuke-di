@@ -594,6 +594,8 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 
 `resolve`、`inject`、`mock`、`override`、`flush` は、コンテナが切断されている間しか使えません。ツリー全体は起動前に構築されます。
 
+コンテナは複数のスレッドから安全に解決できます。コンテナごとに一つのロックが `resolve`、`inject`、`mock`、`override`、`flush` を直列化するため、二つのスレッドが同時に求めたシングルトンは一度だけ構築されます。`connect()` と `disconnect()` は一つのイベントループに属します。
+
 ```python
 async def main() -> None:
     deps = Dependencies()

@@ -633,6 +633,10 @@ sprawdzacz typów nie potrafi odjąć argumentów-klientów od sygnatury.
 `resolve`, `inject`, `mock`, `override` i `flush` działają tylko wtedy, gdy kontener jest rozłączony:
 całe drzewo buduje się przed startem.
 
+Kontener można bezpiecznie używać z kilku wątków: jedna blokada na kontener serializuje `resolve`, `inject`,
+`mock`, `override` i `flush`, więc singleton zażądany przez dwa wątki naraz jest budowany raz.
+`connect()` i `disconnect()` należą do jednej pętli zdarzeń.
+
 ```python
 async def main() -> None:
     deps = Dependencies()

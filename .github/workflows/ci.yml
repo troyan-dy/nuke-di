@@ -42,6 +42,17 @@ jobs:
       - run: uv sync --locked
       - run: uv run pytest --cov --cov-report=term
 
+  free-threaded:
+    # The container is resolved from threads without a GIL; the framework extras have no free-threaded wheels
+    # yet, so the job runs the tests that need none of them
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14t"
+      - run: make test-free-threaded
+
   fastapi-min:
     # The lowest FastAPI the `fastapi` extra allows
     runs-on: ubuntu-latest

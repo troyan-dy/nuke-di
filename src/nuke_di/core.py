@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import threading
 import time
 import types
 from collections import OrderedDict, defaultdict
@@ -52,6 +53,17 @@ class _ClientConnectError(Exception):
 
 @dataclass(repr=False)
 class Dependencies:
+    """
+    The container: resolves clients from type hints and drives their connect / disconnect lifecycle.
+
+    `resolve()`, `inject()`, `mock()`, `override()` and `flush()` are safe to call from several threads: one lock per
+    container serializes them, so a singleton asked for by two threads at once is built once and a resolve in one
+    thread never sees the path of another as a cycle. The lock is reentrant, for a client whose `__init__` resolves
+    from the same container, and is not held inside an `override()` block, only while the block registers its
+    Replacement and flushes on exit; a block of one container is not meant to be shared by threads, its exit flushes
+    what the others resolved. `connect()` and `disconnect()` are not locked: they belong to one event loop.
+    """
+
     clients: OrderedDict[type[NotSingletonClient], NotSingletonClient] = field(default_factory=OrderedDict)
     connect_clients: list[NotSingletonClient] = field(default_factory=list)
     settings: DependenciesSettings = field(default_factory=DependenciesSettings)
@@ -77,6 +89,16 @@ class Dependencies:
     _resolving_set: set[type[NotSingletonClient]] = field(default_factory=set, init=False)
     # The function `inject()` is resolving for, named first in the path but never part of a cycle
     _injecting: Callable[..., Any] | None = field(default=None, init=False)
+    # Serializes the methods that build or drop clients across threads; reentrant, a client's `__init__` may resolve
+    _lock: threading.RLock = field(default_factory=threading.RLock, init=False, compare=False)
+
+    def __getstate__(self) -> dict[str, Any]:
+        # A copy is another container, so it gets a lock of its own; an RLock cannot be copied or pickled anyway
+        return {key: value for key, value in vars(self).items() if key != "_lock"}
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        vars(self).update(state)
+        self._lock = threading.RLock()
 
     async def __aenter__(self) -> None:
         await self.connect()
@@ -88,14 +110,15 @@ class Dependencies:
         if self.connected is True:
             raise ConnectError("already connected")
 
-        self.clients = OrderedDict()
-        self.connect_clients = []
-        self._layers = {}
-        self._dependencies = {}
-        self._timings = {}
-        self._replacements = {}
-        for cls, replacement in self._overrides:
-            self._register_replacement(cls, replacement)
+        with self._lock:
+            self.clients = OrderedDict()
+            self.connect_clients = []
+            self._layers = {}
+            self._dependencies = {}
+            self._timings = {}
+            self._replacements = {}
+            for cls, replacement in self._overrides:
+                self._register_replacement(cls, replacement)
 
     def _abandon(self) -> None:
         """
@@ -267,6 +290,21 @@ class Dependencies:
         if self.connected is True:
             raise ConnectError("already connected")
 
+        # A resolved singleton is handed out without the lock: it is complete once it is in `clients`, and a lookup
+        # in a dict is safe next to a writer on every build of CPython. The cold path takes the lock once for the
+        # whole tree, so a tree of a thousand clients pays for one acquire, not a thousand.
+        inst = self.clients.get(cls)
+        if inst is not None:
+            return cast(CT, inst)
+
+        with self._lock:
+            return self._resolve(cls)
+
+    def _resolve(self, cls: type[CT]) -> CT:
+        """
+        Build `cls` with the lock held: the caller holds it for the whole tree.
+        """
+        # Checked again under the lock: another thread may have built it while this one waited
         inst = self.clients.get(cls)
         if inst is not None:
             return cast(CT, inst)
@@ -282,7 +320,7 @@ class Dependencies:
         self._resolving_set.add(cls)
         try:
             arguments = self._client_arguments(cls)
-            init = {key: self.resolve(dep) for key, dep in arguments.items()}
+            init = {key: self._resolve(dep) for key, dep in arguments.items()}
         finally:
             self._resolving.pop()
             self._resolving_set.remove(cls)
@@ -413,7 +451,8 @@ class Dependencies:
         if self.connected is True:
             raise ConnectError("already connected")
 
-        signature = self._inspect(func)
+        with self._lock:
+            signature = self._inspect(func)
         return partial(func, **signature)
 
     # Typed like `unittest.mock.create_autospec`: an autospec mock is `Any`, so a test reaches its
@@ -433,25 +472,26 @@ class Dependencies:
             raise ConnectError("already connected")
 
         name = sname(cls)
-        current = self._replacements.get(cls)
-        if current is not None:
-            if new is not None and new is not current:
-                raise ConnectError(f"{name} already has a replacement")
-            return current
-        # Consumers resolved before would keep the real client while the caller holds the Replacement
-        if self._is_resolved(cls):
-            raise ConnectError(f"{name} is already resolved, call mock() before resolve() or inject()")
+        with self._lock:
+            current = self._replacements.get(cls)
+            if current is not None:
+                if new is not None and new is not current:
+                    raise ConnectError(f"{name} already has a replacement")
+                return current
+            # Consumers resolved before would keep the real client while the caller holds the Replacement
+            if self._is_resolved(cls):
+                raise ConnectError(f"{name} is already resolved, call mock() before resolve() or inject()")
 
-        if new is None:
-            # unittest costs every process a few milliseconds at import, and only tests mock
-            from unittest.mock import create_autospec
+            if new is None:
+                # unittest costs every process a few milliseconds at import, and only tests mock
+                from unittest.mock import create_autospec
 
-            # A Replacement stands in for an instance: calling it is a TypeError, not another mock
-            replacement = create_autospec(cls, instance=True)
-        else:
-            replacement = new
-        self._register_replacement(cls, replacement)
-        return self._replacements[cls]
+                # A Replacement stands in for an instance: calling it is a TypeError, not another mock
+                replacement = create_autospec(cls, instance=True)
+            else:
+                replacement = new
+            self._register_replacement(cls, replacement)
+            return self._replacements[cls]
 
     @overload
     def override(self, cls: type[CT], new: None = None) -> contextlib.AbstractContextManager[Any]: ...
@@ -471,16 +511,18 @@ class Dependencies:
             raise ConnectError("already connected")
 
         name = sname(cls)
-        if self.connect_clients:
-            # Flushing them on exit would silently drop what the caller resolved before the block
-            resolved = ", ".join(sorted(map(sname, self.connect_clients)))
-            raise ConnectError(f"override({name}) needs a container without resolved clients, found: {resolved}")
-        if cls in self._replacements:
-            raise ConnectError(f"{name} already has a replacement")
+        # The lock covers the registration only: the block runs the caller's code, which resolves on its own
+        with self._lock:
+            if self.connect_clients:
+                # Flushing them on exit would silently drop what the caller resolved before the block
+                resolved = ", ".join(sorted(map(sname, self.connect_clients)))
+                raise ConnectError(f"override({name}) needs a container without resolved clients, found: {resolved}")
+            if cls in self._replacements:
+                raise ConnectError(f"{name} already has a replacement")
 
-        replacement = self.mock(cls, new)
-        entry: tuple[type[NotSingletonClient], NotSingletonClient] = (cls, replacement)
-        self._overrides.append(entry)
+            replacement = self.mock(cls, new)
+            entry: tuple[type[NotSingletonClient], NotSingletonClient] = (cls, replacement)
+            self._overrides.append(entry)
         try:
             yield replacement
         except BaseException:
@@ -493,10 +535,11 @@ class Dependencies:
             raise ConnectError(f"override({name}) exited while the container is connected")
 
     def _close_override(self, entry: tuple[type[NotSingletonClient], NotSingletonClient]) -> None:
-        self._overrides = [other for other in self._overrides if other is not entry]
-        # A connected container is flushed by its disconnect()
-        if self.connected is False:
-            self.flush()
+        with self._lock:
+            self._overrides = [other for other in self._overrides if other is not entry]
+            # A connected container is flushed by its disconnect()
+            if self.connected is False:
+                self.flush()
 
     def _is_resolved(self, cls: type[NotSingletonClient]) -> bool:
         # A NotSingletonClient is never cached in `clients`, only its instances are in `connect_clients`
@@ -525,7 +568,8 @@ class Dependencies:
         try:
             for key, value in sig.items():
                 if isnotsingleton(value):
-                    signature[key] = self.resolve(value)
+                    # `inject()` holds the lock for the whole signature
+                    signature[key] = self._resolve(value)
         finally:
             self._injecting = outer
 

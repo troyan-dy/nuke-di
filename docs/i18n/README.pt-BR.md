@@ -633,6 +633,10 @@ ficam sem tipo: um verificador de tipos não consegue subtrair os argumentos cli
 `resolve`, `inject`, `mock`, `override` e `flush` só funcionam enquanto o container está desconectado:
 a árvore inteira é construída antes da inicialização.
 
+O container pode resolver a partir de várias threads: um lock por container serializa `resolve`, `inject`,
+`mock`, `override` e `flush`, então um singleton pedido por duas threads ao mesmo tempo é construído uma
+única vez. `connect()` e `disconnect()` pertencem a um único event loop.
+
 ```python
 async def main() -> None:
     deps = Dependencies()

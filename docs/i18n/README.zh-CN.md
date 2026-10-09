@@ -612,6 +612,8 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 `resolve`、`inject`、`mock`、`override` 和 `flush` 只能在容器未连接时使用：
 整棵树在启动之前就已构建完成。
 
+容器可以安全地从多个线程解析：每个容器一把锁串行化 `resolve`、`inject`、`mock`、`override` 和 `flush`，因此两个线程同时请求的单例只构建一次。`connect()` 和 `disconnect()` 属于同一个事件循环。
+
 ```python
 async def main() -> None:
     deps = Dependencies()

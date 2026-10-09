@@ -633,6 +633,10 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 `resolve`, `inject`, `mock`, `override` и `flush` работают, только пока контейнер отключён:
 всё дерево строится до старта.
 
+Контейнер безопасно использовать из нескольких потоков: один замок на контейнер сериализует `resolve`,
+`inject`, `mock`, `override` и `flush`, поэтому синглтон, запрошенный двумя потоками одновременно, создаётся
+один раз. `connect()` и `disconnect()` принадлежат одному циклу событий.
+
 ```python
 async def main() -> None:
     deps = Dependencies()
