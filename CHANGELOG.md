@@ -6,6 +6,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.10.2] - 2026-10-09
+
 ### Added
 
 - CI runs the tests that need no framework on free-threaded CPython 3.14t with `PYTHON_GIL=0`, as
@@ -349,7 +351,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.10.1...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.10.2...HEAD
+[1.10.2]: https://github.com/troyan-dy/nuke-di/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/troyan-dy/nuke-di/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/troyan-dy/nuke-di/compare/v1.9.2...v1.10.0
 [1.9.2]: https://github.com/troyan-dy/nuke-di/compare/v1.9.1...v1.9.2
