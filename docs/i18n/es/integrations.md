@@ -6,9 +6,13 @@
 
 Una integración con un framework hace dos cosas: los handlers del framework reciben clientes por su type hint,
 a través de la inyección de dependencias propia del framework, y el contenedor se conecta cuando la app arranca
-y se desconecta cuando se detiene. Las integraciones de [FastAPI](fastapi.md), [Litestar](litestar.md) y
-[FastStream](faststream.md) están construidas sobre `nuke_di.integration`, y una integración con otro
-framework no necesita de nuke-di nada más que eso y la API pública.
+y se desconecta cuando se detiene. Las integraciones de [FastAPI](fastapi.md), [Litestar](litestar.md),
+[FastStream](faststream.md), [MCP](mcp.md), [aiogram](aiogram.md) y [taskiq](taskiq.md) están construidas sobre
+`nuke_di.integration`, y una integración con otro framework no necesita de nuke-di nada más que eso y la API
+pública.
+Un framework sin inyección de dependencias propia, como Starlette o Quart, no necesita integración:
+[`nuke_di.asgi.lifespan()`](asgi.md), construido sobre el mismo kit, conecta los clientes, y los handlers
+se los piden a él.
 Un servidor sin inyección de dependencias propia, como grpc.aio, aiohttp, websockets, APScheduler, Textual o un
 worker de Temporal, no necesita ninguna integración: se ejecuta dentro de un `@worker`, consulta
 [Servidores dentro de un worker](servers-in-workers.md).
@@ -119,7 +123,9 @@ Litestar proporciona las dependencias por nombre, y aiogram las pasa por nombre 
 aplica: usa `Framework` para los mensajes, `client_of()` para encontrar los argumentos de tipo cliente de un handler, un
 `Binding` por cliente cuyo `get` el framework llama por sus propios medios, y `running()` dentro del lifespan
 de la app. `nuke_di.litestar` es el ejemplo completo: registra `Provide(binding.get)` bajo el nombre
-del argumento.
+del argumento. `nuke_di.aiogram` es otro: un inner middleware del dispatcher pone `binding.instance` en los datos
+de un update bajo el nombre de cada argumento de tipo cliente del handler que coincidió con él, y `running()`
+envuelve el arranque y el apagado del dispatcher.
 
 ## <a id="checking-an-integration"></a>Comprobar una integración
 
@@ -200,6 +206,3 @@ FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 (Tracebacks abreviados.) Un framework que reporta el error de un handler en lugar de lanzarlo necesita un `send()`
 que lo lance: el cliente de pruebas de un framework HTTP devuelve un 500, así que `send()` comprueba el código de estado. Litestar pone
 el error en la respuesta solo con `debug=True`.
-
-`nuke_di._integration`, el módulo privado en el que vivía este kit antes de 1.14.0, todavía se importa con un
-`DeprecationWarning` y se elimina en 1.15.0.

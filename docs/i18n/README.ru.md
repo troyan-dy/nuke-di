@@ -16,7 +16,8 @@
 зависимости, конкурентно со всеми остальными готовыми клиентами.
 
 Вдобавок один декоратор превращает асинхронную функцию в процесс с параметрами командной строки,
-а обработчики FastAPI, Litestar и FastStream получают клиенты по аннотации типа точно так же.
+а обработчики FastAPI, Litestar, FastStream и aiogram, а также инструменты MCP и задачи taskiq получают клиенты
+по аннотации типа точно так же.
 
 Библиотека выделена из DI-подсистемы продакшен-фреймворка для микросервисов на Python
 и не имеет зависимостей во время выполнения.
@@ -386,7 +387,7 @@ $ pytest -q tests/test_api.py
 ```
 
 Роутеры, WebSocket и собственный lifespan приложения описаны в разделе [FastAPI](ru/fastapi.md);
-[Litestar](ru/litestar.md) и [FastStream](ru/faststream.md) работают так же.
+[Litestar](ru/litestar.md), [FastStream](ru/faststream.md), [MCP-серверы](ru/mcp.md), [aiogram](ru/aiogram.md) и [taskiq](ru/taskiq.md) работают так же.
 
 ## <a id="documentation"></a>Документация
 
@@ -397,14 +398,15 @@ $ pytest -q tests/test_api.py
 - [Воркеры и джобы](ru/workers-and-jobs.md): `@job` и `@worker`, параметры командной строки,
   `Shutdown`, grace period, фоновые задачи, коды завершения, хуки, Kubernetes
 - Фреймворки: [FastAPI](ru/fastapi.md), [Litestar](ru/litestar.md),
-  [FastStream](ru/faststream.md),
+  [FastStream](ru/faststream.md), [MCP-серверы](ru/mcp.md) на SDK и на FastMCP, [aiogram](ru/aiogram.md), [taskiq](ru/taskiq.md),
+  [Starlette, Quart и любое ASGI-приложение](ru/asgi.md),
   [серверы внутри воркера](ru/servers-in-workers.md) для grpc.aio, aiohttp, websockets, APScheduler,
   Textual и Temporal, а также [своя интеграция](ru/integrations.md) для другого фреймворка на `nuke_di.integration`
 - [Тестирование](ru/testing.md): `mock()`, `override()`, фикстуры pytest, проверка связывания
 - [Настройка](ru/configuration.md): таймауты, конкурентность и grace period
 - [Ошибки](ru/errors.md): все исключения и когда они выбрасываются
-- [Примеры](../../examples/README.md): 21 готовый к запуску сценарий, от разового скрипта и воркера очереди
-  до FastAPI, Litestar, FastStream, Starlette и целого сервиса, каждый с выводом и тестами
+- [Примеры](../../examples/README.md): 23 готовых к запуску сценария, от разового скрипта и воркера очереди
+  до FastAPI, Litestar, FastStream, aiogram, taskiq, Starlette, MCP-сервера и целого сервиса, каждый с выводом и тестами
 - [Бенчмарки](../benchmarks.md): каждый сценарий, базовые замеры на Python 3.11–3.14 и сравнение
   с другими библиотеками
 - [Агенты для написания кода](ru/agents.md): Agent Skill, блок для `AGENTS.md`,

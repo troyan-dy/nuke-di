@@ -15,7 +15,8 @@ creates every client once and drives its async lifecycle: `connect()` on startup
 connected, concurrently with every other client that is ready.
 
 On top of that, one decorator turns an async function into a process with command-line
-arguments, and FastAPI, Litestar and FastStream handlers take clients by type hint the same way.
+arguments, and FastAPI, Litestar, FastStream and aiogram handlers, MCP tools and taskiq tasks take clients by type hint
+the same way.
 
 It was extracted from the DI layer of a production Python microservice framework
 and has no runtime dependencies.
@@ -379,7 +380,7 @@ $ pytest -q tests/test_api.py
 ```
 
 Routers, websockets and the app's own lifespan are covered in [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md);
-[Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md) and [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md) work the same way.
+[Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md), [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), [MCP servers](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md), [aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md) and [taskiq](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/taskiq.md) work the same way.
 
 ## Documentation
 
@@ -390,14 +391,16 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
 - [Workers and jobs](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md): `@job` and `@worker`, command-line parameters,
   `Shutdown`, the grace period, background tasks, exit codes, hooks, Kubernetes
 - Frameworks: [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md),
-  [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md),
+  [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), [MCP servers](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md) on the SDK and on FastMCP, [aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md),
+  [taskiq](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/taskiq.md), [Starlette, Quart and any ASGI app](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/asgi.md),
   [servers inside a worker](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/servers-in-workers.md) for grpc.aio, aiohttp, websockets, APScheduler,
   Textual and Temporal, and [writing an integration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/integrations.md) for another framework with `nuke_di.integration`
 - [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md): `mock()`, `override()`, the pytest fixtures, checking the wiring
 - [Configuration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/configuration.md): timeouts, concurrency and the grace period
 - [Errors](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/errors.md): every exception and when it is raised
-- [Examples](https://github.com/troyan-dy/nuke-di/blob/master/examples/README.md): 21 runnable scenarios, from a one-off script and a queue worker
-  to FastAPI, Litestar, FastStream, Starlette and a whole service, each with its output and tests
+- [Examples](https://github.com/troyan-dy/nuke-di/blob/master/examples/README.md): 23 runnable scenarios, from a one-off script and a queue worker
+  to FastAPI, Litestar, FastStream, aiogram, taskiq, Starlette, an MCP server and a whole service, each with its output
+  and tests
 - [Benchmarks](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md): every scenario, the baseline on Python 3.11–3.14 and the comparison
   with other libraries
 - [Coding agents](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/agents.md): the Agent Skill, a block for `AGENTS.md`,
@@ -1013,7 +1016,7 @@ Found 2 errors in 1 file (checked 1 source file)
 - Left to the container: a type hint that cannot be evaluated at runtime, which mypy evaluates
   anyway; a class in a variable of type `type[...]`, which may hold a subclass with another
   `__init__`; a decorated or overloaded `__init__`; `inject()` of a class; the routes and handlers
-  of the FastAPI, Litestar and FastStream integrations; a type mypy does not know, such as a class
+  of the FastAPI, Litestar, FastStream and aiogram integrations; a type mypy does not know, such as a class
   of a library without type hints.
 - An intended error, in a test of that error, is silenced with `# type: ignore[nuke-di]`.
 - It works with mypy 1.13 and later, with the cache as without it: a change to a client deep in a
@@ -2291,6 +2294,1392 @@ A message handled without the app's lifespan, e.g. through `TestNatsBroker(broke
 raises `RuntimeError: UserService is not connected: start the app with its lifespan`. A subscriber
 added after the app has started raises `RuntimeError: UserService was not started with the app`.
 
+<!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md -->
+
+# MCP servers
+
+
+
+An MCP tool takes a client by its type hint, the way it takes the request `Context`, and the client is left out
+of the input schema the LLM sees. The clients connect when the server starts and disconnect when it stops. Two
+modules, one per library: `nuke_di.mcp` for the official SDK's `MCPServer`, `nuke_di.fastmcp` for FastMCP.
+
+## The MCP SDK
+
+```bash
+pip install "nuke-di[mcp]"
+```
+
+Requires `mcp` 2.0 or newer, whose `MCPServer` fills a tool argument annotated `Annotated[T, Resolve(fn)]` by
+calling `fn`; `nuke_di.mcp` hands it the clients that way. The `FastMCP` class of `mcp` 1.x has no such
+mechanism and is not supported. A bookshop with one tool:
+
+```python
+# bookshop/clients.py
+import sys
+
+from nuke_di import Client
+
+
+class Database(Client):
+    async def connect(self) -> None:
+        # A server on stdio speaks MCP on stdout, so everything else goes to stderr
+        print("database: connected", file=sys.stderr)
+        self.books = {"fantasy": ["A Wizard of Earthsea", "The Hobbit"], "poetry": ["Leaves of Grass"]}
+
+    async def disconnect(self) -> None:
+        print("database: disconnected", file=sys.stderr)
+
+
+class Catalog(Client):
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def count(self, genre: str) -> int:
+        return len(self.db.books.get(genre, []))
+```
+
+```python
+# bookshop/server.py
+from mcp.server.mcpserver import MCPServer
+
+from bookshop.clients import Catalog
+from nuke_di.mcp import setup
+
+server = MCPServer("bookshop")
+setup(server)  # before the tools: clients connect when the server starts, disconnect when it stops
+
+
+@server.tool()
+async def count_books(genre: str, catalog: Catalog) -> int:
+    """How many books of a genre the shop has."""
+    return catalog.count(genre)
+
+
+if __name__ == "__main__":
+    server.run()  # stdio
+```
+
+An MCP host such as Claude Desktop or an IDE starts the server with `python -m bookshop.server` and talks to
+it over stdio. So does this script, with the SDK's client:
+
+```python
+# ask.py: starts the server over stdio, as an MCP host does, and calls its tool
+import asyncio
+import sys
+
+from mcp import Client, StdioServerParameters
+
+
+async def main() -> None:
+    server = StdioServerParameters(command=sys.executable, args=["-m", sys.argv[1]])
+    async with Client(server) as client:
+        for tool in (await client.list_tools()).tools:
+            print(tool.name, tool.input_schema["properties"])
+        result = await client.call_tool("count_books", {"genre": "fantasy"})
+        print(result.structured_content)
+
+
+asyncio.run(main())
+```
+
+```console
+$ python ask.py bookshop.server
+database: connected
+[10/10/26 18:46:46] INFO     Connected 2 clients in 0.00s (slowest:  core.py:177
+                             Database 0.00s, Catalog 0.00s)
+count_books {'genre': {'title': 'Genre', 'type': 'string'}}
+{'result': 2}
+database: disconnected
+```
+
+The input schema has `genre` only. The `INFO` line is the startup summary of `nuke-di` on the server's
+stderr: the SDK configures logging.
+
+The rules:
+
+- **Where clients are filled.** In the arguments of the tools added with `@server.tool()` or
+  `server.add_tool()` after `setup(server)`, and of every resolver they use, `Annotated[T, Resolve(fn)]`, at
+  any depth: functions, bound methods and callable objects. An argument with a plain default, `catalog:
+  Catalog = None`, is filled too. Every other argument is the SDK's: the tool's input, `Context`. An argument
+  with a `Resolve(...)` of your own is yours, even if its type is a client.
+- **Tools only.** The SDK has no resolvers for resources and prompts, so they take no clients: read the data
+  in a tool, or use [FastMCP](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md#fastmcp). A `functools.partial`, and a tool that returns an
+  `InputRequiredResult`, which the SDK does not combine with resolvers, take no clients either: both raise a
+  `TypeError` when added.
+- **Which clients start.** On startup, those of every tool added through `setup()`. A `Tool` object built
+  before and passed as `MCPServer(tools=[...])` is not seen.
+- **Lifespan.** The clients connect before the server's own `lifespan=` and disconnect after it, so it can use
+  them. The SDK runs the lifespan once per process on stdio, once per app on streamable HTTP, once per
+  in-memory `Client`. On the SSE transport it runs it for every connection, and a second connection at once
+  fails to start: serve over streamable HTTP. Two in-memory `Client(server)` open at once fail the same way.
+- **The function stays as written.** The `Resolve` markers are in its annotations only while the SDK reads
+  them, when the tool is added; a test can call it with clients of its own.
+
+## FastMCP
+
+```bash
+pip install "nuke-di[fastmcp]"
+```
+
+Requires FastMCP 4.0 or newer. FastMCP fills an argument whose default is `Depends(fn)` and leaves it out of
+the schema, for tools, resources and prompts alike; `nuke_di.fastmcp` gives every client argument such a
+default. The same bookshop, with a dependency, a resource and a prompt:
+
+```python
+# bookshop/fastmcp_server.py
+from fastmcp import FastMCP
+from fastmcp.dependencies import Depends
+
+from bookshop.clients import Catalog, Database
+from nuke_di.fastmcp import setup
+
+mcp = FastMCP("bookshop")
+setup(mcp)  # before the tools: clients connect when the server starts, disconnect when it stops
+
+
+async def bestseller(db: Database) -> str:
+    return db.books["fantasy"][0]
+
+
+@mcp.tool
+async def count_books(genre: str, catalog: Catalog) -> int:
+    """How many books of a genre the shop has."""
+    return catalog.count(genre)
+
+
+@mcp.tool
+async def recommend(title: str = Depends(bestseller)) -> str:
+    """The book to start with."""
+    return f"Start with {title}."
+
+
+@mcp.resource("books://{genre}")
+async def shelf(genre: str, db: Database) -> list[str]:
+    return db.books[genre]
+
+
+@mcp.prompt
+async def review(genre: str, catalog: Catalog) -> str:
+    return f"Write a short review of our {catalog.count(genre)} {genre} books."
+
+
+if __name__ == "__main__":
+    mcp.run(show_banner=False)  # stdio
+```
+
+```console
+$ python ask.py bookshop.fastmcp_server
+database: connected
+[10/10/26 18:46:47] INFO     Starting MCP server 'bookshop'     transport.py:241
+                             with transport 'stdio'
+count_books {'genre': {'type': 'string'}}
+recommend {}
+{'result': 2}
+database: disconnected
+```
+
+FastMCP's own in-memory client reaches the rest:
+
+```python
+# browse.py: the tool with a dependency, the resource and the prompt, through FastMCP's in-memory client
+import asyncio
+
+from fastmcp import Client
+
+from bookshop.fastmcp_server import mcp
+
+
+async def main() -> None:
+    async with Client(mcp) as client:
+        print((await client.call_tool("recommend", {})).data)
+        (shelf,) = await client.read_resource("books://poetry")
+        print(shelf.text)
+        (message,) = (await client.get_prompt("review", {"genre": "fantasy"})).messages
+        print(message.content.text)
+
+
+asyncio.run(main())
+```
+
+```console
+$ python browse.py
+database: connected
+Start with A Wizard of Earthsea.
+["Leaves of Grass"]
+Write a short review of our 2 fantasy books.
+database: disconnected
+```
+
+The rules:
+
+- **Where clients are filled.** In the arguments of the tools, resources and prompts added as functions or
+  bound methods with the decorators of the server or its `add_tool()`, `add_resource()`, `add_prompt()` after
+  `setup(mcp)`, and of every function in a `Depends(...)` they use, at any depth. An argument with a plain
+  default, `catalog: Catalog = None`, is filled too; one with a `Depends(...)` or another marker of FastMCP
+  is left alone, even if its type is a client. A `Tool` object built beforehand, as in
+  `mcp.add_tool(Tool.from_function(fn))`, is not seen. A `functools.partial`, a callable object or a class in
+  `Depends(...)` that takes clients raises a `TypeError`: declare a function.
+- **The signature changes.** FastMCP reads `Depends` from defaults only, so a client argument becomes
+  keyword-only with `Depends(...)` as its default, after the arguments the caller passes:
+  `count_books(genre, *, catalog=Depends(...))`. Only introspection sees it: a test calls the function as it
+  was written.
+- **Lifespan.** The clients connect before the server's own `lifespan=` and disconnect after it. FastMCP runs
+  the lifespan once however many sessions or transports share the server.
+- **One server at a time.** FastMCP keeps the signature of a function for good, so a function is rewritten
+  once, whatever the container: two servers that share a tool function run one after another, and the second
+  to start while the first runs fails to start. For the same reason a function serves FastMCP or FastAPI, not
+  both.
+- **Mounted servers.** Call `setup()` on every server whose functions take clients, and `mount()` after it.
+  A server mounted on one with the same container is started by it: the clients of both connect once, when
+  the server you run starts. Started on its own, it starts its clients itself. A server set up on another
+  container starts its own when the server it is mounted on starts.
+
+## Testing
+
+A test replaces a client with `override()` before the in-memory client starts the server:
+
+```python
+# tests/test_server.py
+from mcp import Client
+
+from bookshop.clients import Database
+from bookshop.server import server
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    def __init__(self) -> None:
+        self.books = {"fantasy": ["Dune"]}
+
+
+async def test_count_books() -> None:
+    # An in-memory client runs the server's lifespan, which resolves and connects the clients
+    with DI.override(Database, FakeDatabase()):
+        async with Client(server) as client:
+            result = await client.call_tool("count_books", {"genre": "fantasy"})
+
+    assert result.structured_content == {"result": 1}
+```
+
+```console
+$ pytest -q tests/test_server.py
+.                                                                        [100%]
+1 passed in 0.36s
+```
+
+With FastMCP the test is the same with `fastmcp.Client(mcp)`, and `result.data == 1`. A Replacement is never
+connected, which is why `FakeDatabase` has its books from `__init__`.
+
+## Errors
+
+- **A tool added before `setup()`.** The SDK and FastMCP read the tool's signature at once, and the client
+  is not a type they know:
+
+  ```
+  TypeError: Catalog is a nuke-di client, not a pydantic type. A pydantic model takes it only with arbitrary_types_allowed, and has no JSON schema for it. A framework fills it only as a plain type hint, not as an optional, through its nuke-di integration: e.g. in a FastAPI route declared through nuke_di.fastapi, or in an MCP tool added after setup() of nuke_di.mcp or nuke_di.fastmcp. See https://github.com/troyan-dy/nuke-di#documentation
+  ```
+
+- **A tool called without the lifespan**, e.g. `await server.call_tool(...)` in a test, without a client:
+  the SDK raises `UnexpectedToolError: Error executing tool count_books`, and FastMCP `ToolError: Error calling tool
+  'count_books': Failed to resolve dependency 'catalog' for count_books`, both caused by:
+
+  ```
+  RuntimeError: Catalog is not connected: run the server with its lifespan, e.g. `async with Client(server)`
+  ```
+
+- **A tool added after the server started** raises `RuntimeError: Catalog was not started with the server:
+  add its tool before the server starts` (FastMCP: "its tool, resource or prompt").
+- **A failed `connect()`** fails the startup: `async with Client(server)` raises `RuntimeError: nuke-di
+  clients failed to start: Database.connect() raised OSError: db.local:5432 is unreachable` (FastMCP's client
+  prefixes it with `Client failed to connect: `), and a server on stdio exits with code 1 and that error in
+  its traceback, which the host reports as a server that failed to start.
+- **`setup()` twice** for one server: `TypeError: setup() was already called for this app`.
+- **Two FastMCP servers that share a function, at once:** the second fails to start with `RuntimeError:
+  nuke-di clients failed to start: Catalog is filled for another app that is running; apps that share a
+  handler function run one at a time`.
+- **A FastMCP function seen before `setup()`.** Moving `setup()` up fixes the `TypeError` above in the next
+  process, not in the one that has already read the function: FastMCP keeps the signature it read. Adding
+  the function to a set-up server later in that process raises `TypeError: FastMCP read count_books before setup()
+  and keeps the signature it read for good: call setup() before the function is first added to any server,
+  and start the process again`.
+- **A server mounted before `setup()`** of the server it is mounted on, with the same container, fails the
+  startup: `RuntimeError: nuke-di clients failed to start: shelf is mounted on a server that runs on the same
+  container, but not through it: call setup() of that server before mount()`.
+- **Shapes that take no clients** raise a `TypeError` when added: `Argument "catalog" of a functools.partial
+  of count_books is Catalog: nuke-di fills the clients of a function, a bound method or a callable object, so
+  declare a function instead`; in FastMCP, `Argument "db" of the class Reader is Database: ...` for a class in
+  `Depends(...)` and a callable object; on the SDK, `ask takes clients and returns an InputRequiredResult:
+  nuke-di fills clients through the SDK's Resolve(...), which the SDK does not combine with an
+  InputRequiredResult of the tool itself; such a tool takes no clients`.
+- **One function for FastAPI and FastMCP:** `TypeError: count_books takes clients in both FastAPI and FastMCP
+  handlers: nuke-di rewrites its signature for one framework, so give each framework its own function`.
+
+<!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md -->
+
+# aiogram
+
+
+
+An aiogram handler takes a client by its type hint, next to the message. Nothing marks the handler: no
+`@inject`, no `FromDishka[...]`.
+
+```bash
+pip install "nuke-di[aiogram]"
+```
+
+Requires aiogram 3.2 or newer. With the clients of the [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md) examples:
+
+```python
+# app/bot.py
+import asyncio
+import os
+
+from aiogram import Bot, Dispatcher, Router
+from aiogram.filters import CommandStart
+from aiogram.types import Message
+
+from app.clients import UserService
+from nuke_di.aiogram import setup
+
+router = Router()
+
+
+@router.message(CommandStart())
+async def start(message: Message, users: UserService) -> None:
+    await message.answer(await users.greet(message.chat.id))
+
+
+dp = Dispatcher()
+dp.include_router(router)
+setup(dp)  # clients connect before the startup handlers, disconnect after the shutdown handlers
+
+
+async def main() -> None:
+    await dp.start_polling(Bot(os.environ["BOT_TOKEN"]))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+With a token from [@BotFather](https://t.me/BotFather), `BOT_TOKEN=... python -m app.bot` runs it. Without
+one, a `Bot` whose session answers in the process runs the same dispatcher: aiogram has no test client,
+and a session is where a bot's requests go.
+
+```python
+# app/telegram.py
+from typing import Any
+
+from aiogram import Bot
+from aiogram.client.session.base import BaseSession
+from aiogram.methods import SendMessage, TelegramMethod
+from aiogram.types import Update
+
+
+class PrintingSession(BaseSession):
+    """
+    The Bot API of a test: prints what the bot sends, and keeps it in `sent`, instead of calling Telegram.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sent: list[str] = []
+
+    async def make_request(self, bot: Bot, method: TelegramMethod[Any], timeout: int | None = None) -> Any:
+        assert isinstance(method, SendMessage), method
+        print(f"bot -> chat {method.chat_id}: {method.text}")
+        self.sent.append(method.text)
+        return True
+
+    async def stream_content(self, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError
+
+    async def close(self) -> None:
+        pass
+
+
+def message(bot: Bot, text: str, chat_id: int = 42) -> Update:
+    """
+    An update with a message in a private chat, as Telegram sends it.
+    """
+    chat = {"id": chat_id, "type": "private"}
+    return Update.model_validate(
+        {"update_id": 1, "message": {"message_id": 1, "date": 0, "chat": chat, "text": text}},
+        context={"bot": bot},
+    )
+```
+
+```python
+# app/try_bot.py
+import asyncio
+
+from aiogram import Bot
+
+from app.bot import dp
+from app.telegram import PrintingSession, message
+
+
+async def main() -> None:
+    bot = Bot("42:TEST", session=PrintingSession())
+    await dp.emit_startup(bot=bot)  # what start_polling() does first
+    try:
+        await dp.feed_update(bot, message(bot, "/start"))  # and then with every update
+    finally:
+        await dp.emit_shutdown(bot=bot)
+
+
+asyncio.run(main())
+```
+
+```console
+$ python -m app.try_bot
+database: connected
+bot -> chat 42: Hello, user-42!
+database: disconnected
+```
+
+What happened:
+
+1. `setup(dp)` added one inner middleware to every event of the dispatcher, which aiogram runs for the
+   handlers of every router included into it, and took over the dispatcher's startup and shutdown.
+2. On startup, `dp.emit_startup()`, which `start_polling()` calls first, walked the handlers of the
+   dispatcher and its routers, found `users: UserService` in `start`, resolved it and connected the
+   clients, each after its own dependencies.
+3. The update matched `start`, and the middleware put the connected `UserService` into the data aiogram
+   passes to a handler by name.
+4. On shutdown the clients disconnected.
+
+The [aiogram_bot](https://github.com/troyan-dy/nuke-di/blob/master/examples/aiogram_bot/README.md) example runs `start_polling()` itself against a fake
+Telegram.
+
+## The rules
+
+- **Where clients are filled.** In the arguments of the handlers of the dispatcher and of every router
+  included into it, at any depth and before `setup()` or after, for every kind of update: messages,
+  callback queries, inline queries, error handlers and the rest. A handler is a function, a bound method,
+  a function wrapped with `functools.wraps`, a `functools.partial`, without the arguments it binds, a
+  callable object, or a plain `def`, which aiogram runs in a thread. An argument is a client when its type
+  hint is a client, also inside `Annotated[UserService, ...]`; a hint that does not evaluate, e.g. a name
+  imported under `TYPE_CHECKING`, is left to aiogram, and the other arguments are still filled.
+- **Startup and shutdown handlers.** `@dp.startup()` and `@dp.shutdown()` handlers, and those of the
+  routers, take clients too, next to the `bot` and the other arguments aiogram passes them. aiogram passes
+  them all the same arguments, so among them one name means one client, and a keyword argument of
+  `dp.emit_shutdown()` under that name raises `TypeError`.
+- **By name, per handler.** aiogram passes a handler the items of its data by name; nuke-di adds the
+  client arguments of the handler that matched the update, so two handlers may give different clients
+  one name. A name aiogram passes itself raises `TypeError` on startup: `bot`, `state`, `event_from_user`
+  and its other names, the workflow data of `Dispatcher(name=...)` or `dp["name"]`, and the keyword
+  arguments of `start_polling()`. A key that comes into the data of one update under a client's name, from a
+  filter that returns it, a middleware or `dp.feed_update(..., name=...)`, raises `TypeError` on that update
+  instead of being replaced. The handler gets a copy of the data, so the next one after a `SkipHandler`
+  does not see the clients of the skipped one.
+- **Resolved on startup.** The clients are resolved when the dispatcher starts: `start_polling()`, the
+  startup of the webhook app, or `await dp.emit_startup()` in a test. So `override()` before that replaces
+  them, and importing the bot builds nothing. A handler of a router included after the startup gets the
+  clients the container connected, for other handlers or as their dependencies.
+- **Startup and shutdown order.** The clients connect before the startup handlers of the dispatcher and
+  of its routers, and disconnect after all their shutdown handlers, which aiogram calls for the routers
+  after the dispatcher's. A startup handler that fails disconnects them again: `start_polling()` does not
+  call the shutdown after a failed startup. A shutdown after a failed startup, which the webhook app calls
+  on cleanup, or a second shutdown runs the shutdown handlers with the arguments of the call alone. On
+  shutdown `Shutdown` is set and `BackgroundTasks` are stopped before the clients disconnect, as in a worker.
+- **Handlers still running.** `start_polling()` handles each update in a task, and so does the webhook's
+  `SimpleRequestHandler` with `handle_in_background=True`, its default; neither waits for them when it
+  stops, so a handler that is still running when the clients disconnect finds them disconnected.
+- **Cost of an update.** One dictionary lookup by the handler, and for a handler with clients a copy of
+  the data with one item per client argument: under 1 µs per update, against 22 µs of aiogram's own
+  dispatch of a message (Python 3.14).
+- **The function stays a function.** Nothing in it is rewritten; calling it directly with a client, e.g.
+  in a unit test, works as before.
+- **Another container.** `setup(dp, container)`. Two dispatchers on one container run one at a time: the
+  second startup raises `RuntimeError: nuke-di clients failed to start: the container is already
+  connected`.
+
+## Your own middleware
+
+nuke-di puts the clients into the data from its own inner middleware, for the handler alone, so the outer
+middlewares of the bot, and the inner ones registered before `setup()`, do not find them there. A
+middleware gets its client from a startup handler instead:
+
+```python
+# app/audit.py
+import asyncio
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from aiogram import BaseMiddleware, Bot
+from aiogram.types import TelegramObject
+
+from app.bot import dp
+from app.clients import Database
+from app.telegram import PrintingSession, message
+
+
+class Audit(BaseMiddleware):
+    """
+    A middleware of the bot's own: it gets its client from a startup handler.
+    """
+
+    def __init__(self) -> None:
+        self.db: Database | None = None
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        assert self.db is not None, "the dispatcher has not started"
+        print(f"audit: an update from {await self.db.fetch_user(data['event_chat'].id)}")
+        return await handler(event, data)
+
+
+audit = Audit()
+dp.update.outer_middleware(audit)
+
+
+@dp.startup()
+async def connect_audit(db: Database) -> None:
+    audit.db = db  # connected already: the clients connect before the startup handlers
+
+
+async def main() -> None:
+    bot = Bot("42:TEST", session=PrintingSession())
+    await dp.emit_startup(bot=bot)
+    try:
+        await dp.feed_update(bot, message(bot, "/start"))
+    finally:
+        await dp.emit_shutdown(bot=bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+```console
+$ python -m app.audit
+database: connected
+audit: an update from user-42
+bot -> chat 42: Hello, user-42!
+database: disconnected
+```
+
+## Testing
+
+A test replaces a client before the startup and feeds the updates itself, with the session above:
+
+```python
+# tests/test_bot.py
+from aiogram import Bot
+
+from app.bot import dp
+from app.clients import Database
+from app.telegram import PrintingSession, message
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+async def test_start() -> None:
+    session = PrintingSession()
+    bot = Bot("42:TEST", session=session)
+    with DI.override(Database, FakeDatabase()):
+        await dp.emit_startup(bot=bot)
+        try:
+            await dp.feed_update(bot, message(bot, "/start"))
+        finally:
+            await dp.emit_shutdown(bot=bot)
+
+    assert session.sent == ["Hello, alice!"]
+```
+
+```console
+$ pytest -q tests/test_bot.py
+.                                                                        [100%]
+1 passed in 1.35s
+```
+
+`dp.feed_update()` raises what the handler raised, unless an error handler of the dispatcher handles it.
+
+## Errors
+
+**A client that fails to connect** fails the startup: `start_polling()` raises a plain `RuntimeError` from
+the `ConnectError` before its first request to Telegram, and the clients that connected are disconnected.
+
+```python
+# app/broken.py
+import asyncio
+
+from aiogram import Bot, Dispatcher
+from aiogram.types import Message
+
+from nuke_di import Client
+from nuke_di.aiogram import setup
+
+
+class Kafka(Client):
+    async def connect(self) -> None:
+        raise OSError("broker kafka-1:9092 is unreachable")
+
+
+dp = Dispatcher()
+setup(dp)
+
+
+@dp.message()
+async def publish(message: Message, kafka: Kafka) -> None: ...
+
+
+if __name__ == "__main__":
+    # The startup fails before the first request to Telegram, so any token of the right shape shows it
+    asyncio.run(dp.start_polling(Bot("42:TEST")))
+```
+
+```console
+$ python -m app.broken
+Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
+Traceback (most recent call last):
+  ...
+OSError: broker kafka-1:9092 is unreachable
+Traceback (most recent call last):
+  ...
+nuke_di.errors.ConnectError: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  ...
+RuntimeError: nuke-di clients failed to start: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
+$ echo $?
+1
+```
+
+**The others**, each raised with this message:
+
+| When | Error |
+|---|---|
+| An update comes before the startup | ``RuntimeError: UserService is not connected: start the dispatcher with `start_polling()`, or `await dp.emit_startup()` in a test`` |
+| A router with a handler of a client nobody asked for is included after the startup | `RuntimeError: Billing was not started with the dispatcher: register its handler before the dispatcher starts` |
+| A client argument under a name aiogram passes itself | `TypeError: Argument "state" of stateful is UserService, but aiogram passes "state" to handlers itself: rename the argument` |
+| A filter takes a client | `TypeError: Argument "db" of the filter is_known is Database: aiogram calls filters before the middlewares that fill clients, so a filter takes no clients; check it in the handler instead` |
+| A filter, a middleware or `feed_update()` puts a client's name into the data | `TypeError: "users" is in the data of the update already, and start takes the client UserService under that name: a filter, a middleware or feed_update() passed it; rename the argument or the key` |
+| A scene takes a client | ``TypeError: Argument "db" of the scene handler Quiz.ask is Database: aiogram calls the handlers of a scene from its own machinery, so a scene takes no clients; pass what it needs from a handler outside it, e.g. `await scenes.enter(Quiz, ...)` `` |
+| `dp.emit_shutdown()` gets a client's name | `TypeError: "users" is passed to emit_shutdown(), but it is the client UserService of a startup or shutdown handler: rename the argument or the key` |
+| `setup()` is given a router | `TypeError: setup() takes the Dispatcher, not <Router '0x109bbea50'>: the routers included into it are covered` |
+
+## Not supported
+
+- **Filters** take no clients, those of a handler and those of an observer, `router.message.filter(...)`,
+  and raise `TypeError` on startup: aiogram runs them before its middlewares, so no client is in the data
+  yet. Check it in the handler.
+- **Scenes** (`aiogram.fsm.scene`) take no clients, and raise `TypeError` on startup: aiogram calls the
+  handlers of a scene's actions, such as `on.message.enter()`, from its own machinery, out of reach of the
+  middleware. Pass what the scene needs from a handler outside it, `await scenes.enter(Quiz, questions=...)`,
+  which aiogram hands to the enter handler. A scene is seen through its handlers on the routers of the
+  dispatcher; a scene with actions alone is not, and fails with aiogram's missing argument instead.
+- **Class-based handlers**, subclasses of `MessageHandler` and the other `BaseHandler` classes, take no
+  clients: aiogram passes them the data as `self.data`, and their `__init__` is aiogram's.
+- **`setup()` on a router.** It takes the `Dispatcher`: a router is included into one dispatcher only,
+  which aiogram enforces, and the dispatcher's middleware covers the routers below it.
+
+<!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/taskiq.md -->
+
+# taskiq
+
+
+
+A taskiq task takes a client by its type hint, next to the arguments it is kicked with:
+
+```bash
+pip install "nuke-di[taskiq]"
+```
+
+Requires taskiq 0.11 or newer, with any broker. With the clients of the [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md) examples, and an
+`InMemoryBroker`, which runs the tasks in the process that kicks them:
+
+```python
+# app/tasks.py
+from typing import Annotated
+
+from taskiq import Context, InMemoryBroker, TaskiqDepends
+
+from app.clients import Database, UserService
+from nuke_di.taskiq import setup
+
+broker = InMemoryBroker()  # runs the tasks in this process
+setup(broker)  # clients connect when the worker starts, disconnect when it stops
+
+
+@broker.task
+async def send_report(user_id: int, users: UserService) -> None:
+    print(await users.greet(user_id))
+
+
+async def account_name(context: Annotated[Context, TaskiqDepends()], db: Database) -> str:
+    # A dependency gets taskiq's own objects and clients side by side
+    return await db.fetch_user(context.message.kwargs["account_id"])
+
+
+@broker.task
+async def close_account(account_id: int, name: Annotated[str, TaskiqDepends(account_name)]) -> str:
+    return f"closed the account of {name}"
+```
+
+```python
+# app/main.py
+import asyncio
+
+from app.tasks import broker, close_account, send_report
+
+
+async def main() -> None:
+    # An InMemoryBroker is its own worker: its startup connects the clients
+    await broker.startup()
+    report = await send_report.kiq(42)
+    await report.wait_result()
+    closed = await close_account.kiq(account_id=7)
+    print((await closed.wait_result()).return_value)
+    await broker.shutdown()
+
+
+asyncio.run(main())
+```
+
+```console
+$ python -m app.main
+database: connected
+Hello, user-42!
+closed the account of user-7
+database: disconnected
+```
+
+**Type checkers.** taskiq types `.kiq()` with the task's own signature, so mypy and pyright ask for `users` in
+`send_report.kiq(42)`; the same goes for every argument taskiq fills, `Annotated` or not. A default makes the
+argument optional for them, and the client still comes from the container by its type:
+
+```python
+@broker.task
+async def send_report(user_id: int, users: UserService = TaskiqDepends()) -> None:
+    print(await users.greet(user_id))
+```
+
+Ruff's `B008` flags a call in a default; taskiq's markers are safe there:
+
+```toml
+# pyproject.toml
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["taskiq.TaskiqDepends"]
+```
+
+**A real worker.** In a deployment the broker is that of a queue, e.g. `NatsBroker` of
+[taskiq-nats](https://github.com/taskiq-python/taskiq-nats); nothing else changes:
+
+```python
+# app/tasks.py
+import os
+
+from taskiq_nats import NatsBroker
+
+from app.clients import UserService
+from nuke_di.taskiq import setup
+
+broker = NatsBroker(os.environ.get("NATS_URL", "nats://localhost:4222"), queue="reports")
+setup(broker)
+
+
+@broker.task
+async def send_report(user_id: int, users: UserService) -> None:
+    print(await users.greet(user_id))
+```
+
+The worker process connects the clients; a process that only kicks tasks, such as a web app, connects the
+broker and nothing else:
+
+```python
+# app/kick.py
+import asyncio
+
+from app.tasks import broker, send_report
+
+
+async def main() -> None:
+    # A client process: the broker connects to NATS, the clients stay unconnected
+    await broker.startup()
+    await send_report.kiq(42)
+    print("kicked send_report(42)")
+    await broker.shutdown()
+
+
+asyncio.run(main())
+```
+
+```console
+$ taskiq worker app.tasks:broker --workers 1
+[2026-10-10 18:40:00,853][taskiq.worker][INFO   ][MainProcess] Pid of a main process: 56250
+[2026-10-10 18:40:00,853][taskiq.worker][INFO   ][MainProcess] Starting 1 worker processes.
+[2026-10-10 18:40:00,859][taskiq.process-manager][INFO   ][MainProcess] Started process worker-0 with pid 56252
+database: connected
+[2026-10-10 18:40:01,084][nuke_di.core][INFO   ][worker-0] Connected 2 clients in 0.00s (slowest: Database 0.00s, UserService 0.00s)
+[2026-10-10 18:40:01,091][taskiq.receiver.receiver][INFO   ][worker-0] Listening started.
+[2026-10-10 18:40:03,815][taskiq.receiver.receiver][INFO   ][worker-0] Executing task app.tasks:send_report with ID: e987ddad37444fa5a0ade0174578c9f2
+Hello, user-42!
+^C
+[2026-10-10 18:40:05,845][taskiq.process-manager][INFO   ][MainProcess] Workers are scheduled for shutdown.
+[2026-10-10 18:40:05,995][taskiq.process-manager][INFO   ][MainProcess] Stopped process worker-0 with pid 56252
+[2026-10-10 18:42:01,140][taskiq.receiver.receiver][INFO   ][worker-0] Stopping prefetching messages...
+[2026-10-10 18:42:01,143][taskiq.receiver.receiver][INFO   ][worker-0] The runner is stopped.
+[2026-10-10 18:42:01,144][taskiq.worker][INFO   ][worker-0] Shutting down the broker.
+database: disconnected
+```
+
+In another terminal:
+
+```console
+$ python -m app.kick
+kicked send_report(42)
+```
+
+The two minutes before `Stopping prefetching messages...` are taskiq's: its worker process (taskiq 0.13 with
+taskiq-nats 0.7) notices the signal at its next message or NATS ping.
+
+The rules:
+
+- **Where clients are filled.** In the arguments of the broker's tasks and of every `TaskiqDepends(...)`
+  function they use, at any depth, generator dependencies included. Every other argument is taskiq's: the
+  arguments of `.kiq()`, `Context`, `TaskiqState`. A dependency class, `Annotated[Auth, TaskiqDepends()]`, is
+  built by taskiq from its own `__init__`, which nuke-di does not rewrite, so one whose `__init__` takes
+  clients is refused when its task is registered: `TypeError: Auth takes clients in __init__ and is a taskiq
+  dependency`. Take a client by its type hint, without `TaskiqDepends()`, and a class that needs clients
+  through a dependency function.
+- **Which clients start.** Those of every task in `broker.get_all_tasks()`: the broker's own and the shared
+  ones (`@shared_task`). Tasks of the broker may be declared before or after `setup(broker)`. A shared task is
+  registered on taskiq's shared broker, which `setup()` does not hook: `setup()` rewrites the shared tasks
+  there are, and the worker's startup the rest. `taskiq worker` reads the signatures of its tasks before it
+  starts, so there a shared task is imported before `setup()`; an `InMemoryBroker` reads one on its first run,
+  so there either order works.
+- **Which process connects.** The one where the broker fires `WORKER_STARTUP`: a `taskiq worker` process, and
+  any process that starts an `InMemoryBroker`, which is its own worker. A process that only kicks tasks
+  starts the broker with `CLIENT_STARTUP` and connects no client. So one module with the broker serves both:
+  the worker connects through taskiq, the web app through its own integration.
+- **Lifespan.** The clients connect before the other `WORKER_STARTUP` handlers, including those registered
+  before `setup()`, and disconnect after `broker.shutdown()` has run the `WORKER_SHUTDOWN` handlers, the
+  middlewares and the result backend; on an `InMemoryBroker`, after the tasks still running have finished.
+  `Shutdown` and `BackgroundTasks` behave as in [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md). `taskiq worker` gives
+  `broker.shutdown()` `--shutdown-timeout` seconds, 5 by default, and each `disconnect()` may take
+  `DISCONNECT_TIMEOUT_SECONDS`, 10 by default: set `--shutdown-timeout` above the longest chain of
+  disconnects, or a slow one is cut off midway.
+- **A failed start.** A failed `connect()` fails `broker.startup()` with a `RuntimeError`, and the worker
+  process dies. taskiq's process manager restarts it for ever by default (`--max-fails -1`), so the
+  orchestrator never sees a crash and the dead dependency is tried again every second. Run the worker with
+  `--max-fails 1`: it then exits with code 255, and the orchestrator restarts it with its own backoff, as
+  `connect()` is fail-fast in nuke-di.
+- **Instances.** As with `inject()`, a `Client` is one instance per container, and a `NotSingletonClient` is
+  one instance per argument that declares it, not one per task.
+- **The function stays a function.** Its signature shows `Annotated[UserService, TaskiqDepends(...)]` to
+  taskiq, as in [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md); `await send_report(1, users)` calls it with clients passed by hand.
+  A function that takes clients serves either taskiq or FastAPI: one bound to FastAPI is refused with a
+  `TypeError` before its task is registered.
+- **One container connects once.** An `InMemoryBroker` started in a process whose container is already
+  connected, e.g. inside a FastAPI app that runs on the same `DI`, fails with `RuntimeError: nuke-di clients
+  failed to start: the container is already connected`. Give that broker a container of its own:
+  `setup(broker, container=Dependencies())`. For the same reason a worker fails to start with
+  `taskiq_fastapi.init(broker, app)` for an app set up with `nuke_di.fastapi` on the same container: it enters
+  the app's lifespan on `WORKER_STARTUP`. With `nuke_di.taskiq` the tasks get their clients without it. A task
+  function serves one broker at a time, as a FastStream subscriber does.
+
+**Testing.** Run the tasks on an `InMemoryBroker` and start it inside the override:
+
+```python
+# tests/test_tasks.py
+import pytest
+
+from app.clients import Database
+from app.tasks import broker, send_report
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+async def test_send_report(capsys: pytest.CaptureFixture[str]) -> None:
+    with DI.override(Database, FakeDatabase()):
+        await broker.startup()
+        try:
+            task = await send_report.kiq(1)
+            await task.wait_result()
+        finally:
+            await broker.shutdown()
+
+    assert "Hello, alice!" in capsys.readouterr().out
+```
+
+```console
+$ pytest -q tests/test_tasks.py
+.                                                                        [100%]
+1 passed in 0.44s
+```
+
+A task run without the worker's startup, e.g. kicked on an `InMemoryBroker` that was never started, fails
+with ``RuntimeError: UserService is not connected: the clients connect when the worker starts; run tasks with
+`taskiq worker`, or start an InMemoryBroker with `await broker.startup()` before kicking them`` in its result. A
+task declared after the worker started fails with `RuntimeError: UserService was not started with the worker`.
+
+<!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/asgi.md -->
+
+# Starlette, Quart and any ASGI app
+
+
+
+A framework without dependency injection, such as Starlette or Quart, cannot fill a handler's arguments by
+type hint. `nuke_di.asgi.lifespan()` covers the rest: it is the app's lifespan, which connects the clients
+it lists when the app starts and disconnects them when it stops, and a handler asks it for a client with
+`get()`. It imports no framework and needs no extra:
+
+```bash
+pip install nuke-di
+```
+
+- [Starlette](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/asgi.md#starlette)
+- [The app's own lifespan](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/asgi.md#the-apps-own-lifespan)
+- [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/asgi.md#testing)
+- [Quart](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/asgi.md#quart)
+- [aiohttp](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/asgi.md#aiohttp)
+- [A plain ASGI app](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/asgi.md#a-plain-asgi-app)
+- [Errors](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/asgi.md#errors)
+
+## <a id="starlette"></a>Starlette
+
+With the clients of the [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md) examples:
+
+```python
+# app/starlette_api.py
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
+from starlette.routing import Route
+
+from app.clients import Database, UserService
+from nuke_di import DI
+from nuke_di.asgi import lifespan
+
+# The clients the handlers take: they connect, with their dependencies, when the app starts
+clients = lifespan(DI, UserService, Database)
+
+
+async def get_user(request: Request) -> PlainTextResponse:
+    users = clients.get(UserService)
+    return PlainTextResponse(await users.greet(request.path_params["user_id"]))
+
+
+async def me(request: Request) -> PlainTextResponse:
+    db = clients.get(Database)
+    return PlainTextResponse(await db.fetch_user(int(request.headers["X-User-Id"])))
+
+
+app = Starlette(
+    routes=[Route("/users/{user_id:int}", get_user), Route("/me", me)],
+    lifespan=clients,
+)
+```
+
+```console
+$ uvicorn app.starlette_api:app
+INFO:     Started server process [47010]
+INFO:     Waiting for application startup.
+database: connected
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:50476 - "GET /users/42 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50478 - "GET /me HTTP/1.1" 200 OK
+^C
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+database: disconnected
+INFO:     Application shutdown complete.
+INFO:     Finished server process [47010]
+```
+
+```console
+$ curl localhost:8000/users/42
+Hello, user-42!
+$ curl localhost:8000/me -H "X-User-Id: 7"
+user-7
+```
+
+The rules:
+
+- **The list is explicit.** There is no route table to find the clients in, so `lifespan(container,
+  *clients)` names every client a handler takes. `clients.get(Database)` works only when `Database` is
+  listed, even though it connects anyway as a dependency of `UserService`: a handler that relied on that
+  would break the day `UserService` stops depending on it.
+- **`get()` is typed.** `clients.get(UserService)` returns a `UserService` for mypy and pyright, unlike
+  an attribute of `request.state`. It is a plain method, so it works in a handler, a websocket endpoint, a
+  middleware or a background task, and the module that holds `clients` is imported by the handlers like
+  any other.
+- **Resolved on startup.** Creating `clients` resolves nothing; every startup resolves the listed clients
+  again, so `override()` before the app starts replaces one, and a second start gets fresh clients.
+- **Shutdown.** On shutdown `Shutdown` is set, the `BackgroundTasks` are stopped and then the clients
+  disconnect, the same order as in a [worker](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md).
+- **One app at a time.** A container connects once: a second app started on the same container while
+  the first runs fails its startup.
+- **FastAPI too.** A FastAPI app that keeps the signatures of its routes as written passes
+  `FastAPI(lifespan=clients)` the same way; with `nuke_di.fastapi.setup()` its routes take clients by
+  type hint instead, see [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md).
+
+## <a id="the-apps-own-lifespan"></a>The app's own lifespan
+
+`clients(app)` is an async context manager, so the app's own lifespan enters it first and runs its startup
+and shutdown code inside, with the clients connected. What it yields is the app's state, as usual:
+
+```python
+# app/own_lifespan.py
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
+from starlette.routing import Route
+
+from app.clients import UserService
+from nuke_di import DI
+from nuke_di.asgi import lifespan
+
+clients = lifespan(DI, UserService)
+
+
+@asynccontextmanager
+async def app_lifespan(app: Starlette) -> AsyncIterator[dict[str, str]]:
+    async with clients(app):
+        # The app's own startup and shutdown code runs with the clients connected
+        greeting = await clients.get(UserService).greet(0)
+        print("warmed up:", greeting)
+        yield {"greeting": greeting}
+        print("app: stopping")
+
+
+async def index(request: Request) -> PlainTextResponse:
+    return PlainTextResponse(request.state.greeting)
+
+
+app = Starlette(routes=[Route("/", index)], lifespan=app_lifespan)
+```
+
+```console
+$ uvicorn app.own_lifespan:app
+INFO:     Started server process [46993]
+INFO:     Waiting for application startup.
+database: connected
+warmed up: Hello, user-0!
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:50465 - "GET / HTTP/1.1" 200 OK
+^C
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+app: stopping
+database: disconnected
+INFO:     Application shutdown complete.
+INFO:     Finished server process [46993]
+```
+
+## <a id="testing"></a>Testing
+
+A test replaces a client before `TestClient` starts the app:
+
+```python
+# tests/test_starlette_api.py
+from starlette.testclient import TestClient
+
+from app.clients import Database
+from app.starlette_api import app
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+def test_get_user() -> None:
+    with DI.override(Database, FakeDatabase()), TestClient(app) as client:
+        assert client.get("/users/1").text == "Hello, alice!"
+        assert client.get("/me", headers={"X-User-Id": "7"}).text == "alice"
+```
+
+```console
+$ pytest -q tests/test_starlette_api.py
+.                                                                        [100%]
+1 passed in 0.04s
+```
+
+`TestClient(app)` without `with` sends requests without running the lifespan, and a handler says so:
+
+```console
+$ python -c "from starlette.testclient import TestClient; from app.starlette_api import app; TestClient(app).get('/users/1')"
+Traceback (most recent call last):
+  ...
+RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` in Starlette or `async with app.test_app()` in Quart
+```
+
+## <a id="quart"></a>Quart
+
+Quart has no `lifespan=` argument: it runs its `before_serving` hooks on startup and its `after_serving`
+hooks on shutdown, each kind in the order it was registered, and skips the rest of them when one fails. A
+subclass of `Quart` connects the clients around all of them, so every hook of the app can use the clients,
+and a hook that fails still leaves them disconnected:
+
+```python
+# app/quart_api.py
+from contextlib import AsyncExitStack
+
+from quart import Quart, request
+
+from app.clients import Database, UserService
+from nuke_di import DI
+from nuke_di.asgi import lifespan
+
+clients = lifespan(DI, UserService, Database)
+running = AsyncExitStack()
+
+
+class ClientsQuart(Quart):
+    """
+    Connects the clients before every before_serving hook and disconnects them after every after_serving
+    hook, also when one of the hooks fails.
+    """
+
+    async def startup(self) -> None:
+        await running.enter_async_context(clients(self))
+        try:
+            await super().startup()
+        except BaseException:
+            await running.aclose()
+            raise
+
+    async def shutdown(self) -> None:
+        try:
+            await super().shutdown()
+        finally:
+            await running.aclose()
+
+
+app = ClientsQuart(__name__)
+
+
+@app.before_serving
+async def warm_up() -> None:
+    print("warm-up:", await clients.get(UserService).greet(0))
+
+
+@app.after_serving
+async def goodbye() -> None:
+    print("goodbye:", await clients.get(UserService).greet(1))
+
+
+@app.get("/users/<int:user_id>")
+async def get_user(user_id: int) -> str:
+    return await clients.get(UserService).greet(user_id)
+
+
+@app.get("/me")
+async def me() -> str:
+    return await clients.get(Database).fetch_user(int(request.headers["X-User-Id"]))
+```
+
+```console
+$ uvicorn app.quart_api:app
+INFO:     Started server process [72984]
+INFO:     Waiting for application startup.
+database: connected
+warm-up: Hello, user-0!
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:57604 - "GET /users/42 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57606 - "GET /me HTTP/1.1" 200 OK
+^C
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+goodbye: Hello, user-1!
+database: disconnected
+INFO:     Application shutdown complete.
+INFO:     Finished server process [72984]
+```
+
+A test starts the app with `test_app()`:
+
+```python
+# tests/test_quart_api.py
+from app.clients import Database
+from app.quart_api import app
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+async def test_get_user() -> None:
+    with DI.override(Database, FakeDatabase()):
+        async with app.test_app() as test_app:
+            response = await test_app.test_client().get("/users/1")
+            assert await response.get_data(as_text=True) == "Hello, alice!"
+```
+
+```console
+$ pytest -q tests/test_quart_api.py
+.                                                                        [100%]
+1 passed in 0.13s
+```
+
+Why not two hooks of the app, one that connects and one that disconnects: each would run in its turn
+among the app's own hooks. A `disconnect` in `after_serving` runs before the `after_serving` hooks
+registered after it, which then find the clients disconnected; a `before_serving` hook that fails after
+the one that connected leaves the container connected, since Quart then calls no `after_serving` hook, and
+the next start fails with `the container is already connected`. `Quart.startup()` and `Quart.shutdown()`
+run every hook, so the subclass connects before the first and disconnects after the last, whichever of
+them fails. Quart's `while_serving` would read shorter, but it creates its generator once, when it is
+registered, so the app could start only once per process, and the second test that starts it would fail.
+
+## <a id="aiohttp"></a>aiohttp
+
+aiohttp 3.14 takes an async context manager in `cleanup_ctx`, and `clients` is one:
+
+```python
+# app/aiohttp_api.py
+from aiohttp import web
+
+from app.clients import Database, UserService
+from nuke_di import DI
+from nuke_di.asgi import lifespan
+
+clients = lifespan(DI, UserService, Database)
+
+
+async def get_user(request: web.Request) -> web.Response:
+    users = clients.get(UserService)
+    return web.Response(text=await users.greet(int(request.match_info["user_id"])))
+
+
+app = web.Application()
+app.router.add_get("/users/{user_id}", get_user)
+app.cleanup_ctx.append(clients)  # aiohttp 3.14 or newer
+
+if __name__ == "__main__":
+    web.run_app(app)
+```
+
+```console
+$ python -m app.aiohttp_api
+database: connected
+======== Running on http://0.0.0.0:8080 ========
+(Press CTRL+C to quit)
+^C
+database: disconnected
+```
+
+```console
+$ curl localhost:8080/users/42
+Hello, user-42!
+```
+
+An older aiohttp takes an async generator instead:
+
+```python
+from collections.abc import AsyncIterator
+
+
+async def run_clients(app: web.Application) -> AsyncIterator[None]:
+    async with clients(app):
+        yield
+
+
+app.cleanup_ctx.append(run_clients)
+```
+
+## <a id="a-plain-asgi-app"></a>A plain ASGI app
+
+An ASGI app without a framework answers the lifespan messages of the server itself. `clients()` takes no
+argument there:
+
+```python
+# app/raw_asgi.py
+from typing import Any
+
+from app.clients import UserService
+from nuke_di import DI
+from nuke_di.asgi import lifespan
+
+clients = lifespan(DI, UserService)
+
+
+async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+    if scope["type"] == "lifespan":
+        await receive()  # lifespan.startup
+        started = False
+        try:
+            async with clients():
+                await send({"type": "lifespan.startup.complete"})
+                started = True
+                await receive()  # lifespan.shutdown
+        except Exception as exc:
+            await send({"type": f"lifespan.{'shutdown' if started else 'startup'}.failed", "message": str(exc)})
+            raise
+        await send({"type": "lifespan.shutdown.complete"})
+        return
+
+    body = (await clients.get(UserService).greet(42)).encode()
+    await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"text/plain")]})
+    await send({"type": "http.response.body", "body": body})
+```
+
+```console
+$ uvicorn app.raw_asgi:app
+INFO:     Started server process [48646]
+INFO:     Waiting for application startup.
+database: connected
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:50998 - "GET / HTTP/1.1" 200 OK
+^C
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+database: disconnected
+INFO:     Application shutdown complete.
+INFO:     Finished server process [48646]
+```
+
+## <a id="errors"></a>Errors
+
+| When | What is raised |
+|---|---|
+| A handler runs without the app's lifespan, or after it stopped | ``RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` in Starlette or `async with app.test_app()` in Quart `` |
+| `get()` of a client the list lacks | ``RuntimeError: Database is not a client of this lifespan: list it in `lifespan(container, ...)` `` |
+| A client's `connect()` fails | `RuntimeError: nuke-di clients failed to start: Database.connect() raised OSError: connection refused`; the server reports a failed startup and exits, and the container is left flushed |
+| The container is connected already, e.g. by another app | `RuntimeError: nuke-di clients failed to start: the container is already connected` |
+| `lifespan(Database)`, the container left out | `TypeError: lifespan() takes the container first, then the clients, e.g. lifespan(DI, Database); got <class 'app.clients.Database'>` |
+| `lifespan(DI, "Database")`, not a client class | `TypeError: 'Database' is not a client: subclass Client or NotSingletonClient` |
+
+Under uvicorn, with a `Database` whose `connect()` raises `OSError("connection refused")`:
+
+```console
+$ uvicorn app.broken_api:app
+INFO:     Started server process [44319]
+INFO:     Waiting for application startup.
+Database.connect() raised OSError: connection refused
+...
+RuntimeError: nuke-di clients failed to start: Database.connect() raised OSError: connection refused
+
+ERROR:    Application startup failed. Exiting.
+```
+
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/servers-in-workers.md -->
 
 # Servers inside a worker
@@ -3163,9 +4552,12 @@ The first run downloads the test server.
 
 An integration with a framework does two things: the framework's handlers take clients by type hint, through
 the framework's own dependency injection, and the container connects when the app starts and disconnects when
-it stops. The [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md) and [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md) integrations are
-built on `nuke_di.integration`, and an integration with another framework needs nothing from nuke-di beyond it
-and the public API.
+it stops. The [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md), [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), [MCP](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md),
+[aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md) and [taskiq](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/taskiq.md) integrations are built on `nuke_di.integration`, and an integration
+with another framework needs nothing from nuke-di beyond it and the public API.
+A framework with no dependency injection of its own, such as Starlette or Quart, needs no integration:
+[`nuke_di.asgi.lifespan()`](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/asgi.md), built on the same kit, connects the clients, and the handlers ask it
+for them.
 A server with no dependency injection of its own, such as grpc.aio, aiohttp, websockets, APScheduler, Textual or a
 Temporal worker, needs no integration at all: it runs inside a `@worker`, see
 [Servers inside a worker](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/servers-in-workers.md).
@@ -3277,7 +4669,9 @@ Litestar provides dependencies by name, and aiogram passes them by name from mid
 not apply: use `Framework` for the messages, `client_of()` to find the client arguments of a handler, a
 `Binding` per client whose `get` the framework calls by its own means, and `running()` inside the app's
 lifespan. `nuke_di.litestar` is the worked example: it registers `Provide(binding.get)` under the argument's
-name.
+name. `nuke_di.aiogram` is another: an inner middleware of the dispatcher puts `binding.instance` into the data of
+an update under the name of each client argument of the handler that matched it, and `running()` wraps the
+dispatcher's startup and shutdown.
 
 ## <a id="checking-an-integration"></a>Checking an integration
 
@@ -3361,9 +4755,6 @@ FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 (Tracebacks shortened.) A framework that reports the error of a handler instead of raising it needs a `send()`
 that raises it: an HTTP framework's test client returns a 500, so `send()` checks the status. Litestar puts
 the error into the response only with `debug=True`.
-
-`nuke_di._integration`, the private module this kit lived in before 1.14.0, still imports with a
-`DeprecationWarning` and is removed in 1.15.0.
 
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md -->
 
@@ -3707,7 +5098,8 @@ An agent without skills still reads the instructions of the project. Paste this 
 
 This project uses nuke-di. A dependency is a `nuke_di.Client` subclass whose `__init__` takes its own
 dependencies as type-hinted arguments; I/O goes in `async def connect()` / `disconnect()`, never in `__init__`.
-Functions, `@job` / `@worker` entrypoints and FastAPI / Litestar / FastStream handlers take clients by type hint.
+Functions, `@job` / `@worker` entrypoints, FastAPI / Litestar / FastStream / aiogram handlers, MCP tools and taskiq tasks take clients by type hint;
+a Starlette or Quart app lists them in `clients = nuke_di.asgi.lifespan(DI, ...)` and calls `clients.get(...)`.
 
 Do not write what nuke-di rejects:
 - provider or factory functions: wrap a third-party object in a Client that creates it in connect();
@@ -3727,7 +5119,7 @@ Two files at the root of the repository, generated from the English pages:
 | File | Contents |
 |------|----------|
 | [`llms.txt`](https://github.com/troyan-dy/nuke-di/blob/master/llms.txt) | An index in the [llms.txt](https://llmstxt.org) format: what `nuke-di` is and does not do, a link to every page |
-| [`llms-full.txt`](https://github.com/troyan-dy/nuke-di/blob/master/llms-full.txt) | The README and the whole guide in one file, about 26k tokens |
+| [`llms-full.txt`](https://github.com/troyan-dy/nuke-di/blob/master/llms-full.txt) | The README and the whole guide in one file, about 45k tokens |
 
 Give an agent the raw URL, `https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt`,
 and it reads the whole manual with one fetch.
