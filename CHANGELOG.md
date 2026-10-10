@@ -6,6 +6,49 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-10-10
+
+### Added
+
+- MCP servers: tools take clients by type hint ([#67](https://github.com/troyan-dy/nuke-di/issues/67), #105),
+  the way they take `Context`, and the clients are left out of the input schema the LLM sees. The container
+  connects when the server's lifespan starts and disconnects when it ends, and `override()` before the server
+  starts replaces a client. Two modules, one per library:
+  - `nuke_di.mcp.setup(server)` for the official SDK's `MCPServer` (`pip install "nuke-di[mcp]"`, `mcp` 2.0 or
+    newer). The client arguments of a tool, and of the resolvers it uses, are handed to the SDK's own
+    `Resolve(...)` marker while the SDK reads the tool; the function is left as written, with no wrapper.
+    Functions, bound methods and callable objects take clients. The SDK has no resolvers for resources and
+    prompts, so they take no clients. `mcp` 1.x is not supported.
+  - `nuke_di.fastmcp.setup(mcp)` for FastMCP (`pip install "nuke-di[fastmcp]"`, FastMCP 4.0 or newer): tools,
+    resources, prompts and the functions of their `Depends(...)` take clients, through a `Depends` default that
+    the integration gives every client argument. A server mounted with `mount()` on one set up on the same
+    container shares its clients, which connect once.
+
+  A shape that takes no clients (a `functools.partial`, a FastMCP callable object or class in `Depends(...)`,
+  an SDK tool that returns an `InputRequiredResult`) raises a `TypeError` that says so when it is added.
+
+  Both run the contract of `nuke_di.integration.testing.check()`. ADR-0011 records why there is no wrapper and
+  why there are two modules; `docs/specs/mcp.md` lists the internals read. CI runs the tests on `mcp` 2.0.0 and
+  FastMCP 4.0.0 too (`make test-mcp-min`, `make test-fastmcp-min`).
+- `examples/mcp_server`: the bookshop on the SDK and on FastMCP, asked over stdio by a host in a few lines.
+
+### Changed
+
+- The `TypeError` of a client where pydantic expects a type names the MCP integrations next to FastAPI and
+  links to the documentation of every framework. A pydantic model that allows arbitrary types raises it too
+  when pydantic fails to generate its JSON schema, which is what the SDK does with a tool declared before
+  `setup()`; a JSON schema generator that tolerates such types keeps its own answer.
+
+### Removed
+
+- `nuke_di._integration`, deprecated in 1.14.0: import from `nuke_di.integration`.
+
+### Documentation
+
+- A guide page, `docs/guide/mcp.md`, in every language: the bookshop on the SDK and on FastMCP with the real
+  output, the rules of each, testing with `override()` and the errors. The README, the integrations page, the
+  Agent Skill, the `AGENTS.md` block, `context7.json` and `llms.txt` name the MCP integrations.
+
 ## [1.14.3] - 2026-10-10
 
 ### Changed
@@ -626,7 +669,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.14.3...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.15.0...HEAD
+[1.15.0]: https://github.com/troyan-dy/nuke-di/compare/v1.14.3...v1.15.0
 [1.14.3]: https://github.com/troyan-dy/nuke-di/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/troyan-dy/nuke-di/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/troyan-dy/nuke-di/compare/v1.14.0...v1.14.1

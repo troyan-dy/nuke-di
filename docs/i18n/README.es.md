@@ -16,7 +16,8 @@ al arrancar y `disconnect()` al apagarse. Cada cliente arranca en cuanto sus pro
 han conectado, de forma concurrente con todos los demás clientes que estén listos.
 
 Además, un solo decorador convierte una función asíncrona en un proceso con argumentos de línea de
-comandos, y los handlers de FastAPI, Litestar y FastStream reciben clientes por su type hint de la misma manera.
+comandos, y los handlers de FastAPI, Litestar y FastStream y las herramientas MCP reciben clientes por su type hint
+de la misma manera.
 
 Nació a partir de la capa de DI de un framework de microservicios en Python usado en producción
 y no tiene dependencias en tiempo de ejecución.
@@ -384,7 +385,7 @@ $ pytest -q tests/test_api.py
 ```
 
 Los routers, los websockets y el lifespan propio de la app se describen en [FastAPI](es/fastapi.md);
-[Litestar](es/litestar.md) y [FastStream](es/faststream.md) funcionan de la misma manera.
+[Litestar](es/litestar.md), [FastStream](es/faststream.md) y [los servidores MCP](es/mcp.md) funcionan de la misma manera.
 
 ## <a id="documentation"></a>Documentación
 
@@ -395,13 +396,13 @@ Los routers, los websockets y el lifespan propio de la app se describen en [Fast
 - [Workers y jobs](es/workers-and-jobs.md): `@job` y `@worker`, parámetros de línea de comandos,
   `Shutdown`, el periodo de gracia, tareas en segundo plano, códigos de salida, hooks, Kubernetes
 - Frameworks: [FastAPI](es/fastapi.md), [Litestar](es/litestar.md),
-  [FastStream](es/faststream.md), y
+  [FastStream](es/faststream.md), [servidores MCP](es/mcp.md) con el SDK y con FastMCP, y
   [escribir una integración](es/integrations.md) para otro framework con `nuke_di.integration`
 - [Pruebas](es/testing.md): `mock()`, `override()`, los fixtures de pytest, la comprobación del cableado
 - [Configuración](es/configuration.md): timeouts, concurrencia y el periodo de gracia
 - [Errores](es/errors.md): cada excepción y cuándo se lanza
-- [Ejemplos](../../examples/README.md): 21 escenarios listos para ejecutar, desde un script puntual y un worker de colas
-  hasta FastAPI, Litestar, FastStream, Starlette y un servicio completo, cada uno con su salida y sus pruebas
+- [Ejemplos](../../examples/README.md): 22 escenarios listos para ejecutar, desde un script puntual y un worker de colas
+  hasta FastAPI, Litestar, FastStream, Starlette, un servidor MCP y un servicio completo, cada uno con su salida y sus pruebas
 - [Benchmarks](../benchmarks.md): cada escenario, la línea base en Python 3.11–3.14 y la comparación
   con otras bibliotecas
 - [Agentes de programación](es/agents.md): la Agent Skill, un bloque para `AGENTS.md`,

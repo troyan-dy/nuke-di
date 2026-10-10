@@ -5,7 +5,7 @@
 ← [文档](../README.zh-CN.md#documentation)
 
 与框架的集成要做两件事：框架的处理函数通过框架自身的依赖注入，按类型提示接收客户端；容器在应用启动时连接，
-在应用停止时断开。[FastAPI](fastapi.md)、[Litestar](litestar.md) 和 [FastStream](faststream.md) 的集成
+在应用停止时断开。[FastAPI](fastapi.md)、[Litestar](litestar.md)、[FastStream](faststream.md) 和 [MCP](mcp.md) 的集成
 都基于 `nuke_di.integration` 构建；与其他框架的集成，除了它和公开 API 之外，不需要 nuke-di 的任何其他东西。
 
 | 名称 | 作用 |
@@ -194,6 +194,3 @@ FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 （traceback 已缩短。）如果框架报告处理函数的错误而不是抛出它，就需要一个会抛出该错误的 `send()`：
 HTTP 框架的测试客户端返回 500，因此 `send()` 要检查状态码。Litestar 只有在 `debug=True` 时才会把错误
 放进响应中。
-
-`nuke_di._integration` 是 1.14.0 之前这套工具包所在的私有模块，现在仍可导入，但会发出
-`DeprecationWarning`，并将在 1.15.0 中移除。

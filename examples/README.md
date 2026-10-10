@@ -64,6 +64,7 @@ docker run -d --rm --name nats -p 4222:4222 nats:2.10
 | [litestar_app](litestar_app/)               | Litestar with `ClientPlugin`: handlers, a dependency and a controller       |
 | [starlette_app](starlette_app/)             | A framework without an integration: `inject()` and a lifespan by hand       |
 | [faststream_nats](faststream_nats/)         | FastStream on NATS: a subscriber with clients and a publisher               |
+| [mcp_server](mcp_server/)                   | An MCP server on the SDK and on FastMCP: tools, a resource and a prompt     |
 
 ### Putting it together
 
