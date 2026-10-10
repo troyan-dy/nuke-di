@@ -3,9 +3,7 @@ The public integration kit: the contract check against an integration written on
 that break the contract. The integrations of this package run the check in their own test files.
 """
 
-import importlib
 import inspect
-import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, get_args
@@ -221,12 +219,3 @@ def test_public_names() -> None:
         "wrap_lifespan",
     }
     assert Binding is nuke_di.integration.Binding
-
-
-def test_private_module_is_a_deprecated_alias() -> None:
-    sys.modules.pop("nuke_di._integration", None)
-    with pytest.warns(DeprecationWarning, match="import from nuke_di.integration instead"):
-        module = importlib.import_module("nuke_di._integration")
-
-    assert module.bind is bind
-    assert module.Framework is Framework

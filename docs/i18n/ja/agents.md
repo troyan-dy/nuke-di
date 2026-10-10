@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/troyan-dy/nuke-di/master/skills/nuk
 
 This project uses nuke-di. A dependency is a `nuke_di.Client` subclass whose `__init__` takes its own
 dependencies as type-hinted arguments; I/O goes in `async def connect()` / `disconnect()`, never in `__init__`.
-Functions, `@job` / `@worker` entrypoints, FastAPI / Litestar / FastStream handlers and taskiq tasks take clients by type hint.
+Functions, `@job` / `@worker` entrypoints, FastAPI / Litestar / FastStream / aiogram handlers, MCP tools and taskiq tasks take clients by type hint.
 
 Do not write what nuke-di rejects:
 - provider or factory functions: wrap a third-party object in a Client that creates it in connect();
@@ -73,7 +73,7 @@ Manual: https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt
 | ファイル | 内容 |
 |----------|------|
 | [`llms.txt`](../../../llms.txt) | [llms.txt](https://llmstxt.org) 形式の索引。`nuke-di` が何をして何をしないか、そしてすべてのページへのリンク |
-| [`llms-full.txt`](../../../llms-full.txt) | README とガイド全体を 1 つにまとめたファイル。約 26k トークン |
+| [`llms-full.txt`](../../../llms-full.txt) | README とガイド全体を 1 つにまとめたファイル。約 35k トークン |
 
 エージェントに raw URL `https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt` を渡せば、
 1 回の取得でマニュアル全体を読み込めます。
