@@ -6,6 +6,33 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.18.3] - 2026-10-10
+
+### Fixed
+
+- FastAPI 0.137 and later: the routes of an included router serve the clients of their own app's container.
+  FastAPI now builds those routes on the app's first request and reads the signatures then, while `bind()`
+  rewrote a function again for every container it was declared with, so the routes read whatever the last
+  container had written. An app built before another container's app failed on its included routes with
+  "Database is not connected", and of two apps on two containers running at once, the older app's included
+  routes served the newer app's clients. A function is now rewritten once, whatever the container; its
+  `Depends` calls a getter that takes the request and returns the client of the app the request came to,
+  resolved in that app's container on startup. Two apps on two containers still serve the same function at
+  once, included and nested routers and websockets too; one request with one client costs what it did. The
+  kit gained `DependsFramework.getter` for this.
+- `bind()` evaluates the type hints of a function each on its own: one that cannot be evaluated, such as a name
+  imported under `TYPE_CHECKING`, is left as written instead of making `bind()` skip the whole function. Its
+  client arguments and `Depends(...)` are found again, so Strawberry's
+  `GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute)` works with clients in `Context`
+  without also listing `Depends(Context)` in its `dependencies=`: Strawberry wraps the getter in a dependency
+  whose return type is imported only under `TYPE_CHECKING`.
+
+### Documentation
+
+- [Writing an integration](docs/guide/integrations.md#per-container) says which frameworks `per_container=True`
+  fits, now that FastAPI reads signatures lazily, and what `getter` is for, in every language. ADR-0003 has a
+  dated revisit with the designs considered and rejected.
+
 ## [1.14.3] - 2026-10-10
 
 ### Changed
@@ -626,7 +653,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.14.3...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.3...HEAD
+[1.18.3]: https://github.com/troyan-dy/nuke-di/compare/v1.18.2...v1.18.3
 [1.14.3]: https://github.com/troyan-dy/nuke-di/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/troyan-dy/nuke-di/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/troyan-dy/nuke-di/compare/v1.14.0...v1.14.1

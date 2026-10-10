@@ -9,8 +9,8 @@
 | 名前 | 役割 |
 |---|---|
 | `Framework(name, not_started, not_connected)` | クライアントが見つからないときに、フレームワークの利用者に伝えるメッセージ。メッセージ中の `{client}` はクライアントのクラス名になります。 |
-| `DependsFramework(..., depends, make_depends, per_container=True)` | `Depends(...)` マーカーで注入するフレームワーク。`depends` はそのマーカーのクラス、`make_depends` は関数からマーカーを作る関数です。 |
-| `bind(call, container, framework)` | ハンドラー、依存関係の関数、依存関係のクラスのシグネチャと、それらが使う依存関係のシグネチャを書き換えます。クライアントの引数はそれぞれ `Annotated[Client, Depends(...)]` になります。クライアントごとの `Binding` を返します。 |
+| `DependsFramework(..., depends, make_depends, per_container=True, getter=None)` | `Depends(...)` マーカーで注入するフレームワーク。`depends` はそのマーカーのクラス、`make_depends` は関数からマーカーを作る関数、`getter` はクライアントのマーカーが呼び出すものを作る関数です（省略すると `binding.get`）。 |
+| `bind(call, container, framework)` | ハンドラー、依存関係の関数、依存関係のクラスのシグネチャと、それらが使う依存関係のシグネチャを書き換えます。クライアントの引数はそれぞれ `Annotated[Client, Depends(...)]` になります。クライアントごとの `Binding` を返します。`TYPE_CHECKING` の下でインポートした名前のように評価できない型ヒントは書かれたまま残し、ほかの引数はそれでも書き換えます。 |
 | `Binding` | クライアントの引数 1 つ。`get()` は起動時に解決されたクライアントを返すか、`not_started` / `not_connected` を送出します。 |
 | `running(container, bindings)` | 非同期コンテキストマネージャー。`bindings` のクライアントを解決してコンテナを接続し、終了時に `Shutdown` をセットして `BackgroundTasks` を止め、切断します。`ConnectError` と `InitializeDependencyError` は `RuntimeError` になり、サーバーはそれを起動の失敗として報告します。循環などクライアントツリーのエラーはそのまま伝わります。 |
 | `wrap_lifespan(original, container, bindings)` | アプリ自身の lifespan `original` を `running()` の内側で実行する lifespan。`bindings` は起動時に呼ばれるので、`setup()` の後に宣言したハンドラーも見つかります。 |
@@ -86,9 +86,11 @@ def _bindings(app: FastStream, container: Dependencies) -> list[Binding]:
 
 ### <a id="per-container"></a>`per_container`
 
-`bind()` は関数をその場で書き換え、バインドしたコンテナを記憶します。`per_container=True`（デフォルト、FastAPI）では、あるコンテナにバインドされた関数が別のコンテナ向けに再び宣言されると、もう一度バインドされます。FastAPI はルートのシグネチャをルートの宣言時に一度だけ読むので、各アプリは取得したバインディングを保持し続け、2 つのコンテナ上の 2 つのアプリが同じ関数を同時に提供できます。
+`bind()` は関数をその場で書き換え、バインドしたコンテナを記憶します。`per_container=True`（デフォルト）では、あるコンテナにバインドされた関数が別のコンテナ向けに再び宣言されると、もう一度バインドされるので、各アプリは取得したバインディングを保持し続けます。これが成り立つのは、ハンドラーのシグネチャをハンドラーの宣言時に一度だけ読み、二度と読まないフレームワークだけです。そうでなければ、2 つ目のコンテナ向けに書き換えたシグネチャが、フレームワークが次に読んだときに最初のアプリにまで届いてしまいます。
 
-`per_container=False`（FastStream）では、関数はコンテナに関係なく一度だけバインドされ、起動するどのアプリも同じ `Binding` を解決します。FastStream は起動のたびにサブスクライバーを作り、テストブローカーの下ではアプリの lifespan が動く前にも作るので、シグネチャがアプリごとに変わってはいけません。その代償として、ハンドラー関数を共有する 2 つのアプリは 1 つずつ順番に実行することになり、2 つ目は `RuntimeError: ... is filled for another app that is running` を送出します。最初のアプリが起動した後でフレームワークがシグネチャを読み直す可能性があるなら、`False` を選んでください。
+`per_container=False`（FastStream、FastAPI）では、関数はコンテナに関係なく一度だけバインドされ、起動するどのアプリも同じ `Binding` を解決します。FastStream は起動のたびにサブスクライバーを作り、テストブローカーの下ではアプリの lifespan が動く前にも作ります。FastAPI 0.137 以降は、インクルードされたルーターのルートをアプリへの最初のリクエストで作ります。どちらの場合も、シグネチャがアプリごとに変わってはいけません。その代償として、ハンドラー関数を共有する 2 つのアプリは 1 つずつ順番に実行することになり、2 つ目は `RuntimeError: ... is filled for another app that is running` を送出します。最初のアプリが起動した後でフレームワークがシグネチャを読み直す可能性があるなら、`False` を選んでください。
+
+フレームワークがハンドラーに、どのアプリに対して動いているかを伝えるなら、`getter` でこの代償をなくせます。`nuke_di.fastapi` は共有される `Binding` のそれぞれについて、アプリごとに専用の `Binding` を用意し、起動時にそのアプリのコンテナで解決します。そしてその `getter` は、共有される `Binding` ごとに、リクエストを受け取ってリクエストが届いたアプリのクライアントを返す依存関係を作ります。これで、2 つのコンテナ上の 2 つのアプリが同じ関数を同時に提供できます。
 
 ## <a id="a-framework-without-depends"></a>`Depends` のないフレームワーク
 

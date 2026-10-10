@@ -13,8 +13,8 @@ poza nim i publicznym API.
 | Nazwa | Co robi |
 |---|---|
 | `Framework(name, not_started, not_connected)` | Co słyszą użytkownicy frameworka, gdy brakuje klienta; `{client}` w komunikacie to nazwa klasy klienta. |
-| `DependsFramework(..., depends, make_depends, per_container=True)` | Framework, który wstrzykuje przez znaczniki `Depends(...)`: `depends` to klasa jego znaczników, `make_depends` tworzy znacznik dla funkcji. |
-| `bind(call, container, framework)` | Przepisuje sygnaturę handlera, funkcji-zależności lub klasy-zależności oraz zależności, których używa: każdy argument-klient staje się `Annotated[Client, Depends(...)]`. Zwraca `Binding` każdego klienta. |
+| `DependsFramework(..., depends, make_depends, per_container=True, getter=None)` | Framework, który wstrzykuje przez znaczniki `Depends(...)`: `depends` to klasa jego znaczników, `make_depends` tworzy znacznik dla funkcji, `getter` tworzy to, co wywołuje znacznik klienta (bez niego `binding.get`). |
+| `bind(call, container, framework)` | Przepisuje sygnaturę handlera, funkcji-zależności lub klasy-zależności oraz zależności, których używa: każdy argument-klient staje się `Annotated[Client, Depends(...)]`. Zwraca `Binding` każdego klienta. Adnotacja typu, której nie da się obliczyć, na przykład nazwa zaimportowana pod `TYPE_CHECKING`, zostaje w zapisanej postaci, a pozostałe argumenty i tak są przepisywane. |
 | `Binding` | Jeden argument-klient; `get()` zwraca klienta rozwiązanego przy starcie albo zgłasza `not_started` / `not_connected`. |
 | `running(container, bindings)` | Asynchroniczny menedżer kontekstu: rozwiązuje klientów z `bindings`, łączy kontener, a przy wyjściu ustawia `Shutdown`, zatrzymuje `BackgroundTasks` i rozłącza. `ConnectError` lub `InitializeDependencyError` staje się `RuntimeError`, który serwer zgłasza jako nieudany start; błąd drzewa klientów, np. cykl, przechodzi bez zmian. |
 | `wrap_lifespan(original, container, bindings)` | Lifespan, który uruchamia własny lifespan aplikacji `original` wewnątrz `running()`; `bindings` jest wywoływane przy starcie, więc handlery zadeklarowane po `setup()` zostaną znalezione. |
@@ -101,16 +101,24 @@ i routerów oraz jeden hook przepisywania na broker, gdy współdzieli go kilka 
 ### <a id="per-container"></a>`per_container`
 
 `bind()` przepisuje funkcję w miejscu i zapamiętuje kontener, z którym została związana. Przy `per_container=True`
-(domyślnie, FastAPI) funkcja związana z jednym kontenerem i zadeklarowana ponownie dla innego jest wiązana
-ponownie: FastAPI odczytuje sygnaturę trasy raz, przy jej deklaracji, więc każda aplikacja zachowuje powiązania,
-które przechwyciła, a dwie aplikacje na dwóch kontenerach mogą jednocześnie obsługiwać tę samą funkcję.
+(domyślnie) funkcja związana z jednym kontenerem i zadeklarowana ponownie dla innego jest wiązana ponownie, więc
+każda aplikacja zachowuje powiązania, które przechwyciła. Działa to tylko z frameworkiem, który odczytuje sygnaturę
+handlera raz, przy jego deklaracji, i nigdy więcej: sygnatura przepisana dla drugiego kontenera trafiłaby do
+pierwszej aplikacji przy następnym odczycie przez framework.
 
-Przy `per_container=False` (FastStream) funkcja jest wiązana raz, niezależnie od kontenera, a każda aplikacja,
-która startuje, rozwiązuje te same `Binding`i. FastStream tworzy subscriber przy każdym starcie, a z testowym
-brokerem nawet zanim wykona się lifespan aplikacji, więc sygnatura nie może się zmieniać między aplikacjami.
+Przy `per_container=False` (FastStream, FastAPI) funkcja jest wiązana raz, niezależnie od kontenera, a każda
+aplikacja, która startuje, rozwiązuje te same `Binding`i. FastStream tworzy subscriber przy każdym starcie, a z
+testowym brokerem nawet zanim wykona się lifespan aplikacji; FastAPI 0.137 i nowsze budują trasy dołączonego
+routera przy pierwszym żądaniu do aplikacji. W obu przypadkach sygnatura nie może się zmieniać między aplikacjami.
 Koszt: dwie aplikacje, które współdzielą funkcję-handler, działają jedna po drugiej, a druga zgłasza
 `RuntimeError: ... is filled for another app that is running`. Wybierz `False`, gdy framework może ponownie
 odczytać sygnaturę po starcie pierwszej aplikacji.
+
+`getter` usuwa ten koszt, gdy framework mówi handlerowi, którą aplikację obsługuje. `nuke_di.fastapi` daje każdej
+aplikacji własny `Binding` dla każdego współdzielonego, rozwiązywany w kontenerze aplikacji przy starcie, a jego
+`getter` buduje dla każdego współdzielonego `Binding` zależność, która przyjmuje żądanie i zwraca klienta tej
+aplikacji, do której przyszło żądanie. Wtedy dwie aplikacje na dwóch kontenerach jednocześnie obsługują tę samą
+funkcję.
 
 ## <a id="a-framework-without-depends"></a>Framework bez `Depends`
 
