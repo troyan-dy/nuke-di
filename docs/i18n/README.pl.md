@@ -16,7 +16,7 @@ i `disconnect()` przy zamykaniu. Każdy klient startuje, gdy tylko połączą si
 współbieżnie ze wszystkimi innymi klientami, którzy są gotowi.
 
 Do tego jeden dekorator zamienia funkcję asynchroniczną w proces z parametrami wiersza poleceń,
-a handlery FastAPI, Litestar, FastStream i aiogram przyjmują klientów po adnotacji typu w ten sam sposób.
+a handlery FastAPI, Litestar, FastStream i aiogram oraz narzędzia MCP przyjmują klientów po adnotacji typu w ten sam sposób.
 
 Biblioteka została wydzielona z warstwy DI produkcyjnego frameworka do mikroserwisów w Pythonie
 i nie ma żadnych zależności w czasie działania.
@@ -380,7 +380,7 @@ $ pytest -q tests/test_api.py
 ```
 
 Routery, websockety i własny lifespan aplikacji opisuje rozdział [FastAPI](pl/fastapi.md);
-[Litestar](pl/litestar.md), [FastStream](pl/faststream.md) i [aiogram](pl/aiogram.md) działają w ten sam sposób.
+[Litestar](pl/litestar.md), [FastStream](pl/faststream.md), [serwery MCP](pl/mcp.md) i [aiogram](pl/aiogram.md) działają w ten sam sposób.
 
 ## <a id="documentation"></a>Dokumentacja
 
@@ -391,13 +391,13 @@ Routery, websockety i własny lifespan aplikacji opisuje rozdział [FastAPI](pl/
 - [Workery i joby](pl/workers-and-jobs.md): `@job` i `@worker`, parametry wiersza poleceń,
   `Shutdown`, okres karencji, zadania w tle, kody wyjścia, hooki, Kubernetes
 - Frameworki: [FastAPI](pl/fastapi.md), [Litestar](pl/litestar.md),
-  [FastStream](pl/faststream.md), [aiogram](pl/aiogram.md) oraz
+  [FastStream](pl/faststream.md), [serwery MCP](pl/mcp.md) na SDK i na FastMCP, [aiogram](pl/aiogram.md) oraz
   [pisanie integracji](pl/integrations.md) z innym frameworkiem przez `nuke_di.integration`
 - [Testowanie](pl/testing.md): `mock()`, `override()`, fixture'y pytest, sprawdzanie okablowania
 - [Konfiguracja](pl/configuration.md): timeouty, współbieżność i okres karencji
 - [Błędy](pl/errors.md): każdy wyjątek i sytuacja, w której jest zgłaszany
-- [Przykłady](../../examples/README.md): 22 scenariusze gotowe do uruchomienia, od jednorazowego skryptu i workera kolejki
-  po FastAPI, Litestar, FastStream, aiogram, Starlette i cały serwis, każdy z wynikiem i testami
+- [Przykłady](../../examples/README.md): 23 scenariusze gotowe do uruchomienia, od jednorazowego skryptu i workera kolejki
+  po FastAPI, Litestar, FastStream, aiogram, Starlette, serwer MCP i cały serwis, każdy z wynikiem i testami
 - [Benchmarki](../benchmarks.md): każdy scenariusz, punkt odniesienia dla Pythona 3.11–3.14 i porównanie
   z innymi bibliotekami
 - [Agenty programistyczne](pl/agents.md): Agent Skill, blok dla `AGENTS.md`,

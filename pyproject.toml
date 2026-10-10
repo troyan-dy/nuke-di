@@ -27,6 +27,9 @@ keywords = [
   "aiogram",
   "telegram-bot",
   "faststream",
+  "mcp",
+  "fastmcp",
+  "model-context-protocol",
   "pytest",
   "microservices",
   "kubernetes",
@@ -71,6 +74,12 @@ faststream = [
 litestar = [
     "litestar>=2.15",
 ]
+mcp = [
+    "mcp>=2.0",
+]
+fastmcp = [
+    "fastmcp>=4.0",
+]
 
 [dependency-groups]
 compare = [
@@ -83,9 +92,11 @@ compare = [
 dev = [
   "aiogram>=3.31",
   "fastapi>=0.142.4",
+  "fastmcp>=4.1.0",
   "faststream[nats]>=0.7.7",
   "httpx2>=2.13.1",
   "litestar>=2.24",
+  "mcp>=2.3.0",
   "mypy>=1.13",
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
@@ -114,6 +125,10 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "N", "B", "A", "UP", "ASYNC", "S", "RUF"]
 ignore = ["S101"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastMCP reads its markers from the defaults of a function's parameters only
+extend-immutable-calls = ["fastmcp.dependencies.Depends"]
 
 [tool.mypy]
 files = ["src", "tests", "scripts", "benchmarks", "examples"]

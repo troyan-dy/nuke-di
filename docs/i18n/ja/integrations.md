@@ -4,7 +4,7 @@
 
 ← [ドキュメント](../README.ja.md#documentation)
 
-フレームワークとのインテグレーションが行うことは 2 つです。フレームワークのハンドラーが、そのフレームワーク自身の依存性注入を通じて型ヒントでクライアントを受け取ること、そしてアプリの起動時にコンテナが接続し、停止時に切断することです。[FastAPI](fastapi.md)、[Litestar](litestar.md)、[FastStream](faststream.md)、[aiogram](aiogram.md) のインテグレーションは `nuke_di.integration` の上に作られており、ほかのフレームワークとのインテグレーションが nuke-di から必要とするのは、これと公開 API だけです。
+フレームワークとのインテグレーションが行うことは 2 つです。フレームワークのハンドラーが、そのフレームワーク自身の依存性注入を通じて型ヒントでクライアントを受け取ること、そしてアプリの起動時にコンテナが接続し、停止時に切断することです。[FastAPI](fastapi.md)、[Litestar](litestar.md)、[FastStream](faststream.md)、[MCP](mcp.md)、[aiogram](aiogram.md) のインテグレーションは `nuke_di.integration` の上に作られており、ほかのフレームワークとのインテグレーションが nuke-di から必要とするのは、これと公開 API だけです。
 
 | 名前 | 役割 |
 |---|---|
@@ -168,5 +168,3 @@ FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 ```
 
 （トレースバックは省略しています。）ハンドラーのエラーを送出せずに報告するフレームワークでは、それを送出する `send()` が必要です。HTTP フレームワークのテストクライアントは 500 を返すので、`send()` がステータスを確認します。Litestar がエラーをレスポンスに含めるのは `debug=True` のときだけです。
-
-1.14.0 より前にこのキットが置かれていたプライベートモジュール `nuke_di._integration` は、`DeprecationWarning` 付きで引き続きインポートできますが、1.15.0 で削除されます。

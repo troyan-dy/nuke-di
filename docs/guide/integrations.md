@@ -6,9 +6,9 @@
 
 An integration with a framework does two things: the framework's handlers take clients by type hint, through
 the framework's own dependency injection, and the container connects when the app starts and disconnects when
-it stops. The [FastAPI](fastapi.md), [Litestar](litestar.md), [FastStream](faststream.md) and [aiogram](aiogram.md)
-integrations are built on `nuke_di.integration`, and an integration with another framework needs nothing from nuke-di beyond it
-and the public API.
+it stops. The [FastAPI](fastapi.md), [Litestar](litestar.md), [FastStream](faststream.md), [MCP](mcp.md) and
+[aiogram](aiogram.md) integrations are built on `nuke_di.integration`, and an integration with another framework
+needs nothing from nuke-di beyond it and the public API.
 
 | Name | What it does |
 |---|---|
@@ -203,6 +203,3 @@ FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 (Tracebacks shortened.) A framework that reports the error of a handler instead of raising it needs a `send()`
 that raises it: an HTTP framework's test client returns a 500, so `send()` checks the status. Litestar puts
 the error into the response only with `debug=True`.
-
-`nuke_di._integration`, the private module this kit lived in before 1.14.0, still imports with a
-`DeprecationWarning` and is removed in 1.15.0.
