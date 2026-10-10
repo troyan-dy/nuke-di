@@ -12,9 +12,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 - The slow-connection comparison runs on the backend of a product page instead of 10 independent clients: an HTTP
   API, four features and four connections of 100–300 ms under each, 21 clients (`PRODUCT_PAGE_TREE` in
-  `benchmarks/compare.py`). `nuke-di` starts it in 336 ms, its longest chain; dishka and wireup in 3.41 s, ten
-  times as long, since they connect one client after another; wireup in 947 ms with the four features gathered by
-  hand; dependency-injector in 336 ms with a `Resource` per client, which stops in 657 ms against 365 ms, since
+  `benchmarks/compare.py`). `nuke-di` starts it in 335 ms, its longest chain; dishka and wireup in 3.41 s, ten
+  times as long, since they connect one client after another; wireup in 945 ms with the four features gathered by
+  hand, and dishka in 943 ms with its lock off as well (`lock_factory=None`), which then builds a client that two
+  features share twice; dependency-injector in 337 ms with a `Resource` per client, which stops in 657 ms against 365 ms, since
   its layers add up the 300 ms that `Checkout` and `EventsProducer` take to stop.
 - The summary of `compare.py` marks in bold every figure within 1% of the best, a difference inside the noise.
 

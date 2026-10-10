@@ -122,26 +122,26 @@ dependencies.
 With real connections the cost of a startup is the waiting, and the structure of the tree decides it. The
 backend of a product page: an API, four features, and every feature four connections of 100–300 ms, 21 clients:
 
-![A product page of 21 clients: connections, features and the API. nuke-di and dependency-injector start them in 0.34 s, dishka and wireup in 3.41 s](https://raw.githubusercontent.com/troyan-dy/nuke-di/619f35923db67226c5999324b693a90d8b0e0903/docs/product-page.svg)
+![A product page of 21 clients: connections, features and the API. nuke-di and dependency-injector start them in 0.34 s, dishka and wireup in 3.41 s](https://raw.githubusercontent.com/troyan-dy/nuke-di/c402c5086426dc28c0886f62656fcf9d901c5de8/docs/product-page.svg)
 
 `nuke-di` connects every client as soon as its own dependencies have, so the startup takes the longest chain,
 0.34 s. dishka and wireup connect one client after another within a `get()`: 3.41 s, ten times as long, and the
-wider the tree, the larger the gap. wireup comes down to 0.95 s when the application gathers the four features
-by hand; dishka does not. dependency-injector starts as fast once every client is a `Resource` written by hand,
-and stops layer by layer, every layer waiting for its slowest client: 0.66 s against 0.37 s, since `Checkout`
+wider the tree, the larger the gap. Gathering the four features by hand brings wireup down
+to 0.95 s, and dishka too once its lock is off, which then builds a client that two features share twice.
+dependency-injector starts as fast once every client is a `Resource` written by hand, and stops layer by layer, every layer waiting for its slowest client: 0.66 s against 0.37 s, since `Checkout`
 and `EventsProducer`, which take 300 ms each to stop, are in different layers. injector has no async lifecycle.
 
 ```console
 $ uv run python benchmarks/compare.py --only connect --summary
-nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 1c9fd59 · N = 10, 100, 1000 · 20 repeats
-nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+nuke-di 1.14.3 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 17c8815 · N = 10, 100, 1000 · 20 repeats
+nuke-di 1.14.3 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 
 | Lower is better                          | nuke-di     | dishka         | wireup         | dependency-injector | injector |
 |------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
-| Startup: 8 clients, connect() of 1–60 ms | **71.0 ms** | 156 ms (2.2×)  | 156 ms (2.2×)  | 71.8 ms (1.0×)      | —        |
-| Shutdown: the same 8 clients             | **18.7 ms** | 30.8 ms (1.6×) | 30.7 ms (1.6×) | 26.0 ms (1.4×)      | —        |
-| Startup: the product page, 21 clients    | **336 ms**  | 3.41 s (10.2×) | 3.41 s (10.2×) | **336 ms**          | —        |
-| Shutdown: the product page               | **365 ms**  | 850 ms (2.3×)  | 851 ms (2.3×)  | 657 ms (1.8×)       | —        |
+| Startup: 8 clients, connect() of 1–60 ms | **70.8 ms** | 156 ms (2.2×)  | 157 ms (2.2×)  | **71.5 ms**         | —        |
+| Shutdown: the same 8 clients             | **18.8 ms** | 30.9 ms (1.6×) | 30.5 ms (1.6×) | 26.0 ms (1.4×)      | —        |
+| Startup: the product page, 21 clients    | **335 ms**  | 3.41 s (10.2×) | 3.41 s (10.2×) | **337 ms**          | —        |
+| Shutdown: the product page               | **365 ms**  | 850 ms (2.3×)  | 850 ms (2.3×)  | 657 ms (1.8×)       | —        |
 ```
 
 None of the three connects anything when its container is created: unless the application gets the root

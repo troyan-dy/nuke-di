@@ -262,7 +262,9 @@ backend of a product page, `PRODUCT_PAGE_TREE` in `compare.py`, as wide as a rea
 features, and every feature four connections of 100–300 ms, gRPC clients of other services, Kafka,
 Elasticsearch and Redis. Its 21 `connect()` take 3.37 s one after another and 0.33 s along the longest chain;
 `Checkout`, which finishes the orders in flight, and `EventsProducer`, which flushes its messages, take 300 ms
-each to stop, the others 5–50 ms.
+each to stop, the others 5–50 ms. The times are round figures for such connections; the ratios come
+from the shape: one after another, the startup grows with every client, along the longest chain only with
+the depth.
 
 ![The product page: 21 clients and the startup and shutdown of every library](product-page.svg)
 
@@ -270,15 +272,15 @@ The picture is `benchmarks/product_page.py` over the JSON of the run, `docs/benc
 
 ```console
 $ uv run python benchmarks/compare.py --only connect --summary
-nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 1c9fd59 · N = 10, 100, 1000 · 20 repeats
-nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+nuke-di 1.14.3 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 17c8815 · N = 10, 100, 1000 · 20 repeats
+nuke-di 1.14.3 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 
 | Lower is better                          | nuke-di     | dishka         | wireup         | dependency-injector | injector |
 |------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
-| Startup: 8 clients, connect() of 1–60 ms | **71.0 ms** | 156 ms (2.2×)  | 156 ms (2.2×)  | 71.8 ms (1.0×)      | —        |
-| Shutdown: the same 8 clients             | **18.7 ms** | 30.8 ms (1.6×) | 30.7 ms (1.6×) | 26.0 ms (1.4×)      | —        |
-| Startup: the product page, 21 clients    | **336 ms**  | 3.41 s (10.2×) | 3.41 s (10.2×) | **336 ms**          | —        |
-| Shutdown: the product page               | **365 ms**  | 850 ms (2.3×)  | 851 ms (2.3×)  | 657 ms (1.8×)       | —        |
+| Startup: 8 clients, connect() of 1–60 ms | **70.8 ms** | 156 ms (2.2×)  | 157 ms (2.2×)  | **71.5 ms**         | —        |
+| Shutdown: the same 8 clients             | **18.8 ms** | 30.9 ms (1.6×) | 30.5 ms (1.6×) | 26.0 ms (1.4×)      | —        |
+| Startup: the product page, 21 clients    | **335 ms**  | 3.41 s (10.2×) | 3.41 s (10.2×) | **337 ms**          | —        |
+| Shutdown: the product page               | **365 ms**  | 850 ms (2.3×)  | 850 ms (2.3×)  | 657 ms (1.8×)       | —        |
 ```
 
 - **dishka and wireup connect one client at a time within a `get()`**, in the order they walk the graph: an
@@ -287,15 +289,17 @@ nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 �
   where `Kafka` (60 ms) starts only after `Postgres`, `Repository`, `Redis` and `Users` are connected. The
   wider the tree, the larger the gap: the sum grows with every client, the longest chain only with the depth.
   `close()` disconnects in reverse, the sum again: 0.85 s and 31 ms.
-- **wireup connects concurrently what the application gets concurrently.** With the root's arguments got by
-  `asyncio.gather()` by hand before the root (the `startup, the root's arguments gathered by hand` rows below),
-  the four features of the product page connect side by side, but the four connections of each one after
-  another: 947 ms, 2.8 times the 336 ms of `nuke-di`; the application starts in 87.3 ms. The gather is written
-  for a tree the application knows, and a dependency added to a client does not join it. dishka serializes its
-  `get()` calls with a lock and takes as long gathered as not.
+- **Gathered by hand, wireup and dishka connect the branches side by side.** With the root's arguments got by
+  `asyncio.gather()` before the root (the `startup, the root's arguments gathered by hand` rows below), the four
+  features of the product page connect concurrently, but the four connections of each one after another: 945 ms
+  for wireup and 943 ms for dishka, 2.8 times the 335 ms of `nuke-di`; the application starts in 87 ms. dishka
+  needs its lock off for that, `make_async_container(..., lock_factory=None)`: the lock serializes its `get()`
+  calls, 3.41 s gathered or not, and without it a client that two gathered branches share is built and connected
+  twice, two instances of a singleton, which `tests/test_benchmarks.py` shows; wireup builds it once. Either way
+  the gather is written for a tree the application knows, and a dependency added to a client does not join it.
 - **dependency-injector starts as concurrently as `nuke-di`** once every client is a `Resource`:
   `init_resources()` gathers all of them, and a resource awaits only its own arguments, so the startup is
-  the longest chain, 336 ms for both. Its shutdown goes in layers, first the resources that no
+  the longest chain, 335 ms against 337 ms. Its shutdown goes in layers, first the resources that no
   initialized resource depends on, and every layer waits for its slowest: on the product page `Checkout` is in
   the second layer and `EventsProducer` in the third, so the two 300 ms waits add up, 657 ms against 365 ms,
   where `nuke-di` stops each client once its own consumers have. The `Resource` is a generator written for every
@@ -312,32 +316,32 @@ nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 �
 - **injector has no async lifecycle**: it builds objects synchronously, and awaiting a `connect()` is left
   to the application.
 
-The same run with every sample, on Python 3.11.7 and the machine of the baseline, at commit `1c9fd59`:
+The same run with every sample, on Python 3.11.7 and the machine of the baseline, at commit `17c8815`:
 
 | Library             | Scenario                                       | Shape                                            | N |             Median |     p95 | Per client |
 |---------------------|------------------------------------------------|--------------------------------------------------|--:|-------------------:|--------:|-----------:|
-| nuke-di             | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms     |   |            71.0 ms | 71.7 ms |            |
-| nuke-di             | shutdown: disconnect() of every client         | application: 8 clients, connect() of 1–60 ms     |   |            18.7 ms | 18.8 ms |            |
-| dishka              | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms     |   |             156 ms |  158 ms |            |
-| dishka              | shutdown: disconnect() of every client         | application: 8 clients, connect() of 1–60 ms     |   |            30.8 ms | 31.0 ms |            |
-| dishka              | startup, the root's arguments gathered by hand | application: 8 clients, connect() of 1–60 ms     |   |             156 ms |  158 ms |            |
-| wireup              | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms     |   |             156 ms |  158 ms |            |
-| wireup              | shutdown: disconnect() of every client         | application: 8 clients, connect() of 1–60 ms     |   |            30.7 ms | 31.0 ms |            |
-| wireup              | startup, the root's arguments gathered by hand | application: 8 clients, connect() of 1–60 ms     |   |            87.3 ms | 88.7 ms |            |
-| dependency-injector | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms     |   |            71.8 ms | 72.0 ms |            |
+| nuke-di             | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms     |   |            70.8 ms | 71.7 ms |            |
+| nuke-di             | shutdown: disconnect() of every client         | application: 8 clients, connect() of 1–60 ms     |   |            18.8 ms | 18.8 ms |            |
+| dishka              | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms     |   |             156 ms |  161 ms |            |
+| dishka              | shutdown: disconnect() of every client         | application: 8 clients, connect() of 1–60 ms     |   |            30.9 ms | 31.2 ms |            |
+| dishka              | startup, the root's arguments gathered by hand | application: 8 clients, connect() of 1–60 ms     |   |            86.8 ms | 87.4 ms |            |
+| wireup              | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms     |   |             157 ms |  158 ms |            |
+| wireup              | shutdown: disconnect() of every client         | application: 8 clients, connect() of 1–60 ms     |   |            30.5 ms | 31.1 ms |            |
+| wireup              | startup, the root's arguments gathered by hand | application: 8 clients, connect() of 1–60 ms     |   |            87.1 ms | 88.4 ms |            |
+| dependency-injector | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms     |   |            71.5 ms | 71.9 ms |            |
 | dependency-injector | shutdown: disconnect() of every client         | application: 8 clients, connect() of 1–60 ms     |   |            26.0 ms | 26.1 ms |            |
 | injector            | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms     |   | no async lifecycle |         |            |
 | injector            | shutdown: disconnect() of every client         | application: 8 clients, connect() of 1–60 ms     |   | no async lifecycle |         |            |
-| nuke-di             | startup: connect() of every client             | product page: 21 clients, connect() of 10–300 ms |   |             336 ms |  337 ms |            |
+| nuke-di             | startup: connect() of every client             | product page: 21 clients, connect() of 10–300 ms |   |             335 ms |  336 ms |            |
 | nuke-di             | shutdown: disconnect() of every client         | product page: 21 clients, connect() of 10–300 ms |   |             365 ms |  366 ms |            |
-| dishka              | startup: connect() of every client             | product page: 21 clients, connect() of 10–300 ms |   |             3.41 s |  3.41 s |            |
+| dishka              | startup: connect() of every client             | product page: 21 clients, connect() of 10–300 ms |   |             3.41 s |  3.42 s |            |
 | dishka              | shutdown: disconnect() of every client         | product page: 21 clients, connect() of 10–300 ms |   |             850 ms |  854 ms |            |
-| dishka              | startup, the root's arguments gathered by hand | product page: 21 clients, connect() of 10–300 ms |   |             3.41 s |  3.42 s |            |
+| dishka              | startup, the root's arguments gathered by hand | product page: 21 clients, connect() of 10–300 ms |   |             943 ms |  945 ms |            |
 | wireup              | startup: connect() of every client             | product page: 21 clients, connect() of 10–300 ms |   |             3.41 s |  3.42 s |            |
-| wireup              | shutdown: disconnect() of every client         | product page: 21 clients, connect() of 10–300 ms |   |             851 ms |  855 ms |            |
-| wireup              | startup, the root's arguments gathered by hand | product page: 21 clients, connect() of 10–300 ms |   |             947 ms |  949 ms |            |
-| dependency-injector | startup: connect() of every client             | product page: 21 clients, connect() of 10–300 ms |   |             336 ms |  337 ms |            |
-| dependency-injector | shutdown: disconnect() of every client         | product page: 21 clients, connect() of 10–300 ms |   |             657 ms |  658 ms |            |
+| wireup              | shutdown: disconnect() of every client         | product page: 21 clients, connect() of 10–300 ms |   |             850 ms |  853 ms |            |
+| wireup              | startup, the root's arguments gathered by hand | product page: 21 clients, connect() of 10–300 ms |   |             945 ms |  947 ms |            |
+| dependency-injector | startup: connect() of every client             | product page: 21 clients, connect() of 10–300 ms |   |             337 ms |  337 ms |            |
+| dependency-injector | shutdown: disconnect() of every client         | product page: 21 clients, connect() of 10–300 ms |   |             657 ms |  659 ms |            |
 | injector            | startup: connect() of every client             | product page: 21 clients, connect() of 10–300 ms |   | no async lifecycle |         |            |
 | injector            | shutdown: disconnect() of every client         | product page: 21 clients, connect() of 10–300 ms |   | no async lifecycle |         |            |
 

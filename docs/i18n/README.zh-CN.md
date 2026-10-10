@@ -112,25 +112,25 @@ database: disconnected
 面对真实的连接，启动的代价在于等待，而决定启动时间的是依赖树的结构。以商品页后端为例：一个 API、四个功能模块，
 每个功能模块有四个耗时 100–300 ms 的连接，共 21 个客户端：
 
-![由 21 个客户端组成的商品页：连接、功能模块和 API。nuke-di 和 dependency-injector 用 0.34 s 启动，dishka 和 wireup 用 3.41 s](https://raw.githubusercontent.com/troyan-dy/nuke-di/619f35923db67226c5999324b693a90d8b0e0903/docs/product-page.svg)
+![由 21 个客户端组成的商品页：连接、功能模块和 API。nuke-di 和 dependency-injector 用 0.34 s 启动，dishka 和 wireup 用 3.41 s](https://raw.githubusercontent.com/troyan-dy/nuke-di/c402c5086426dc28c0886f62656fcf9d901c5de8/docs/product-page.svg)
 
 `nuke-di` 在每个客户端自身的依赖连接完成后立即连接它，所以启动时间等于最长的依赖链，0.34 s。dishka 和 wireup
-在一次 `get()` 中逐个连接客户端：3.41 s，是前者的十倍，而且依赖树越宽，差距越大。如果应用手动并发获取四个功能模块，
-wireup 可以降到 0.95 s；dishka 不行。dependency-injector 在每个客户端都手写成 `Resource` 时启动同样快，但关闭是分层进行的，
+在一次 `get()` 中逐个连接客户端：3.41 s，是前者的十倍，而且依赖树越宽，差距越大。如果手动并发获取四个功能模块，wireup 可以降到 0.95 s；
+dishka 也可以，但必须关闭它的锁，而这样一来，两个功能模块共享的客户端会被创建两次。dependency-injector 在每个客户端都手写成 `Resource` 时启动同样快，但关闭是分层进行的，
 每一层都要等待最慢的客户端：0.66 s 对比 0.37 s，因为关闭各需 300 ms 的 `Checkout` 和 `EventsProducer` 位于不同的层。
 injector 没有异步生命周期。
 
 ```console
 $ uv run python benchmarks/compare.py --only connect --summary
-nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 1c9fd59 · N = 10, 100, 1000 · 20 repeats
-nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+nuke-di 1.14.3 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 17c8815 · N = 10, 100, 1000 · 20 repeats
+nuke-di 1.14.3 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 
 | Lower is better                          | nuke-di     | dishka         | wireup         | dependency-injector | injector |
 |------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
-| Startup: 8 clients, connect() of 1–60 ms | **71.0 ms** | 156 ms (2.2×)  | 156 ms (2.2×)  | 71.8 ms (1.0×)      | —        |
-| Shutdown: the same 8 clients             | **18.7 ms** | 30.8 ms (1.6×) | 30.7 ms (1.6×) | 26.0 ms (1.4×)      | —        |
-| Startup: the product page, 21 clients    | **336 ms**  | 3.41 s (10.2×) | 3.41 s (10.2×) | **336 ms**          | —        |
-| Shutdown: the product page               | **365 ms**  | 850 ms (2.3×)  | 851 ms (2.3×)  | 657 ms (1.8×)       | —        |
+| Startup: 8 clients, connect() of 1–60 ms | **70.8 ms** | 156 ms (2.2×)  | 157 ms (2.2×)  | **71.5 ms**         | —        |
+| Shutdown: the same 8 clients             | **18.8 ms** | 30.9 ms (1.6×) | 30.5 ms (1.6×) | 26.0 ms (1.4×)      | —        |
+| Startup: the product page, 21 clients    | **335 ms**  | 3.41 s (10.2×) | 3.41 s (10.2×) | **337 ms**          | —        |
+| Shutdown: the product page               | **365 ms**  | 850 ms (2.3×)  | 850 ms (2.3×)  | 657 ms (1.8×)       | —        |
 ```
 
 这三个库在创建容器时都不会建立任何连接：除非应用在启动时获取根对象，否则第一个请求会等待这些连接，并随它们一起失败。
