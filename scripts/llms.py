@@ -25,6 +25,7 @@ GUIDE = [
     "faststream",
     "mcp",
     "aiogram",
+    "taskiq",
     "integrations",
     "testing",
     "configuration",

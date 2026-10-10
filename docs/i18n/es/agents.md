@@ -54,7 +54,7 @@ Un agente sin skills sigue leyendo las instrucciones del proyecto. Pega esto en 
 
 This project uses nuke-di. A dependency is a `nuke_di.Client` subclass whose `__init__` takes its own
 dependencies as type-hinted arguments; I/O goes in `async def connect()` / `disconnect()`, never in `__init__`.
-Functions, `@job` / `@worker` entrypoints, FastAPI / Litestar / FastStream / aiogram handlers and MCP tools take clients by type hint.
+Functions, `@job` / `@worker` entrypoints, FastAPI / Litestar / FastStream / aiogram handlers, MCP tools and taskiq tasks take clients by type hint.
 
 Do not write what nuke-di rejects:
 - provider or factory functions: wrap a third-party object in a Client that creates it in connect();
@@ -74,7 +74,7 @@ Dos archivos en la raíz del repositorio, generados a partir de las páginas en 
 | Archivo | Contenido |
 |---------|-----------|
 | [`llms.txt`](../../../llms.txt) | Un índice en el formato [llms.txt](https://llmstxt.org): qué es `nuke-di` y qué no hace, un enlace a cada página |
-| [`llms-full.txt`](../../../llms-full.txt) | El README y la guía completa en un solo archivo, unos 32k tokens |
+| [`llms-full.txt`](../../../llms-full.txt) | El README y la guía completa en un solo archivo, unos 35k tokens |
 
 Dale a un agente la URL raw, `https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt`,
 y leerá el manual completo con una sola petición.

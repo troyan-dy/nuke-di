@@ -6,6 +6,37 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-10-10
+
+### Added
+
+- The taskiq integration (#69): `nuke_di.taskiq.setup(broker, container=DI)`, with the `taskiq` extra
+  (`taskiq>=0.11`, `taskiq-dependencies>=1.5`). A task takes a client by type hint next to its arguments,
+  `async def send_report(user_id: int, users: UserService)`, and so does every `TaskiqDepends(...)` function it
+  uses, generator dependencies included. The signatures are rewritten as in FastAPI and FastStream, when a task is
+  registered: `setup()` rewrites the tasks the broker has, shared ones included, and wraps `broker.task` (and
+  with it `register_task()`) for the tasks declared later, since `taskiq worker` reads them before it starts.
+- The container connects on `WORKER_STARTUP`, before the other startup handlers, and disconnects once
+  `broker.shutdown()` has run the shutdown handlers, the middlewares and the result backend. A process that only
+  kicks tasks connects nothing; an `InMemoryBroker`, which runs the tasks it is kicked, connects on its
+  `startup()`. A task run without the worker's startup fails with "is not connected", and a failed `connect()`
+  fails `broker.startup()` with a `RuntimeError`. `nuke_di.integration.testing.check()` passes on an
+  `InMemoryBroker`; CI runs the tests on taskiq 0.11.0 with taskiq-dependencies 1.5.0 as well (`make
+  test-taskiq-min`).
+- A dependency class whose `__init__` takes clients, `Annotated[Auth, TaskiqDepends()]`, is refused with a
+  `TypeError` when its task is registered, since taskiq builds it from that `__init__`; so is a function that
+  takes clients in FastAPI handlers, before taskiq registers the task. On an `InMemoryBroker` the shared tasks
+  declared before the broker get their clients too, and its shutdown waits for the tasks in flight before the
+  clients disconnect.
+
+### Documentation
+
+- A guide page, `docs/guide/taskiq.md`, in every language: an `InMemoryBroker` run, a real `taskiq worker` on
+  NATS, the rules, the default `= TaskiqDepends()` that lets type checkers accept `.kiq()` without the client, the
+  worker flags `--max-fails 1` and `--shutdown-timeout`, and testing. ADR-0003 names taskiq among the integrations
+  that share the rewrite. A spec, `docs/specs/taskiq.md`, and an example, `examples/taskiq_app`.
+- taskiq is named with the other integrations in the README, the integrations page, the Agent Skill, `llms.txt`,
+  `context7.json` and the plugin manifests; `llms-full.txt` grows to about 35k tokens.
 ## [1.16.0] - 2026-10-10
 
 ### Added
@@ -703,7 +734,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.16.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.17.0...HEAD
+[1.17.0]: https://github.com/troyan-dy/nuke-di/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/troyan-dy/nuke-di/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/troyan-dy/nuke-di/compare/v1.14.3...v1.15.0
 [1.14.3]: https://github.com/troyan-dy/nuke-di/compare/v1.14.2...v1.14.3

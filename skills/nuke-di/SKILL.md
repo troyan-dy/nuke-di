@@ -1,6 +1,6 @@
 ---
 name: nuke-di
-description: Use when writing, changing, reviewing or testing Python code that uses nuke-di (import nuke_di) - Client classes, DI.resolve / DI.inject, @job, @worker, nuke_di.fastapi / litestar / faststream / mcp / fastmcp / aiogram, mock() / override(), the di / global_di pytest fixtures. Gives the whole model and the recipes, and keeps out the designs nuke-di rejects - provider functions, interface binding, per-request scopes and retries in connect().
+description: Use when writing, changing, reviewing or testing Python code that uses nuke-di (import nuke_di) - Client classes, DI.resolve / DI.inject, @job, @worker, nuke_di.fastapi / litestar / faststream / mcp / fastmcp / aiogram / taskiq, mock() / override(), the di / global_di pytest fixtures. Gives the whole model and the recipes, and keeps out the designs nuke-di rejects - provider functions, interface binding, per-request scopes and retries in connect().
 ---
 
 # nuke-di
@@ -123,6 +123,10 @@ per handler.
   tools, resources and prompts, which take clients, as do their `Depends(...)` functions.
 - aiogram: `from nuke_di.aiogram import setup`; `setup(dp)` on the `Dispatcher`, not on a router; a handler is
   `async def start(message: Message, users: UserService)`. Filters and scenes take no clients.
+- taskiq: `from nuke_di.taskiq import setup`; `setup(broker)` right after the broker, before the tasks;
+  the worker connects the clients, a process that only kicks tasks connects none. A client argument of a
+  task takes `= TaskiqDepends()` as its default, so type checkers accept `.kiq()` without it.
+  Run `taskiq worker --max-fails 1`, so a failed connect exits the process instead of looping.
 
 **Per-request state** (a transaction, a unit of work, a request id) is not a client: open it in
 the handler through a method of a long-lived client, e.g. `async with db.transaction() as tx:`.

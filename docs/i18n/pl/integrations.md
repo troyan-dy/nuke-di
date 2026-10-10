@@ -7,8 +7,8 @@
 Integracja z frameworkiem robi dwie rzeczy: handlery frameworka przyjmują klientów po adnotacji typu, przez
 własny mechanizm wstrzykiwania zależności frameworka, a kontener łączy się, gdy aplikacja startuje, i rozłącza,
 gdy się zatrzymuje. Integracje z [FastAPI](fastapi.md), [Litestar](litestar.md), [FastStream](faststream.md),
-[MCP](mcp.md) i [aiogram](aiogram.md) są zbudowane na `nuke_di.integration`, a integracja z innym frameworkiem nie
-potrzebuje od nuke-di niczego poza nim i publicznym API.
+[MCP](mcp.md), [aiogram](aiogram.md) i [taskiq](taskiq.md) są zbudowane na `nuke_di.integration`, a integracja
+z innym frameworkiem nie potrzebuje od nuke-di niczego poza nim i publicznym API.
 
 | Nazwa | Co robi |
 |---|---|

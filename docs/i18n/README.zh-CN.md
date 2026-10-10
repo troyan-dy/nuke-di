@@ -15,7 +15,7 @@
 与其他所有已就绪的客户端并发进行。
 
 在此之上，只需一个装饰器就能把异步函数变成一个带命令行参数的进程；
-FastAPI、Litestar、FastStream 和 aiogram 的处理函数以及 MCP 工具也以同样的方式通过类型提示接收客户端。
+FastAPI、Litestar、FastStream 和 aiogram 的处理函数、MCP 工具以及 taskiq 的任务也以同样的方式通过类型提示接收客户端。
 
 它提取自一个生产环境 Python 微服务框架的 DI 层，没有任何运行时依赖。
 
@@ -361,7 +361,7 @@ $ pytest -q tests/test_api.py
 ```
 
 路由器、WebSocket 和应用自己的 lifespan 在 [FastAPI](zh-CN/fastapi.md) 中介绍；
-[Litestar](zh-CN/litestar.md)、[FastStream](zh-CN/faststream.md)、[MCP 服务器](zh-CN/mcp.md) 和 [aiogram](zh-CN/aiogram.md) 的用法相同。
+[Litestar](zh-CN/litestar.md)、[FastStream](zh-CN/faststream.md)、[MCP 服务器](zh-CN/mcp.md)、[aiogram](zh-CN/aiogram.md) 和 [taskiq](zh-CN/taskiq.md) 的用法相同。
 
 ## <a id="documentation"></a>文档
 
@@ -372,13 +372,13 @@ $ pytest -q tests/test_api.py
 - [worker 与 job](zh-CN/workers-and-jobs.md)：`@job` 与 `@worker`、命令行参数、
   `Shutdown`、宽限期、后台任务、退出码、钩子、Kubernetes
 - 框架：[FastAPI](zh-CN/fastapi.md)、[Litestar](zh-CN/litestar.md)、
-  [FastStream](zh-CN/faststream.md)、基于 SDK 和 FastMCP 的 [MCP 服务器](zh-CN/mcp.md)、[aiogram](zh-CN/aiogram.md)，以及用 `nuke_di.integration`
+  [FastStream](zh-CN/faststream.md)、基于 SDK 和 FastMCP 的 [MCP 服务器](zh-CN/mcp.md)、[aiogram](zh-CN/aiogram.md)、[taskiq](zh-CN/taskiq.md)，以及用 `nuke_di.integration`
   为其他框架[编写集成](zh-CN/integrations.md)
 - [测试](zh-CN/testing.md)：`mock()`、`override()`、pytest fixture、检查装配
 - [配置](zh-CN/configuration.md)：超时、并发和宽限期
 - [错误](zh-CN/errors.md)：每种异常及其抛出时机
 - [示例](../../examples/README.md)：23 个可直接运行的场景，从一次性脚本、队列 worker
-  到 FastAPI、Litestar、FastStream、aiogram、Starlette、MCP 服务器和完整的服务，每个都附带输出和测试
+  到 FastAPI、Litestar、FastStream、aiogram、taskiq、Starlette、MCP 服务器和完整的服务，每个都附带输出和测试
 - [基准测试](../benchmarks.md)：每个场景、Python 3.11–3.14 上的基线，以及与其他库的
   对比
 - [编程智能体](zh-CN/agents.md)：Agent Skill、`AGENTS.md` 片段、

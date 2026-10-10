@@ -16,7 +16,8 @@ creates every client once and drives its async lifecycle: `connect()` on startup
 connected, concurrently with every other client that is ready.
 
 On top of that, one decorator turns an async function into a process with command-line
-arguments, and FastAPI, Litestar, FastStream and aiogram handlers and MCP tools take clients by type hint the same way.
+arguments, and FastAPI, Litestar, FastStream and aiogram handlers, MCP tools and taskiq tasks take clients by type hint
+the same way.
 
 It was extracted from the DI layer of a production Python microservice framework
 and has no runtime dependencies.
@@ -380,7 +381,7 @@ $ pytest -q tests/test_api.py
 ```
 
 Routers, websockets and the app's own lifespan are covered in [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md);
-[Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md), [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), [MCP servers](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md) and [aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md) work the same way.
+[Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md), [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), [MCP servers](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md), [aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md) and [taskiq](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/taskiq.md) work the same way.
 
 ## Documentation
 
@@ -391,13 +392,15 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
 - [Workers and jobs](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md): `@job` and `@worker`, command-line parameters,
   `Shutdown`, the grace period, background tasks, exit codes, hooks, Kubernetes
 - Frameworks: [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md),
-  [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), [MCP servers](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md) on the SDK and on FastMCP, [aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md), and
+  [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), [MCP servers](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md) on the SDK and on FastMCP, [aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md),
+  [taskiq](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/taskiq.md), and
   [writing an integration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/integrations.md) for another framework with `nuke_di.integration`
 - [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md): `mock()`, `override()`, the pytest fixtures, checking the wiring
 - [Configuration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/configuration.md): timeouts, concurrency and the grace period
 - [Errors](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/errors.md): every exception and when it is raised
 - [Examples](https://github.com/troyan-dy/nuke-di/blob/master/examples/README.md): 23 runnable scenarios, from a one-off script and a queue worker
-  to FastAPI, Litestar, FastStream, aiogram, Starlette, an MCP server and a whole service, each with its output and tests
+  to FastAPI, Litestar, FastStream, aiogram, taskiq, Starlette, an MCP server and a whole service, each with its output
+  and tests
 - [Benchmarks](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md): every scenario, the baseline on Python 3.11–3.14 and the comparison
   with other libraries
 - [Coding agents](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/agents.md): the Agent Skill, a block for `AGENTS.md`,

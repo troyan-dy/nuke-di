@@ -52,7 +52,7 @@ test-all: ## Run tests on every supported Python version
 test-free-threaded: ## Run the tests that need no framework on free-threaded Python 3.14t with the GIL off, as CI does
 	PYTHON_GIL=0 uv run --python 3.14t --isolated --no-default-groups --with pytest --with pytest-asyncio pytest -p no:cacheprovider \
 		--ignore=tests/test_fastapi.py --ignore=tests/test_litestar.py --ignore=tests/test_faststream.py \
-		--ignore=tests/test_mcp.py --ignore=tests/test_fastmcp.py --ignore=tests/test_aiogram.py \
+		--ignore=tests/test_mcp.py --ignore=tests/test_fastmcp.py --ignore=tests/test_aiogram.py --ignore=tests/test_taskiq.py \
 		--ignore=tests/test_benchmarks.py --ignore=tests/test_typing.py --ignore=tests/test_examples.py
 
 .PHONY: test-fastapi-min
@@ -78,6 +78,10 @@ test-fastmcp-min: ## Run the FastMCP tests on the lowest supported FastMCP
 .PHONY: test-aiogram-min
 test-aiogram-min: ## Run the aiogram tests on the lowest supported aiogram
 	uv run --python 3.11 --isolated --with "aiogram==3.2.0" pytest tests/test_aiogram.py -p no:cacheprovider
+
+.PHONY: test-taskiq-min
+test-taskiq-min: ## Run the taskiq tests on the lowest supported taskiq
+	uv run --python 3.11 --isolated --with "taskiq==0.11.0" --with "taskiq-dependencies==1.5.0" pytest tests/test_taskiq.py -p no:cacheprovider
 
 .PHONY: bench
 bench: ## Run the benchmarks, see docs/benchmarks.md
