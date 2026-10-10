@@ -1,6 +1,6 @@
 ---
 name: nuke-di
-description: Use when writing, changing, reviewing or testing Python code that uses nuke-di (import nuke_di) - Client classes, DI.resolve / DI.inject, @job, @worker, nuke_di.fastapi / litestar / faststream, mock() / override(), the di / global_di pytest fixtures. Gives the whole model and the recipes, and keeps out the designs nuke-di rejects - provider functions, interface binding, per-request scopes and retries in connect().
+description: Use when writing, changing, reviewing or testing Python code that uses nuke-di (import nuke_di) - Client classes, DI.resolve / DI.inject, @job, @worker, nuke_di.fastapi / litestar / faststream / aiogram, mock() / override(), the di / global_di pytest fixtures. Gives the whole model and the recipes, and keeps out the designs nuke-di rejects - provider functions, interface binding, per-request scopes and retries in connect().
 ---
 
 # nuke-di
@@ -116,6 +116,8 @@ per handler.
 - FastAPI: `from nuke_di.fastapi import setup`; `setup(app)` right after `app = FastAPI()`, before the routes.
 - Litestar: `from nuke_di.litestar import ClientPlugin`; `Litestar(handlers, plugins=[ClientPlugin()])`.
 - FastStream: `from nuke_di.faststream import setup`; `setup(app)` after `app = FastStream(broker)`.
+- aiogram: `from nuke_di.aiogram import setup`; `setup(dp)` on the `Dispatcher`, not on a router; a handler is
+  `async def start(message: Message, users: UserService)`. Filters take no clients.
 
 **Per-request state** (a transaction, a unit of work, a request id) is not a client: open it in
 the handler through a method of a long-lived client, e.g. `async with db.transaction() as tx:`.

@@ -23,6 +23,7 @@ GUIDE = [
     "fastapi",
     "litestar",
     "faststream",
+    "aiogram",
     "integrations",
     "testing",
     "configuration",

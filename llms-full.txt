@@ -15,7 +15,7 @@ creates every client once and drives its async lifecycle: `connect()` on startup
 connected, concurrently with every other client that is ready.
 
 On top of that, one decorator turns an async function into a process with command-line
-arguments, and FastAPI, Litestar and FastStream handlers take clients by type hint the same way.
+arguments, and FastAPI, Litestar, FastStream and aiogram handlers take clients by type hint the same way.
 
 It was extracted from the DI layer of a production Python microservice framework
 and has no runtime dependencies.
@@ -379,7 +379,7 @@ $ pytest -q tests/test_api.py
 ```
 
 Routers, websockets and the app's own lifespan are covered in [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md);
-[Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md) and [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md) work the same way.
+[Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md), [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md) and [aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md) work the same way.
 
 ## Documentation
 
@@ -390,13 +390,13 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
 - [Workers and jobs](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md): `@job` and `@worker`, command-line parameters,
   `Shutdown`, the grace period, background tasks, exit codes, hooks, Kubernetes
 - Frameworks: [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md),
-  [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), and
+  [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), [aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md), and
   [writing an integration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/integrations.md) for another framework with `nuke_di.integration`
 - [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md): `mock()`, `override()`, the pytest fixtures, checking the wiring
 - [Configuration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/configuration.md): timeouts, concurrency and the grace period
 - [Errors](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/errors.md): every exception and when it is raised
-- [Examples](https://github.com/troyan-dy/nuke-di/blob/master/examples/README.md): 21 runnable scenarios, from a one-off script and a queue worker
-  to FastAPI, Litestar, FastStream, Starlette and a whole service, each with its output and tests
+- [Examples](https://github.com/troyan-dy/nuke-di/blob/master/examples/README.md): 22 runnable scenarios, from a one-off script and a queue worker
+  to FastAPI, Litestar, FastStream, aiogram, Starlette and a whole service, each with its output and tests
 - [Benchmarks](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md): every scenario, the baseline on Python 3.11–3.14 and the comparison
   with other libraries
 - [Coding agents](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/agents.md): the Agent Skill, a block for `AGENTS.md`,
@@ -1012,7 +1012,7 @@ Found 2 errors in 1 file (checked 1 source file)
 - Left to the container: a type hint that cannot be evaluated at runtime, which mypy evaluates
   anyway; a class in a variable of type `type[...]`, which may hold a subclass with another
   `__init__`; a decorated or overloaded `__init__`; `inject()` of a class; the routes and handlers
-  of the FastAPI, Litestar and FastStream integrations; a type mypy does not know, such as a class
+  of the FastAPI, Litestar, FastStream and aiogram integrations; a type mypy does not know, such as a class
   of a library without type hints.
 - An intended error, in a test of that error, is silenced with `# type: ignore[nuke-di]`.
 - It works with mypy 1.13 and later, with the cache as without it: a change to a client deep in a
@@ -2287,6 +2287,289 @@ A message handled without the app's lifespan, e.g. through `TestNatsBroker(broke
 raises `RuntimeError: UserService is not connected: start the app with its lifespan`. A subscriber
 added after the app has started raises `RuntimeError: UserService was not started with the app`.
 
+<!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md -->
+
+# aiogram
+
+
+
+An aiogram handler takes a client by its type hint, next to the message. Nothing marks the handler: no
+`@inject`, no `FromDishka[...]`.
+
+```bash
+pip install "nuke-di[aiogram]"
+```
+
+Requires aiogram 3.2 or newer. With the clients of the [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md) examples:
+
+```python
+# app/bot.py
+import asyncio
+import os
+
+from aiogram import Bot, Dispatcher, Router
+from aiogram.filters import CommandStart
+from aiogram.types import Message
+
+from app.clients import UserService
+from nuke_di.aiogram import setup
+
+router = Router()
+
+
+@router.message(CommandStart())
+async def start(message: Message, users: UserService) -> None:
+    await message.answer(await users.greet(message.chat.id))
+
+
+dp = Dispatcher()
+dp.include_router(router)
+setup(dp)  # clients connect before the startup handlers, disconnect after the shutdown handlers
+
+
+async def main() -> None:
+    await dp.start_polling(Bot(os.environ["BOT_TOKEN"]))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+With a token from [@BotFather](https://t.me/BotFather), `BOT_TOKEN=... python -m app.bot` runs it. Without
+one, a `Bot` whose session answers in the process runs the same dispatcher: aiogram has no test client,
+and a session is where a bot's requests go.
+
+```python
+# app/telegram.py
+from typing import Any
+
+from aiogram import Bot
+from aiogram.client.session.base import BaseSession
+from aiogram.methods import SendMessage, TelegramMethod
+from aiogram.types import Update
+
+
+class PrintingSession(BaseSession):
+    """
+    The Bot API of a test: prints what the bot sends, and keeps it in `sent`, instead of calling Telegram.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sent: list[str] = []
+
+    async def make_request(self, bot: Bot, method: TelegramMethod[Any], timeout: int | None = None) -> Any:
+        assert isinstance(method, SendMessage), method
+        print(f"bot -> chat {method.chat_id}: {method.text}")
+        self.sent.append(method.text)
+        return True
+
+    async def stream_content(self, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError
+
+    async def close(self) -> None:
+        pass
+
+
+def message(bot: Bot, text: str, chat_id: int = 42) -> Update:
+    """
+    An update with a message in a private chat, as Telegram sends it.
+    """
+    chat = {"id": chat_id, "type": "private"}
+    return Update.model_validate(
+        {"update_id": 1, "message": {"message_id": 1, "date": 0, "chat": chat, "text": text}},
+        context={"bot": bot},
+    )
+```
+
+```python
+# app/try_bot.py
+import asyncio
+
+from aiogram import Bot
+
+from app.bot import dp
+from app.telegram import PrintingSession, message
+
+
+async def main() -> None:
+    bot = Bot("42:TEST", session=PrintingSession())
+    await dp.emit_startup(bot=bot)  # what start_polling() does first
+    try:
+        await dp.feed_update(bot, message(bot, "/start"))  # and then with every update
+    finally:
+        await dp.emit_shutdown(bot=bot)
+
+
+asyncio.run(main())
+```
+
+```console
+$ python -m app.try_bot
+database: connected
+bot -> chat 42: Hello, user-42!
+database: disconnected
+```
+
+What happened:
+
+1. `setup(dp)` added one inner middleware to every event of the dispatcher, which aiogram runs for the
+   handlers of every router included into it, and took over the dispatcher's startup and shutdown.
+2. On startup, `dp.emit_startup()`, which `start_polling()` calls first, walked the handlers of the
+   dispatcher and its routers, found `users: UserService` in `start`, resolved it and connected the
+   clients, each after its own dependencies.
+3. The update matched `start`, and the middleware put the connected `UserService` into the data aiogram
+   passes to a handler by name.
+4. On shutdown the clients disconnected.
+
+The [aiogram_bot](https://github.com/troyan-dy/nuke-di/blob/master/examples/aiogram_bot/README.md) example runs `start_polling()` itself against a fake
+Telegram.
+
+## The rules
+
+- **Where clients are filled.** In the arguments of the handlers of the dispatcher and of every router
+  included into it, at any depth and before `setup()` or after, for every kind of update: messages,
+  callback queries, inline queries, error handlers and the rest. A handler is a function, a bound method,
+  a function wrapped with `functools.wraps`, or a plain `def`, which aiogram runs in a thread. An argument
+  is a client when its type hint is a client, also inside `Annotated[UserService, ...]`.
+- **Startup and shutdown handlers.** `@dp.startup()` and `@dp.shutdown()` handlers, and those of the
+  routers, take clients too, next to the `bot` and the other arguments aiogram passes them. aiogram passes
+  them all the same arguments, so among them one name means one client.
+- **By name, per handler.** aiogram passes a handler the items of its data by name; nuke-di adds the
+  client arguments of the handler that matched the update, so two handlers may give different clients
+  one name. A name aiogram passes itself raises `TypeError` on startup: `bot`, `state`, `event_from_user`
+  and its other names, the workflow data of `Dispatcher(name=...)` or `dp["name"]`, and the keyword
+  arguments of `start_polling()`.
+- **Resolved on startup.** The clients are resolved when the dispatcher starts: `start_polling()`, the
+  startup of the webhook app, or `await dp.emit_startup()` in a test. So `override()` before that replaces
+  them, and importing the bot builds nothing.
+- **Startup and shutdown order.** The clients connect before the startup handlers of the dispatcher and
+  of its routers, and disconnect after all their shutdown handlers, which aiogram calls for the routers
+  after the dispatcher's. A startup handler that fails disconnects them again: `start_polling()` does not
+  call the shutdown after a failed startup. On shutdown `Shutdown` is set and `BackgroundTasks` are
+  stopped before the clients disconnect, as in a worker.
+- **Handlers still running.** `start_polling()` handles each update in a task and does not wait for them
+  when it stops: a handler that is still running when the clients disconnect finds them disconnected.
+- **Cost of an update.** One dictionary lookup by the handler, and one item of the data per client
+  argument: about 0.3 µs per update, against 22 µs of aiogram's own dispatch of a message (Python 3.14).
+- **The function stays a function.** Nothing in it is rewritten; calling it directly with a client, e.g.
+  in a unit test, works as before.
+- **Another container.** `setup(dp, container)`. Two dispatchers on one container run one at a time: the
+  second startup raises `RuntimeError: nuke-di clients failed to start: the container is already
+  connected`.
+
+## Testing
+
+A test replaces a client before the startup and feeds the updates itself, with the session above:
+
+```python
+# tests/test_bot.py
+from aiogram import Bot
+
+from app.bot import dp
+from app.clients import Database
+from app.telegram import PrintingSession, message
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+async def test_start() -> None:
+    session = PrintingSession()
+    bot = Bot("42:TEST", session=session)
+    with DI.override(Database, FakeDatabase()):
+        await dp.emit_startup(bot=bot)
+        try:
+            await dp.feed_update(bot, message(bot, "/start"))
+        finally:
+            await dp.emit_shutdown(bot=bot)
+
+    assert session.sent == ["Hello, alice!"]
+```
+
+```console
+$ pytest -q tests/test_bot.py
+.                                                                        [100%]
+1 passed in 1.35s
+```
+
+`dp.feed_update()` raises what the handler raised, unless an error handler of the dispatcher handles it.
+
+## Errors
+
+**A client that fails to connect** fails the startup: `start_polling()` raises a plain `RuntimeError` from
+the `ConnectError` before its first request to Telegram, and the clients that connected are disconnected.
+
+```python
+# app/broken.py
+import asyncio
+
+from aiogram import Bot, Dispatcher
+from aiogram.types import Message
+
+from nuke_di import Client
+from nuke_di.aiogram import setup
+
+
+class Kafka(Client):
+    async def connect(self) -> None:
+        raise OSError("broker kafka-1:9092 is unreachable")
+
+
+dp = Dispatcher()
+setup(dp)
+
+
+@dp.message()
+async def publish(message: Message, kafka: Kafka) -> None: ...
+
+
+if __name__ == "__main__":
+    # The startup fails before the first request to Telegram, so any token of the right shape shows it
+    asyncio.run(dp.start_polling(Bot("42:TEST")))
+```
+
+```console
+$ python -m app.broken
+Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
+Traceback (most recent call last):
+  ...
+OSError: broker kafka-1:9092 is unreachable
+Traceback (most recent call last):
+  ...
+nuke_di.errors.ConnectError: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  ...
+RuntimeError: nuke-di clients failed to start: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
+$ echo $?
+1
+```
+
+**The others**, each raised with this message:
+
+| When | Error |
+|---|---|
+| An update comes before the startup | ``RuntimeError: UserService is not connected: start the dispatcher with `start_polling()`, or `await dp.emit_startup()` in a test`` |
+| A router with a handler of a client nobody asked for is included after the startup | `RuntimeError: Billing was not started with the dispatcher: register its handler before the dispatcher starts` |
+| A client argument under a name aiogram passes itself | `TypeError: Argument "state" of stateful is UserService, but aiogram passes "state" to handlers itself: rename the argument` |
+| A filter takes a client | `TypeError: Argument "db" of the filter is_known is Database: aiogram calls filters before the middlewares that fill clients, so a filter takes no clients; check it in the handler instead` |
+| `setup()` is given a router | `TypeError: setup() takes the Dispatcher, not <Router '0x109bbea50'>: the routers included into it are covered` |
+
+## Not supported
+
+- **Filters** take no clients, and raise `TypeError` on startup: aiogram runs a handler's filters before
+  its middlewares, so no client is in the data yet. Check it in the handler.
+- **Class-based handlers**, subclasses of `MessageHandler` and the other `BaseHandler` classes, take no
+  clients: aiogram passes them the data as `self.data`, and their `__init__` is aiogram's.
+- **`setup()` on a router.** It takes the `Dispatcher`: a router is included into one dispatcher only,
+  which aiogram enforces, and the dispatcher's middleware covers the routers below it.
+
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/integrations.md -->
 
 # Writing an integration
@@ -2295,8 +2578,8 @@ added after the app has started raises `RuntimeError: UserService was not starte
 
 An integration with a framework does two things: the framework's handlers take clients by type hint, through
 the framework's own dependency injection, and the container connects when the app starts and disconnects when
-it stops. The [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md) and [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md) integrations are
-built on `nuke_di.integration`, and an integration with another framework needs nothing from nuke-di beyond it
+it stops. The [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md), [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md) and [aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md)
+integrations are built on `nuke_di.integration`, and an integration with another framework needs nothing from nuke-di beyond it
 and the public API.
 
 | Name | What it does |
@@ -2406,7 +2689,9 @@ Litestar provides dependencies by name, and aiogram passes them by name from mid
 not apply: use `Framework` for the messages, `client_of()` to find the client arguments of a handler, a
 `Binding` per client whose `get` the framework calls by its own means, and `running()` inside the app's
 lifespan. `nuke_di.litestar` is the worked example: it registers `Provide(binding.get)` under the argument's
-name.
+name. `nuke_di.aiogram` is another: an inner middleware of the dispatcher puts `binding.instance` into the data of
+an update under the name of each client argument of the handler that matched it, and `running()` wraps the
+dispatcher's startup and shutdown.
 
 ## <a id="checking-an-integration"></a>Checking an integration
 
@@ -2836,7 +3121,7 @@ An agent without skills still reads the instructions of the project. Paste this 
 
 This project uses nuke-di. A dependency is a `nuke_di.Client` subclass whose `__init__` takes its own
 dependencies as type-hinted arguments; I/O goes in `async def connect()` / `disconnect()`, never in `__init__`.
-Functions, `@job` / `@worker` entrypoints and FastAPI / Litestar / FastStream handlers take clients by type hint.
+Functions, `@job` / `@worker` entrypoints and FastAPI / Litestar / FastStream / aiogram handlers take clients by type hint.
 
 Do not write what nuke-di rejects:
 - provider or factory functions: wrap a third-party object in a Client that creates it in connect();
@@ -2856,7 +3141,7 @@ Two files at the root of the repository, generated from the English pages:
 | File | Contents |
 |------|----------|
 | [`llms.txt`](https://github.com/troyan-dy/nuke-di/blob/master/llms.txt) | An index in the [llms.txt](https://llmstxt.org) format: what `nuke-di` is and does not do, a link to every page |
-| [`llms-full.txt`](https://github.com/troyan-dy/nuke-di/blob/master/llms-full.txt) | The README and the whole guide in one file, about 26k tokens |
+| [`llms-full.txt`](https://github.com/troyan-dy/nuke-di/blob/master/llms-full.txt) | The README and the whole guide in one file, about 28k tokens |
 
 Give an agent the raw URL, `https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt`,
 and it reads the whole manual with one fetch.
