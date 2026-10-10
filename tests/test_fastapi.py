@@ -583,6 +583,19 @@ def test_router_without_route_class_explains() -> None:
         router.get("/")(plain)
 
 
+async def unserved(users: UserService) -> None: ...
+
+
+def test_app_without_setup_explains() -> None:
+    router = ClientRouter(container=Dependencies())
+    router.get("/")(unserved)
+    app = FastAPI()
+    app.include_router(router)
+
+    with pytest.raises(RuntimeError, match=r"UserService is not connected: start the app with its lifespan"):
+        TestClient(app).get("/")
+
+
 def test_function_on_two_containers() -> None:
     first, second = Dependencies(), Dependencies()
     first_app, second_app = make_app(first), make_app(second)
@@ -592,6 +605,69 @@ def test_function_on_two_containers() -> None:
     with second.override(Database, FakeDatabase()), TestClient(first_app) as a, TestClient(second_app) as b:
         assert a.get("/users/1").json() == "Hello, user-1!"
         assert b.get("/users/1").json() == "Hello, alice!"
+
+
+async def database_audit(db: Database) -> None:
+    events.append(f"audit: {type(db).__name__}")
+
+
+def make_nested_app(deps: Dependencies) -> FastAPI:
+    # The same functions on every container, in routes and dependencies of included and nested routers
+    app = make_app(deps)
+    inner = ClientRouter(container=deps, dependencies=[Depends(database_audit)])
+    inner.get("/users/{user_id}")(greet)
+    inner.get("/me")(by_header)
+    inner.websocket("/chat")(chat)
+    outer = ClientRouter(container=deps)
+    outer.get("/users/{user_id}")(greet)
+    outer.include_router(inner, prefix="/inner", dependencies=[Depends(database_audit)])
+    app.include_router(outer, prefix="/outer", dependencies=[Depends(database_audit)])
+    return app
+
+
+def served(client: TestClient) -> list[str]:
+    """
+    What every route of a nested app answers, in order.
+    """
+    answers = [
+        client.get("/outer/users/1").json(),
+        client.get("/outer/inner/users/2").json(),
+        client.get("/outer/inner/me", headers={"X-User-Id": "3"}).json(),
+    ]
+    with client.websocket_connect("/outer/inner/chat") as ws:
+        ws.send_text("4")
+        answers.append(ws.receive_text())
+    return answers
+
+
+def test_included_routes_of_an_app_built_before_another_container() -> None:
+    # FastAPI 0.137+ reads the signatures of included routes on the app's first request, after the second
+    # container has bound the same functions
+    first, second = Dependencies(), Dependencies()
+    first_app = make_nested_app(first)
+    second_app = make_nested_app(second)
+
+    with TestClient(first_app) as client:
+        assert served(client) == ["Hello, user-1!", "Hello, user-2!", "user-3", "Hello, user-1!: Hello, user-4!"]
+    with second.override(Database, FakeDatabase()), TestClient(second_app) as client:
+        assert served(client) == ["Hello, alice!", "Hello, alice!", "alice", "Hello, alice!: Hello, alice!"]
+
+    audits = [event for event in events if event.startswith("audit")]
+    # Once per request: FastAPI caches the dependency within it
+    assert audits == ["audit: Database"] * 4 + ["audit: FakeDatabase"] * 4
+
+
+def test_included_routes_on_two_containers_at_once() -> None:
+    first, second = Dependencies(), Dependencies()
+    first_app, second_app = make_nested_app(first), make_nested_app(second)
+
+    with second.override(Database, FakeDatabase()), TestClient(first_app) as a, TestClient(second_app) as b:
+        assert served(a) == ["Hello, user-1!", "Hello, user-2!", "user-3", "Hello, user-1!: Hello, user-4!"]
+        assert served(b) == ["Hello, alice!", "Hello, alice!", "alice", "Hello, alice!: Hello, alice!"]
+        assert served(a) == ["Hello, user-1!", "Hello, user-2!", "user-3", "Hello, user-1!: Hello, user-4!"]
+
+    audits = [event for event in events if event.startswith("audit")]
+    assert audits == ["audit: Database"] * 4 + ["audit: FakeDatabase"] * 4 + ["audit: Database"] * 4
 
 
 def test_setup_refuses_foreign_route_class() -> None:

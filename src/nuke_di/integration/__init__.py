@@ -42,10 +42,14 @@ class DependsFramework(Framework):
     depends: type
     # Builds the marker for a callable
     make_depends: Callable[[Callable[..., Any]], Any]
-    # Whether a function is bound again for every container: FastAPI analyses a route once, when it is
-    # declared, so each app keeps the bindings it captured. Otherwise a function is bound once, and every
-    # app that starts resolves the same bindings
+    # Whether a function is bound again for every container, for a framework that reads a signature once,
+    # when the handler is declared, so each app keeps the bindings it captured. Otherwise a function is
+    # bound once, and every app that starts resolves the same bindings
     per_container: bool = True
+    # What the marker of a client argument calls, `binding.get` when not given: e.g. a function that takes
+    # the request and finds the client of the app it came to, for a framework that reads signatures lazily
+    # and serves one function from several apps at once
+    getter: Callable[["Binding"], Callable[..., Any]] | None = None
 
 
 class Binding:
@@ -217,7 +221,8 @@ def bind(call: Callable[..., Any] | None, container: Dependencies, framework: De
 
         binding = Binding(client, container, framework)
         own.append(binding)
-        parameters.append(param.replace(annotation=Annotated[client, framework.make_depends(binding.get)]))
+        getter = binding.get if framework.getter is None else framework.getter(binding)
+        parameters.append(param.replace(annotation=Annotated[client, framework.make_depends(getter)]))
 
     reachable += own
     if not own:
