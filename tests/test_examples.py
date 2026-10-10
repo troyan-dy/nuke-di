@@ -162,6 +162,19 @@ PROGRAMS = [
         exit_code=2,
         output=('job_exit_code{job="hooks_metrics.export.export"} 2', "invalid int value: 'three'"),
     ),
+    Program(
+        "mcp_server.ask",
+        output=(
+            "tool count_books(genre): How many books of a genre the shop has.",
+            "count_books(genre='fantasy') = {'result': 3}",
+            "database: disconnected",
+        ),
+    ),
+    Program(
+        "mcp_server.ask",
+        ("fastmcp_server",),
+        output=("tool recommend(): The book to start with.", "count_books(genre='fantasy') = {'result': 3}"),
+    ),
     Program("testing.main", output=("registered user 4",)),
     Program(
         "testing.jobs.reminders", ("--limit", "1", "--dry-run"), output=("reminders: would remind bob@example.com",)
