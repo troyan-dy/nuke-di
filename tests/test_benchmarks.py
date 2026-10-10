@@ -2,6 +2,7 @@
 The benchmark suite of benchmarks/ keeps running: CI runs it the same way, as a smoke test.
 """
 
+import asyncio
 import importlib
 import json
 import platform
@@ -147,10 +148,10 @@ def test_compares_slow_connections(tmp_path: Path) -> None:
     assert (
         figures["dependency-injector", shutdown, page]["median"] > figures["nuke-di", shutdown, page]["median"] + 0.15
     )
-    # wireup connects concurrently what the application gets concurrently by hand, dishka still one at a time
+    # wireup connects concurrently what the application gets concurrently by hand, dishka with its lock off
     gathered = "startup, the root's arguments gathered by hand"
     assert figures["wireup", gathered, page]["median"] < 2
-    assert figures["dishka", gathered, page]["median"] > 3
+    assert figures["dishka", gathered, page]["median"] < 2
 
 
 async def test_the_other_containers_connect_on_the_first_get(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -186,6 +187,39 @@ async def test_the_other_containers_connect_on_the_first_get(monkeypatch: pytest
     await deps.connect()
     assert connected == ["connect"]
     await deps.disconnect()
+
+
+async def test_dishka_without_its_lock_builds_a_shared_client_twice(monkeypatch: pytest.MonkeyPatch) -> None:
+    # What docs/benchmarks.md says of the gathered startup of dishka: its `get()` calls run concurrently only with
+    # `lock_factory=None`, and then a client that two of them need is built and connected once per call
+    pytest.importorskip("dishka")
+    monkeypatch.syspath_prepend(str(ROOT / "benchmarks"))
+    compare = importlib.import_module("compare")
+    connected: list[int] = []
+
+    class Database(Client):
+        async def connect(self) -> None:
+            connected.append(id(self))
+            await asyncio.sleep(0.01)
+
+    class Users(Client):
+        def __init__(self, db: Database) -> None:
+            self.db = db
+
+    class Orders(Client):
+        def __init__(self, db: Database) -> None:
+            self.db = db
+
+    provider = compare.Provider(scope=compare.Scope.APP)
+    for cls in (Database, Users, Orders):
+        provider.provide(compare.lifecycle(cls))
+    container = compare.make_async_container(provider, lock_factory=None)
+
+    users, orders = await asyncio.gather(container.get(Users), container.get(Orders))
+
+    assert users.db is not orders.db
+    assert len(connected) == 2
+    await container.close()
 
 
 def test_draws_the_product_page(tmp_path: Path) -> None:

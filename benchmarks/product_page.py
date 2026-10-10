@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from compare import PRODUCT_PAGE, PRODUCT_PAGE_TREE, SHUTDOWN, STARTUP, STARTUP_GATHERED
+from run import fmt
 
 ROOT = Path(__file__).resolve().parent.parent
 JSON = ROOT / "docs" / "benchmarks" / "connect-py3.11.json"
@@ -34,16 +35,20 @@ BAR_MAX = WIDTH - BAR_X - 165
 BAR_H, BAR_STEP = 18, 26
 # The connect() time that fills a box
 FULL_BOX = 0.3
+# A client that takes this long to stop is outlined: it is what the shutdowns differ by
+SLOW_STOP = 0.1
 
 STYLE = """<style>
 svg {
   --surface: #fcfcfb; --border: #e4e3df; --text: #0b0b0b; --muted: #52514e; --grid: #ecebe7;
   --bar: #2a78d6; --other: #a3a29c; --edge: #c9c8c2; --node: #ffffff; --feature: #eef4fc; --api: #2a78d6;
+  --stop: #eb6834;
 }
 @media (prefers-color-scheme: dark) {
   svg {
     --surface: #1a1a19; --border: #33332f; --text: #ffffff; --muted: #c3c2b7; --grid: #2a2a27;
     --bar: #3987e5; --other: #77766f; --edge: #4a4945; --node: #232321; --feature: #1d2a3b; --api: #3987e5;
+    --stop: #d95926;
   }
 }
 text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--text); }
@@ -57,6 +62,7 @@ text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Ar
 .edge { fill: none; stroke: var(--edge); stroke-width: 1.2; }
 .leaf { fill: var(--node); stroke: var(--border); }
 .feature { fill: var(--feature); stroke: var(--border); }
+.slow-stop { fill: none; stroke: var(--stop); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .api { fill: var(--api); }
 .load { fill: var(--bar); opacity: 0.18; }
 .ours { fill: var(--bar); }
@@ -70,8 +76,17 @@ text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Ar
 Bar = tuple[str, float, bool]
 
 
-def fmt(value: float) -> str:
-    return f"{value:.2f} s" if value >= 1 else f"{value * 1000:.0f} ms"
+def seconds(value: float) -> str:
+    return fmt(value, "s")
+
+
+def chain(name: str, step: str) -> float:
+    """
+    The longest chain of `step` ("connect" or "disconnect") times from `name` down to a client with no dependencies.
+    """
+    node = PRODUCT_PAGE_TREE[name]
+    below = max((chain(dependency, step) for dependency in node.dependencies), default=0.0)
+    return float(getattr(node, step)) + below
 
 
 def medians(data: dict[str, Any]) -> dict[tuple[str, str], float]:
@@ -97,8 +112,13 @@ class Drawing:
         self.add(f'<path class="edge" d="M{x1},{y1:.1f} C{middle},{y1:.1f} {middle},{y2:.1f} {x2},{y2:.1f}"/>')
 
     def box(self, name: str, x: float, top: float, width: float, kind: str) -> None:
-        connect = PRODUCT_PAGE_TREE[name][0]
+        node = PRODUCT_PAGE_TREE[name]
+        connect = node.connect
         self.add(f'<rect class="{kind}" x="{x}" y="{top}" width="{width}" height="{BOX_H}" rx="5"/>')
+        if node.disconnect >= SLOW_STOP and name != ROOT_CLIENT:
+            self.add(
+                f'<rect class="slow-stop" x="{x - 3}" y="{top - 3}" width="{width + 6}" height="{BOX_H + 6}" rx="7"/>'
+            )
         time = f"{connect * 1000:.0f} ms"
         if kind == "api":
             self.add(f'<text class="api-name" x="{x + 10}" y="{top + 16}">{escape(name)}</text>')
@@ -111,7 +131,7 @@ class Drawing:
         self.add(f'<text class="time" x="{x + width - 9}" y="{top + 16}" text-anchor="end">{time}</text>')
 
     def bars(self, rows: list[Bar], top: float, scale: float) -> None:
-        ours = rows[0][1]
+        ours = next(value for _, value, highlight in rows if highlight)
         for number, (label, value, highlight) in enumerate(rows):
             y = top + number * BAR_STEP
             self.add(f'<text class="label" x="24" y="{y + 13}">{escape(label)}</text>')
@@ -121,15 +141,16 @@ class Drawing:
             times = value / ours
             ratio = "" if highlight else ("  the same" if times < 1.05 else f"  {times:.1f}× longer")  # noqa: RUF001
             self.add(
-                f'<text class="value" x="{BAR_X + width + 8:.1f}" y="{y + 13}">{fmt(value)}'
+                f'<text class="value" x="{BAR_X + width + 8:.1f}" y="{y + 13}">{seconds(value)}'
                 f'<tspan class="ratio">{ratio}</tspan></text>'
             )
 
 
 def draw(data: dict[str, Any]) -> str:
     figures = medians(data)
-    features = [
-        name for name, (_, _, dependencies) in PRODUCT_PAGE_TREE.items() if dependencies and name != ROOT_CLIENT
+    features = list(PRODUCT_PAGE_TREE[ROOT_CLIENT].dependencies)
+    slow_stops = [
+        name for name, node in PRODUCT_PAGE_TREE.items() if node.disconnect >= SLOW_STOP and name != ROOT_CLIENT
     ]
 
     # Every connection a row, grouped under its feature; a feature in the middle of its group
@@ -137,7 +158,7 @@ def draw(data: dict[str, Any]) -> str:
     y: float = TREE_TOP
     for feature in features:
         first = y
-        for leaf in PRODUCT_PAGE_TREE[feature][2]:
+        for leaf in PRODUCT_PAGE_TREE[feature].dependencies:
             tops[leaf] = y
             y += STEP
         tops[feature] = (first + y - STEP) / 2
@@ -148,7 +169,8 @@ def draw(data: dict[str, Any]) -> str:
     startup: list[Bar] = [
         ("nuke-di", figures["nuke-di", STARTUP], True),
         ("dependency-injector, a Resource per client", figures["dependency-injector", STARTUP], False),
-        ("wireup, the four features gathered by hand", figures["wireup", STARTUP_GATHERED], False),
+        (f"wireup, the {len(features)} features gathered by hand", figures["wireup", STARTUP_GATHERED], False),
+        ("dishka, the same with its lock off", figures["dishka", STARTUP_GATHERED], False),
         ("wireup", figures["wireup", STARTUP], False),
         ("dishka", figures["dishka", STARTUP], False),
     ]
@@ -165,12 +187,8 @@ def draw(data: dict[str, Any]) -> str:
     shutdown_top = shutdown_heading + 40
     height = shutdown_top + len(shutdown) * BAR_STEP + 20
 
-    connects = [connect for connect, _, _ in PRODUCT_PAGE_TREE.values()]
-    longest = max(
-        PRODUCT_PAGE_TREE[leaf][0] + PRODUCT_PAGE_TREE[feature][0] + PRODUCT_PAGE_TREE[ROOT_CLIENT][0]
-        for feature in features
-        for leaf in PRODUCT_PAGE_TREE[feature][2]
-    )
+    total = sum(node.connect for node in PRODUCT_PAGE_TREE.values())
+    longest = chain(ROOT_CLIENT, "connect")
 
     svg = Drawing()
     svg.add(
@@ -179,12 +197,13 @@ def draw(data: dict[str, Any]) -> str:
     )
     svg.add(f'<title id="t">A product page: {len(PRODUCT_PAGE_TREE)} clients, started by each library</title>')
     svg.add(
-        '<desc id="d">A product page API needs four features, and every feature four connections that take 100 to '
-        "300 ms to connect. nuke-di connects every client as soon as its own dependencies have, so the startup "
-        f"takes the longest chain, {fmt(figures['nuke-di', STARTUP])}; dishka and wireup connect one client after "
-        f"another, {fmt(figures['dishka', STARTUP])}. dependency-injector starts as fast with a Resource per client "
-        f"and stops layer by layer, {fmt(figures['dependency-injector', SHUTDOWN])} against "
-        f"{fmt(figures['nuke-di', SHUTDOWN])}.</desc>"
+        f'<desc id="d">A product page API needs {len(features)} features, and every feature its own connections, '
+        "which take 100 to 300 ms to connect. nuke-di connects every client as soon as its own dependencies have, "
+        "so the startup "
+        f"takes the longest chain, {seconds(figures['nuke-di', STARTUP])}; dishka and wireup connect one client "
+        f"after another, {seconds(figures['dishka', STARTUP])}. dependency-injector starts as fast with a Resource per "
+        f"client and stops layer by layer, {seconds(figures['dependency-injector', SHUTDOWN])} against "
+        f"{seconds(figures['nuke-di', SHUTDOWN])}.</desc>"
     )
     svg.add(STYLE)
     svg.add(f'<rect class="bg" x="0.5" y="0.5" width="{WIDTH - 1}" height="{height - 1:.0f}" rx="10"/>')
@@ -194,7 +213,7 @@ def draw(data: dict[str, Any]) -> str:
     )
     svg.add(
         '<text class="note" x="24" y="52">Every client connects once the clients to its left have. '
-        f"Along the longest chain that takes {longest:.2f} s; one client after another, {sum(connects):.2f} s.</text>"
+        f"Along the longest chain that takes {longest:.2f} s; one client after another, {total:.2f} s.</text>"
     )
     for x, column in ((LEAF_X, "Connections"), (FEATURE_X, "Features"), (API_X, "HTTP API")):
         svg.add(f'<text class="column" x="{x}" y="{TREE_TOP - 12}">{column}</text>')
@@ -203,11 +222,11 @@ def draw(data: dict[str, Any]) -> str:
         return tops[name] + BOX_H / 2
 
     for feature in features:
-        for leaf in PRODUCT_PAGE_TREE[feature][2]:
+        for leaf in PRODUCT_PAGE_TREE[feature].dependencies:
             svg.edge(LEAF_X + LEAF_W, middle(leaf), FEATURE_X, middle(feature))
         svg.edge(FEATURE_X + FEATURE_W, middle(feature), API_X, middle(ROOT_CLIENT))
     for feature in features:
-        for leaf in PRODUCT_PAGE_TREE[feature][2]:
+        for leaf in PRODUCT_PAGE_TREE[feature].dependencies:
             svg.box(leaf, LEAF_X, tops[leaf], LEAF_W, "leaf")
         svg.box(feature, FEATURE_X, tops[feature], FEATURE_W, "feature")
     svg.box(ROOT_CLIENT, API_X, tops[ROOT_CLIENT], API_W, "api")
@@ -219,9 +238,10 @@ def draw(data: dict[str, Any]) -> str:
     svg.bars(startup, startup_top, scale)
     svg.add(f'<text class="title" x="24" y="{shutdown_heading + 4}">Shutdown: disconnect() of every client</text>')
     svg.add(
-        f'<text class="note" x="24" y="{shutdown_heading + 22}">Checkout finishes the orders in flight and '
-        "EventsProducer flushes its messages, 300 ms each; every client disconnects after the clients that need "
-        "it.</text>"
+        f'<text class="note" x="24" y="{shutdown_heading + 22}">{" and ".join(slow_stops)}, outlined above, take '
+        f"{seconds(max(PRODUCT_PAGE_TREE[name].disconnect for name in slow_stops))} each to stop, the others up to "
+        f"{seconds(max(n.disconnect for k, n in PRODUCT_PAGE_TREE.items() if k not in slow_stops))}; "
+        "every client disconnects after the clients that need it.</text>"
     )
     svg.bars(shutdown, shutdown_top, scale)
     svg.add("</svg>")

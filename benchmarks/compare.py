@@ -23,7 +23,7 @@ from dataclasses import dataclass, fields
 from functools import partial
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any, get_type_hints
+from typing import Any, NamedTuple, get_type_hints
 
 import wireup
 from dependency_injector import containers, providers
@@ -193,41 +193,51 @@ SHUTDOWN = "shutdown: disconnect() of every client"
 STARTUP_GATHERED = "startup, the root's arguments gathered by hand"
 PRODUCT_PAGE = "product page: 21 clients, connect() of 10–300 ms"  # noqa: RUF001
 
+
 # The backend of an online shop's product page, a tree as wide as a real service's: the HTTP API needs four
 # features, and every feature its own four connections, gRPC clients of other services, Kafka, Elasticsearch,
-# Redis. Every client: (connect() seconds, disconnect() seconds, the clients its `__init__` takes). Connected
+# Redis. Connected
 # one after another, the startup is the sum, 3.37 s; along the longest chain, PaymentsClient → Checkout →
 # ProductPageApi or EventsProducer → Personalization → ProductPageApi, it is 0.33 s. To stop, the longest chain is
 # ProductPageApi → Checkout → PaymentsClient, 0.36 s; layer by layer, every layer waiting for its slowest client,
 # it is 0.65 s, since Checkout and EventsProducer stop slowly in different layers
-PRODUCT_PAGE_TREE: dict[str, tuple[float, float, tuple[str, ...]]] = {
-    "CatalogClient": (0.250, 0.010, ()),
-    "PricesClient": (0.200, 0.010, ()),
-    "StockClient": (0.200, 0.010, ()),
-    "ReviewsClient": (0.150, 0.010, ()),
-    "ProductCard": (0.050, 0.005, ("CatalogClient", "PricesClient", "StockClient", "ReviewsClient")),
-    "PaymentsClient": (0.300, 0.010, ()),
-    "DeliveryClient": (0.200, 0.010, ()),
-    "LoyaltyClient": (0.150, 0.010, ()),
-    "PromotionsClient": (0.200, 0.010, ()),
+class Node(NamedTuple):
+    """
+    A client of the product page: how long its connect() and disconnect() take, and the clients its `__init__`
+    takes.
+    """
+
+    connect: float
+    disconnect: float
+    dependencies: tuple[str, ...] = ()
+
+
+PRODUCT_PAGE_TREE: dict[str, Node] = {
+    "CatalogClient": Node(0.250, 0.010),
+    "PricesClient": Node(0.200, 0.010),
+    "StockClient": Node(0.200, 0.010),
+    "ReviewsClient": Node(0.150, 0.010),
+    "ProductCard": Node(0.050, 0.005, ("CatalogClient", "PricesClient", "StockClient", "ReviewsClient")),
+    "PaymentsClient": Node(0.300, 0.010),
+    "DeliveryClient": Node(0.200, 0.010),
+    "LoyaltyClient": Node(0.150, 0.010),
+    "PromotionsClient": Node(0.200, 0.010),
     # Finishes the orders in flight before it stops
-    "Checkout": (0.020, 0.300, ("PaymentsClient", "DeliveryClient", "LoyaltyClient", "PromotionsClient")),
-    "UsersClient": (0.200, 0.010, ()),
-    "RecommendationsClient": (0.250, 0.010, ()),
-    "FavoritesClient": (0.150, 0.010, ()),
+    "Checkout": Node(0.020, 0.300, ("PaymentsClient", "DeliveryClient", "LoyaltyClient", "PromotionsClient")),
+    "UsersClient": Node(0.200, 0.010),
+    "RecommendationsClient": Node(0.250, 0.010),
+    "FavoritesClient": Node(0.150, 0.010),
     # Flushes the messages it has buffered
-    "EventsProducer": (0.300, 0.300, ()),
-    "Personalization": (
-        0.020,
-        0.005,
-        ("UsersClient", "RecommendationsClient", "FavoritesClient", "EventsProducer"),
+    "EventsProducer": Node(0.300, 0.300),
+    "Personalization": Node(
+        0.020, 0.005, ("UsersClient", "RecommendationsClient", "FavoritesClient", "EventsProducer")
     ),
-    "Elasticsearch": (0.250, 0.010, ()),
-    "Redis": (0.100, 0.010, ()),
-    "SynonymsClient": (0.150, 0.010, ()),
-    "CategoriesClient": (0.200, 0.010, ()),
-    "Search": (0.020, 0.005, ("Elasticsearch", "Redis", "SynonymsClient", "CategoriesClient")),
-    "ProductPageApi": (0.010, 0.050, ("ProductCard", "Checkout", "Personalization", "Search")),
+    "Elasticsearch": Node(0.250, 0.010),
+    "Redis": Node(0.100, 0.010),
+    "SynonymsClient": Node(0.150, 0.010),
+    "CategoriesClient": Node(0.200, 0.010),
+    "Search": Node(0.020, 0.005, ("Elasticsearch", "Redis", "SynonymsClient", "CategoriesClient")),
+    "ProductPageApi": Node(0.010, 0.050, ("ProductCard", "Checkout", "Personalization", "Search")),
 }
 
 
@@ -237,10 +247,10 @@ def product_page() -> type[Client]:
     the root, ProductPageApi.
     """
     made: dict[str, type[Client]] = {}
-    for name, (connect_seconds, disconnect_seconds, dependencies) in PRODUCT_PAGE_TREE.items():
-        cls = client(name, [made[dependency] for dependency in dependencies], base=Sleeper)
-        cls.connect_seconds = connect_seconds  # type: ignore[attr-defined]
-        cls.disconnect_seconds = disconnect_seconds  # type: ignore[attr-defined]
+    for name, node in PRODUCT_PAGE_TREE.items():
+        cls = client(name, [made[dependency] for dependency in node.dependencies], base=Sleeper)
+        cls.connect_seconds = node.connect  # type: ignore[attr-defined]
+        cls.disconnect_seconds = node.disconnect  # type: ignore[attr-defined]
         made[name] = cls
     return made["ProductPageApi"]
 
@@ -317,8 +327,10 @@ async def dishka_start(root: type[Client], gather: bool = False) -> Stop:
     provider = Provider(scope=Scope.APP)
     for cls in tree_of(root):
         provider.provide(lifecycle(cls))
-    # The container connects nothing until a client is asked for
-    container = make_async_container(provider)
+    # The container connects nothing until a client is asked for. It serializes the `get()` calls with a lock, so
+    # gathered ones run one after another unless the lock is off; without it, a client that two gathered branches
+    # share is built and connected twice
+    container = make_async_container(provider, lock_factory=None) if gather else make_async_container(provider)
     await get_root(container, root, gather)
     return container.close
 

@@ -212,8 +212,8 @@ framework integrations use the same cache.
 ![nuke-di against other DI libraries: lower is better](benchmarks/compare.png)
 
 The chart is `benchmarks/chart.py` over the JSON of a run, and `compare.py --summary` prints the same
-three figures as a table, plus the cold start of the string-annotation tree, the best per row in bold
-with the ratio of the others to it; here at `N = 100`, from the full run below:
+three figures as a table, plus the cold start of the string-annotation tree, the best per row in bold,
+and every figure within 1% of it, with the ratio of the others to the best; here at `N = 100`, from the full run below:
 
 | Lower is better                                          | nuke-di        | dishka          | wireup          | dependency-injector | injector        |
 |----------------------------------------------------------|---------------:|----------------:|----------------:|--------------------:|----------------:|
