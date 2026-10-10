@@ -3,12 +3,14 @@ The FastMCP integration: tools, resources and prompts of a `FastMCP` server, and
 take clients by type hint, through FastMCP's `Depends`.
 """
 
+import functools
 import inspect
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from fastmcp import Client as MCPClient
 from fastmcp import Context, FastMCP
 from fastmcp.dependencies import Depends
@@ -17,6 +19,7 @@ from fastmcp.tools import Tool
 from mcp.types import TextContent, TextResourceContents
 
 from nuke_di import DI, Client, Dependencies
+from nuke_di.fastapi import setup as fastapi_setup
 from nuke_di.fastmcp import _FASTMCP, setup
 from nuke_di.integration.testing import Send, check
 
@@ -177,6 +180,73 @@ async def test_tool_object_and_callable_object_are_left_to_fastmcp() -> None:
     assert events == []
 
 
+async def test_client_with_a_default_is_filled() -> None:
+    async def count_books(genre: str, catalog: Catalog = None) -> int:  # type: ignore[assignment]
+        return catalog.count(genre)
+
+    server = make_server(Dependencies())
+    server.tool(count_books)
+
+    assert await call(server, "count_books", {"genre": "fantasy"}) == 2
+
+
+def test_partial_callable_object_and_class_with_clients_are_refused() -> None:
+    def count(genre: str, catalog: Catalog) -> int:
+        return catalog.count(genre)  # pragma: no cover
+
+    class Counter:
+        __name__ = "counter"
+
+        def __call__(self, genre: str, catalog: Catalog) -> int:
+            return catalog.count(genre)  # pragma: no cover
+
+    class Reader:
+        def __init__(self, db: Database) -> None:
+            self.db = db  # pragma: no cover
+
+    async def read(reader: Reader = Depends(Reader)) -> str:
+        return ""  # pragma: no cover
+
+    server = make_server(Dependencies())
+
+    with pytest.raises(TypeError, match=r'Argument "catalog" of a functools\.partial of .*count is Catalog'):
+        server.add_tool(functools.partial(count, "fantasy"))
+    with pytest.raises(TypeError, match=r'Argument "catalog" of the callable object .*Counter is Catalog'):
+        server.add_tool(Counter())
+    with pytest.raises(TypeError, match=r'Argument "db" of the class .*Reader is Database: .* declare a function'):
+        server.tool(read)
+
+
+def test_function_read_by_fastmcp_before_setup_is_refused() -> None:
+    async def count_books(genre: str, catalog: Catalog) -> int:
+        return catalog.count(genre)  # pragma: no cover
+
+    with pytest.raises(TypeError, match="not a pydantic type"):
+        FastMCP("plain").tool(count_books)
+
+    with pytest.raises(TypeError, match=r"FastMCP read .*count_books before setup\(\) and keeps the signature"):
+        make_server(Dependencies()).tool(count_books)
+
+
+def test_one_function_for_fastapi_and_fastmcp_is_refused() -> None:
+    async def for_fastapi_first(catalog: Catalog) -> int:
+        return 1  # pragma: no cover
+
+    async def for_fastmcp_first(catalog: Catalog) -> int:
+        return 1  # pragma: no cover
+
+    app = FastAPI()
+    fastapi_setup(app, Dependencies())
+    app.get("/first")(for_fastapi_first)
+    server = make_server(Dependencies())
+    server.tool(for_fastmcp_first)
+
+    with pytest.raises(TypeError, match="takes clients in both FastAPI and FastMCP handlers"):
+        server.tool(for_fastapi_first)
+    with pytest.raises(TypeError, match="takes clients in both FastMCP and FastAPI handlers"):
+        app.get("/second")(for_fastmcp_first)
+
+
 async def test_own_dependency_of_a_client_type_is_kept() -> None:
     def fake() -> Catalog:
         return Catalog(FakeDatabase())
@@ -268,6 +338,60 @@ async def test_resources_and_prompts_take_clients() -> None:
     assert isinstance(message.content, TextContent)
     assert message.content.text == "Recommend one of the 2 fantasy books."
     assert [argument.name for argument in listed.arguments or []] == ["genre"]
+
+
+# --- mounted servers -------------------------------------------------------------------------------------
+
+
+async def test_mounted_server_on_the_same_container_shares_its_clients() -> None:
+    async def count_books(genre: str, catalog: Catalog) -> int:
+        return catalog.count(genre)
+
+    async def titles(genre: str, db: Database) -> list[str]:
+        return db.books[genre]
+
+    container = Dependencies()
+    parent, child = make_server(container), make_server(container)
+    parent.tool(count_books)
+    child.tool(titles)
+    parent.mount(child, namespace="shelf")
+
+    async with MCPClient(parent) as client:
+        assert (await client.call_tool("count_books", {"genre": "fantasy"})).data == 2
+        assert (await client.call_tool("shelf_titles", {"genre": "poetry"})).data == ["Leaves of Grass"]
+    # On its own, the mounted server starts its clients itself
+    assert await call(child, "titles", {"genre": "poetry"}) == ["Leaves of Grass"]
+
+    assert events == ["database: connected", "database: disconnected"] * 2
+
+
+async def test_mounted_server_on_another_container_starts_its_own() -> None:
+    async def titles(genre: str, db: Database) -> list[str]:
+        return db.books[genre]
+
+    parent, child = make_server(Dependencies()), make_server(Dependencies())
+    child.tool(titles)
+    parent.mount(child)
+
+    assert await call(parent, "titles", {"genre": "poetry"}) == ["Leaves of Grass"]
+    assert events == ["database: connected", "database: disconnected"]
+
+
+async def test_server_mounted_before_setup_on_the_same_container_fails_to_start() -> None:
+    async def titles(genre: str, db: Database) -> list[str]:
+        return db.books[genre]  # pragma: no cover
+
+    container = Dependencies()
+    parent: FastMCP[Any] = FastMCP("parent")
+    child = make_server(container)
+    child.tool(titles)
+    parent.mount(child)
+    setup(parent, container)
+
+    with pytest.raises(RuntimeError, match=r"bookshop is mounted on a server that runs on the same container"):
+        async with MCPClient(parent):
+            pass  # pragma: no cover
+    assert not container.connected
 
 
 # --- one function, two servers ---------------------------------------------------------------------------

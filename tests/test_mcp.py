@@ -2,6 +2,8 @@
 The MCP SDK integration: the tools of an `MCPServer` take clients by type hint, through the SDK's `Resolve`.
 """
 
+import functools
+import sys
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
@@ -10,6 +12,9 @@ import pytest
 from mcp import Client as MCPClient
 from mcp.server.mcpserver import Context, MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import InvalidSignature, ToolError
+from mcp.types import InputRequiredResult
+from pydantic import BaseModel, ConfigDict
+from pydantic.json_schema import GenerateJsonSchema
 
 from nuke_di import DI, Client, Dependencies
 from nuke_di.integration.testing import Send, check
@@ -118,6 +123,15 @@ async def test_function_is_left_as_written() -> None:
 
     assert count_books.__annotations__ == annotations
     assert "__signature__" not in vars(count_books)
+    if sys.version_info >= (3, 14):
+        # The annotations as written, not only their values: `__annotate__` is kept
+        import annotationlib
+
+        assert annotationlib.get_annotations(count_books, format=annotationlib.Format.STRING) == {
+            "genre": "str",
+            "catalog": "Catalog",
+            "return": "int",
+        }
     # A test can call it with a client of its own
     assert await count_books("fantasy", Catalog(FakeDatabase())) == 1
 
@@ -156,6 +170,25 @@ async def test_bound_method_tool() -> None:
     assert await call(server, "count", {"genre": "fantasy"}) == {"result": "corner: 2"}
 
 
+async def test_callable_object_takes_clients() -> None:
+    class Counter:
+        __name__ = "count"
+
+        def __call__(self, genre: str, catalog: Catalog) -> int:
+            return catalog.count(genre)
+
+    server = make_server(Dependencies())
+    server.add_tool(Counter(), name="count")
+
+    async with MCPClient(server) as client:
+        (tool,) = (await client.list_tools()).tools
+        result = await client.call_tool("count", {"genre": "fantasy"})
+
+    assert list(tool.input_schema["properties"]) == ["genre"]
+    assert result.structured_content == {"result": 2}
+    assert "Annotated" not in str(Counter.__call__.__annotations__)
+
+
 async def test_callable_object_is_left_to_the_sdk() -> None:
     class Hello:
         __name__ = "hello"
@@ -165,9 +198,56 @@ async def test_callable_object_is_left_to_the_sdk() -> None:
 
     server = make_server(Dependencies())
     server.add_tool(Hello(), name="hello")
+    # A builtin has no annotations to fill
+    server.add_tool(len, name="size")
 
     assert await call(server, "hello", {"name": "Ada"}) == {"result": "Hello, Ada!"}
     assert events == []
+
+
+async def test_client_with_a_default_is_filled() -> None:
+    async def count(genre: str, catalog: Catalog = None) -> int:  # type: ignore[assignment]
+        return catalog.count(genre)
+
+    server = make_server(Dependencies())
+    server.tool()(count)
+
+    assert await call(server, "count", {"genre": "fantasy"}) == {"result": 2}
+
+
+def test_partial_with_clients_is_refused() -> None:
+    def count(genre: str, catalog: Catalog) -> int:
+        return catalog.count(genre)  # pragma: no cover
+
+    server = make_server(Dependencies())
+
+    with pytest.raises(TypeError, match=r'Argument "catalog" of a functools.partial of .*count is Catalog'):
+        server.add_tool(functools.partial(count, "fantasy"), name="fantasy")
+
+
+def test_partial_without_clients_is_left_to_the_sdk() -> None:
+    def greet(greeting: str, name: str) -> str:
+        return f"{greeting}, {name}!"  # pragma: no cover
+
+    def missing(value: "Missing") -> str:  # type: ignore[name-defined]  # noqa: F821
+        return ""  # pragma: no cover
+
+    server = make_server(Dependencies())
+    # The SDK takes no partials: it reads their `__name__`
+    for partial in (functools.partial(greet, "Hello"), functools.partial(missing)):
+        with pytest.raises(AttributeError, match="__name__"):
+            server.add_tool(partial, name="greet")
+
+
+def test_input_required_result_with_clients_is_refused() -> None:
+    async def ask(catalog: Catalog) -> InputRequiredResult | int:
+        return 1  # pragma: no cover
+
+    server = make_server(Dependencies())
+
+    with pytest.raises(TypeError, match="takes clients and returns an InputRequiredResult") as raised:
+        server.tool()(ask)
+    assert isinstance(raised.value.__cause__, InvalidSignature)
 
 
 async def test_one_function_on_two_servers_with_two_containers() -> None:
@@ -330,6 +410,21 @@ def test_unresolvable_annotation_is_left_to_the_sdk() -> None:
     server = make_server(Dependencies())
     with pytest.raises(Exception, match="Unable to evaluate type annotations for callable 'tool'"):
         server.add_tool(tool)
+
+
+def test_tolerant_json_schema_generator_keeps_working() -> None:
+    # A JSON schema generator that tolerates arbitrary types gets its own answer, not the TypeError
+    class Tolerant(GenerateJsonSchema):
+        def handle_invalid_for_json_schema(self, schema: Any, error_info: str) -> dict[str, Any]:
+            return {"title": "invalid"}
+
+    class Model(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        catalog: Catalog
+
+    assert Model.model_json_schema(schema_generator=Tolerant)["properties"]["catalog"] == {"title": "invalid"}
+    with pytest.raises(TypeError, match="Catalog is a nuke-di client, not a pydantic type"):
+        Model.model_json_schema()
 
 
 def test_tool_declared_before_setup_names_the_fix() -> None:

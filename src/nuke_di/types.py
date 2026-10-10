@@ -25,10 +25,14 @@ class NotSingletonClient:
     @classmethod
     def __get_pydantic_json_schema__(cls, schema: Any, handler: Callable[[Any], Any]) -> Any:
         """
-        Explain a client where pydantic needs a JSON schema for it, which a model that allows arbitrary types
-        has none of, e.g. in the arguments of an MCP tool declared without nuke_di.mcp.
+        Explain a client where pydantic fails to give it a JSON schema, which a model that allows arbitrary
+        types has none of, e.g. in the arguments of an MCP tool declared without nuke_di.mcp; a generator that
+        tolerates such types keeps its own answer.
         """
-        raise TypeError(_not_a_pydantic_type(cls))
+        try:
+            return handler(schema)
+        except Exception as exc:
+            raise TypeError(_not_a_pydantic_type(cls)) from exc
 
     async def connect(self) -> None:
         """
