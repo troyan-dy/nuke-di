@@ -123,6 +123,10 @@ As regras:
   com o `TypeError` descrito [abaixo](#not-supported).
 - **Só o que a aplicação serve.** Um router que a aplicação não inclui, por exemplo um importado apenas por um
   teste, não conecta nada na inicialização da aplicação.
+- **Um container por aplicação.** Cada aplicação recebe os clientes do container passado ao `setup()` dela, então
+  duas aplicações sobre dois containers servem as mesmas funções ao mesmo tempo, por exemplo em testes. Uma
+  aplicação montada em uma aplicação com `setup()`, ou uma que serve as rotas dela, por exemplo via
+  `include_router(api.router)`, que roda o lifespan de `api`, recebe os clientes que essa aplicação iniciou.
 - **Instâncias.** Assim como em `inject()`, um `Client` é uma instância por container, e um
   `NotSingletonClient` é uma instância por argumento que o declara, não uma por requisição.
 - **Lifespan.** O `lifespan=` da própria aplicação roda por dentro: o código de inicialização dele já vê os clientes conectados, e

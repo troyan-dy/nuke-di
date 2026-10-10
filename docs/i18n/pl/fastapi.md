@@ -124,6 +124,11 @@ Zasady:
   błędem `TypeError` opisanym [niżej](#not-supported).
 - **Tylko to, co obsługuje aplikacja.** Router, którego aplikacja nie dołącza, np. importowany wyłącznie
   w teście, niczego nie łączy przy starcie aplikacji.
+- **Jeden kontener na aplikację.** Każda aplikacja dostaje klientów kontenera przekazanego do jej `setup()`,
+  więc dwie aplikacje na dwóch kontenerach jednocześnie obsługują te same funkcje, np. w testach. Aplikacja
+  zamontowana w aplikacji z `setup()` albo taka, która obsługuje jej trasy, np. przez
+  `include_router(api.router)`, który uruchamia lifespan `api`, dostaje klientów uruchomionych przez tamtą
+  aplikację.
 - **Instancje.** Tak jak w `inject()`, `Client` to jedna instancja na kontener, a
   `NotSingletonClient` — jedna instancja na każdy argument, który go deklaruje, a nie jedna na żądanie.
 - **Lifespan.** Własny `lifespan=` aplikacji działa wewnątrz: jego kod startowy widzi połączonych klientów,

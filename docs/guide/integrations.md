@@ -13,9 +13,9 @@ and the public API.
 | Name | What it does |
 |---|---|
 | `Framework(name, not_started, not_connected)` | What the users of a framework are told when a client is missing; `{client}` in a message is the client's class name. |
-| `DependsFramework(..., depends, make_depends, per_container=True, getter=None)` | A framework that injects through `Depends(...)` markers: `depends` is the class of its markers, `make_depends` builds one for a function, `getter` builds what the marker of a client calls (`binding.get` without it). |
+| `DependsFramework(..., depends, make_depends, per_container=True)` | A framework that injects through `Depends(...)` markers: `depends` is the class of its markers, `make_depends` builds one for a function. |
 | `bind(call, container, framework)` | Rewrites the signature of a handler, a dependency function or a dependency class, and of the dependencies it uses: each client argument becomes `Annotated[Client, Depends(...)]`. Returns the `Binding` of each client. A type hint that cannot be evaluated, such as a name imported under `TYPE_CHECKING`, is left as written, and the other arguments are still rewritten. |
-| `Binding` | One client argument; `get()` returns the client resolved on startup, or raises `not_started` / `not_connected`. |
+| `Binding(cls, container, framework)` | One client argument: `cls` is the client's class, `instance` the client `running()` resolved, `None` before startup and after shutdown. `get()` returns it, or raises `not_started` / `not_connected`. `bind()` creates them; an integration without `Depends` creates one per client argument itself. |
 | `running(container, bindings)` | An async context manager: resolves the clients of `bindings`, connects the container, and on exit sets `Shutdown`, stops the `BackgroundTasks` and disconnects. A `ConnectError` or `InitializeDependencyError` becomes a `RuntimeError`, which a server reports as a failed startup; an error of the client tree, such as a cycle, passes as it is. |
 | `wrap_lifespan(original, container, bindings)` | A lifespan that runs the app's own `original` lifespan inside `running()`; `bindings` is called on startup, so handlers declared after `setup()` are found. |
 | `client_of(hint, *markers)` | The client a type hint asks for, or `None`: `Client`, or `Annotated[Client, ...]` without any of `markers`. |
@@ -103,7 +103,8 @@ and routers, and one rewrite hook per broker when several apps share it.
 (the default) a function bound to one container and declared again for another is bound again, so each app
 keeps the bindings it captured. That holds only for a framework that reads a handler's signature once, when the
 handler is declared, and never again: a signature rewritten for the second container would reach the first
-app the next time the framework reads it.
+app the next time the framework reads it. No integration shipped with nuke-di uses it any more: FastAPI read
+signatures that way until 0.136.
 
 With `per_container=False` (FastStream, FastAPI) a function is bound once, whatever the container, and every
 app that starts resolves the same `Binding`s. FastStream builds a subscriber on every start, and under a test
@@ -111,12 +112,9 @@ broker even before the app's lifespan runs; FastAPI 0.137 and later build the ro
 the app's first request. Either way the signature must not change from one app to the next. The cost: two
 apps that share a handler function run one at a time, and the second raises `RuntimeError: ... is filled for
 another app that is running`. Choose `False` when the framework may read a signature again after the first
-app has started.
-
-`getter` removes that cost when the framework tells a handler which app it serves. `nuke_di.fastapi` gives
-each app its own `Binding` for every shared one, resolved in the app's container on startup, and its `getter`
-builds, for each shared `Binding`, a dependency that takes the request and returns the client of the app the
-request came to. Two apps on two containers then serve the same function at once.
+app has started. `nuke_di.fastapi` avoids the cost, because a FastAPI dependency can take the request: each
+app resolves its own copy of every `Binding` in its own container, and the request picks the copy of its app,
+so two apps on two containers serve the same function at once.
 
 ## <a id="a-framework-without-depends"></a>A framework without `Depends`
 

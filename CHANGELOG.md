@@ -6,7 +6,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.18.3] - 2026-10-10
+## [1.18.2] - 2026-10-10
 
 ### Fixed
 
@@ -18,11 +18,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   routes served the newer app's clients. A function is now rewritten once, whatever the container; its
   `Depends` calls a getter that takes the request and returns the client of the app the request came to,
   resolved in that app's container on startup. Two apps on two containers still serve the same function at
-  once, included and nested routers and websockets too; one request with one client costs what it did. The
-  kit gained `DependsFramework.getter` for this.
-- `bind()` evaluates the type hints of a function each on its own: one that cannot be evaluated, such as a name
-  imported under `TYPE_CHECKING`, is left as written instead of making `bind()` skip the whole function. Its
-  client arguments and `Depends(...)` are found again, so Strawberry's
+  once, included and nested routers and websockets too, and one request with one client costs what it did.
+  An app that serves the routes of a set-up app, e.g. through `include_router(api.router)`, a mounted app and
+  an app without `setup()` get the clients of the one running app that started them.
+- FastAPI, on every version: `app.dependency_overrides` on one app while an app on another container ran at
+  the same time gave the override the other container's clients, since FastAPI reads the signature of an
+  override on every request. It gets its own app's clients now.
+- `bind()` evaluates the type hints of a function each on its own, for every integration built on
+  `nuke_di.integration` (FastAPI, FastStream and third-party ones): a hint that cannot be evaluated, such as a
+  name imported under `TYPE_CHECKING`, is left as written instead of making `bind()` skip the whole function,
+  and on Python 3.14, which evaluates annotations when it reads a signature, such a name is read as a
+  `ForwardRef`. The client arguments and `Depends(...)` of that function are found again, so Strawberry's
   `GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute)` works with clients in `Context`
   without also listing `Depends(Context)` in its `dependencies=`: Strawberry wraps the getter in a dependency
   whose return type is imported only under `TYPE_CHECKING`.
@@ -30,8 +36,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ### Documentation
 
 - [Writing an integration](docs/guide/integrations.md#per-container) says which frameworks `per_container=True`
-  fits, now that FastAPI reads signatures lazily, and what `getter` is for, in every language. ADR-0003 has a
-  dated revisit with the designs considered and rejected.
+  fits, now that no shipped integration uses it, and documents the `Binding(cls, container, framework)`
+  constructor and its `cls` and `instance`; the [FastAPI](docs/guide/fastapi.md) rules say which container's
+  clients an app gets, mounted apps included; in every language. ADR-0003 has a dated revisit with the
+  designs considered and rejected.
 
 ## [1.14.3] - 2026-10-10
 
@@ -653,8 +661,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.3...HEAD
-[1.18.3]: https://github.com/troyan-dy/nuke-di/compare/v1.18.2...v1.18.3
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.2...HEAD
+[1.18.2]: https://github.com/troyan-dy/nuke-di/compare/v1.18.1...v1.18.2
 [1.14.3]: https://github.com/troyan-dy/nuke-di/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/troyan-dy/nuke-di/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/troyan-dy/nuke-di/compare/v1.14.0...v1.14.1

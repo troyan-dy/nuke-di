@@ -74,7 +74,7 @@ The routes the app serves: those in `app.router.routes`, those of every router i
 
 ### Getter
 
-An `async def`, so FastAPI calls it inline (no threadpool), one per client argument, shared by every container. It takes the connection (`HTTPConnection`: the request or the websocket) and returns the client of the `Binding` that `connection.app` resolved on startup; an app without `setup()` gets the messages of the container the function was first bound to, and a route the app's startup never saw raises the "was not started with the app" error. Before startup, or after shutdown, it raises `RuntimeError("UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)`")`.
+An `async def`, so FastAPI calls it inline (no threadpool), one per client argument, shared by every container. It takes the connection (`HTTPConnection`: the request or the websocket) and returns the client of the `Binding` that `connection.app` resolved on startup. An app with no `Binding` of its own for the function (one that serves the routes of a set-up app, e.g. through `include_router(api.router)`, which runs `api`'s lifespan; a mounted app; an app without `setup()`) gets the copy that a running app filled, if exactly one did. Otherwise a set-up app whose container is connected raises the "was not started with the app" error, and any other app the "not connected" one. `bind()` writes the getter through `DependsFramework._getter`, an internal field of the kit. Before startup, or after shutdown, it raises `RuntimeError("UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)`")`.
 
 ### `NotSingletonClient.__get_pydantic_core_schema__`
 
@@ -95,14 +95,14 @@ In core, no import of pydantic. Defers to pydantic's own handler and only replac
 | 3 | Activation | `route_class`: the only stable public hook before FastAPI analyses an endpoint. |
 | 4 | When to resolve | On startup, not at route declaration: imports stay cheap, and `override()` works in tests. |
 | 5 | How startup finds the clients | Each route keeps its clients; nuke-di records which routers the app includes. Not a walk of FastAPI's routes (private `_IncludedRouter` in 0.142), and not a list per container, which would start routes of other apps and of apps already dropped. |
-| 6 | Getter cost | `async def` without arguments: about 4 µs per request with one client, measured. Since 1.18.3 it takes the connection to find its app; one request with one client measured 114 µs median before and after. |
+| 6 | Getter cost | `async def` that takes the connection, to find the app it serves; inline, no threadpool. One request with one client: 105 µs median, the same as a plain FastAPI `Depends()` (`benchmarks/run.py --only fastapi`, CPython 3.14, FastAPI 0.142.4). |
 | 7 | Container choice | `ClientRoute` and `ClientRouter()` for `DI`; `setup(app, container)` and `ClientRouter(container=...)` for others. No public route-class factory. |
 | 8 | Lifespan order | Ours outside the app's own: clients are connected during the app's startup and still connected during its shutdown. Shutdown order follows a Run: `Shutdown`, `BackgroundTasks`, `disconnect()`. |
 | 9 | Unsupported places | One `TypeError` with the fix, through the pydantic hook, instead of FastAPI's "Invalid args for response field". |
 | 10 | `NotSingletonClient` | One instance per argument, like `inject()`. |
 | 11 | Minimum FastAPI | 0.105: the first that works with current pydantic 2 (0.100–0.104 break on `Header()` even without nuke-di). CI runs the FastAPI tests on it. |
 | 12 | FastAPI's `BackgroundTasks` | Not a client; `nuke_di.BackgroundTasks` is. Documented, no special case. |
-| 13 | A function declared with two containers | Not refused: an app factory with a container per test is common. Until 1.18.2 it was rewritten again from its original signature; FastAPI 0.137+ reads included routes lazily, so since 1.18.3 it is rewritten once and each app picks its own clients per request (ADR-0003, revisited). |
+| 13 | A function declared with two containers | Not refused: an app factory with a container per test is common. Until 1.18.1 it was rewritten again from its original signature; FastAPI 0.137+ reads included routes lazily, so since 1.18.2 it is rewritten once and each app picks its own clients per request (ADR-0003, revisited). |
 | 14 | Lazy dependency paths of FastAPI 0.14x | `ClientRouter` covers router-level and `include_router()` dependencies, `setup()` the app's and those of `app.include_router()`, by wrapping that method of the app it was given. |
 | 16 | Class dependencies | Supported: `Depends(Auth)` with clients in `Auth.__init__` is common in FastAPI. |
 | 17 | A router of another container | `TypeError` on `include_router()`: its clients would never start. |

@@ -13,9 +13,9 @@ framework no necesita de nuke-di nada más que eso y la API pública.
 | Nombre | Qué hace |
 |---|---|
 | `Framework(name, not_started, not_connected)` | Lo que se les dice a los usuarios de un framework cuando falta un cliente; `{client}` en un mensaje es el nombre de la clase del cliente. |
-| `DependsFramework(..., depends, make_depends, per_container=True, getter=None)` | Un framework que inyecta mediante marcadores `Depends(...)`: `depends` es la clase de sus marcadores, `make_depends` construye uno para una función, `getter` construye lo que llama el marcador de un cliente (`binding.get` si no se pasa). |
+| `DependsFramework(..., depends, make_depends, per_container=True)` | Un framework que inyecta mediante marcadores `Depends(...)`: `depends` es la clase de sus marcadores, `make_depends` construye uno para una función. |
 | `bind(call, container, framework)` | Reescribe la firma de un handler, de una función de dependencia o de una clase de dependencia, y de las dependencias que usa: cada argumento de tipo cliente pasa a ser `Annotated[Client, Depends(...)]`. Devuelve el `Binding` de cada cliente. Una anotación de tipo que no se puede evaluar, como un nombre importado bajo `TYPE_CHECKING`, se deja tal como está escrita, y los demás argumentos se reescriben igualmente. |
-| `Binding` | Un argumento de tipo cliente; `get()` devuelve el cliente resuelto al arrancar, o lanza `not_started` / `not_connected`. |
+| `Binding(cls, container, framework)` | Un argumento de tipo cliente: `cls` es la clase del cliente, `instance` es el cliente que resolvió `running()`, o `None` antes del arranque y después del apagado. `get()` lo devuelve, o lanza `not_started` / `not_connected`. Los crea `bind()`; una integración sin `Depends` crea por su cuenta uno por cada argumento de tipo cliente. |
 | `running(container, bindings)` | Un context manager asíncrono: resuelve los clientes de `bindings`, conecta el contenedor y, al salir, activa `Shutdown`, detiene las `BackgroundTasks` y desconecta. Un `ConnectError` o un `InitializeDependencyError` se convierte en un `RuntimeError`, que un servidor reporta como un arranque fallido; un error del árbol de clientes, como un ciclo, pasa tal cual. |
 | `wrap_lifespan(original, container, bindings)` | Un lifespan que ejecuta el lifespan `original` propio de la app dentro de `running()`; `bindings` se llama al arrancar, así que se encuentran los handlers declarados después de `setup()`. |
 | `client_of(hint, *markers)` | El cliente que pide un type hint, o `None`: `Client`, o `Annotated[Client, ...]` sin ninguno de los `markers`. |
@@ -102,7 +102,8 @@ y de los routers, y un hook de reescritura por broker cuando varias apps lo comp
 (el valor por defecto), una función vinculada a un contenedor y declarada de nuevo para otro se vincula de nuevo, así que
 cada app conserva los bindings que capturó. Eso solo vale para un framework que lee la firma de un handler una sola vez,
 cuando se declara el handler, y nunca más: una firma reescrita para el segundo contenedor llegaría a la primera app la
-próxima vez que el framework la leyera.
+próxima vez que el framework la leyera. Ya no lo usa ninguna integración incluida en nuke-di: FastAPI leía así las
+firmas hasta la 0.136.
 
 Con `per_container=False` (FastStream, FastAPI), una función se vincula una sola vez, sea cual sea el contenedor, y cada
 app que arranca resuelve los mismos `Binding`. FastStream construye un subscriber en cada arranque, y con un broker de
@@ -110,12 +111,9 @@ pruebas incluso antes de que se ejecute el lifespan de la app; FastAPI 0.137 y p
 router incluido en la primera petición a la app. En ambos casos la firma no debe cambiar de una app a otra. El coste: dos
 apps que comparten una función handler se ejecutan una tras otra, y la segunda lanza `RuntimeError: ... is filled for
 another app that is running`. Elige `False` cuando el framework pueda volver a leer una firma después de que la primera
-app haya arrancado.
-
-`getter` elimina ese coste cuando el framework le indica a un handler a qué app sirve. `nuke_di.fastapi` da a cada app su
-propio `Binding` por cada uno compartido, resuelto en el contenedor de la app al arrancar, y su `getter` construye, para
-cada `Binding` compartido, una dependencia que recibe la petición y devuelve el cliente de la app a la que llegó la
-petición. Así, dos apps sobre dos contenedores sirven la misma función a la vez.
+app haya arrancado. `nuke_di.fastapi` evita ese coste, porque una dependencia de FastAPI puede recibir la petición:
+cada app resuelve su propia copia de cada `Binding` en su propio contenedor, y la petición elige la copia de su app,
+así que dos apps sobre dos contenedores sirven la misma función a la vez.
 
 ## <a id="a-framework-without-depends"></a>Un framework sin `Depends`
 

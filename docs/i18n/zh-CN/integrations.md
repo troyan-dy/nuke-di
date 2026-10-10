@@ -11,9 +11,9 @@
 | 名称 | 作用 |
 |---|---|
 | `Framework(name, not_started, not_connected)` | 客户端缺失时告诉该框架用户的消息；消息中的 `{client}` 是客户端的类名。 |
-| `DependsFramework(..., depends, make_depends, per_container=True, getter=None)` | 通过 `Depends(...)` 标记注入的框架：`depends` 是其标记的类，`make_depends` 为一个函数构建标记，`getter` 构建客户端标记所调用的对象（不提供时为 `binding.get`）。 |
+| `DependsFramework(..., depends, make_depends, per_container=True)` | 通过 `Depends(...)` 标记注入的框架：`depends` 是其标记的类，`make_depends` 为一个函数构建标记。 |
 | `bind(call, container, framework)` | 重写处理函数、依赖函数或依赖类的签名，以及它所用依赖的签名：每个客户端参数都变成 `Annotated[Client, Depends(...)]`。返回每个客户端的 `Binding`。无法求值的类型提示（例如在 `TYPE_CHECKING` 下导入的名称）保持原样，其余参数照常重写。 |
-| `Binding` | 一个客户端参数；`get()` 返回启动时解析出的客户端，否则抛出 `not_started` / `not_connected`。 |
+| `Binding(cls, container, framework)` | 一个客户端参数：`cls` 是客户端的类，`instance` 是 `running()` 解析出的客户端，启动之前和关闭之后为 `None`。`get()` 返回它，否则抛出 `not_started` / `not_connected`。它们由 `bind()` 创建；不使用 `Depends` 的集成则自己为每个客户端参数创建一个。 |
 | `running(container, bindings)` | 一个异步上下文管理器：解析 `bindings` 中的客户端，连接容器；退出时设置 `Shutdown`、停止 `BackgroundTasks` 并断开连接。`ConnectError` 或 `InitializeDependencyError` 会变成 `RuntimeError`，服务器会将其报告为启动失败；客户端树的错误（例如循环依赖）则原样抛出。 |
 | `wrap_lifespan(original, container, bindings)` | 一个在 `running()` 内运行应用自己的 `original` lifespan 的 lifespan；`bindings` 在启动时调用，因此在 `setup()` 之后声明的处理函数也能被找到。 |
 | `client_of(hint, *markers)` | 类型提示所请求的客户端，或 `None`：`Client`，或不带任何 `markers` 的 `Annotated[Client, ...]`。 |
@@ -99,18 +99,16 @@ def _bindings(app: FastStream, container: Dependencies) -> list[Binding]:
 `bind()` 就地重写函数，并记住它所绑定的容器。当 `per_container=True`（默认值）时，一个已绑定到某个容器、
 又为另一个容器再次声明的函数会被重新绑定，因此每个应用都保留自己捕获的绑定。这只适用于只在声明处理函数时
 读取一次其签名、之后再也不读取的框架：为第二个容器重写的签名，会在框架下一次读取时影响到第一个应用。
+nuke-di 自带的集成都已不再使用这种方式：FastAPI 在 0.136 之前正是这样读取签名的。
 
 当 `per_container=False`（FastStream、FastAPI）时，函数只绑定一次，与容器无关，每个启动的应用都解析同样的
 `Binding`。FastStream 在每次启动时构建订阅者，在测试 broker 下甚至在应用的 lifespan 运行之前就构建；
 FastAPI 0.137 及更高版本则在应用收到第一个请求时才构建被包含路由器的路由。无论哪种情况，签名都不能在不同
 应用之间变化。代价是：共享同一个处理函数的两个应用只能依次运行，第二个会抛出
 `RuntimeError: ... is filled for another app that is running`。如果框架可能在第一个应用启动之后再次读取
-签名，就选择 `False`。
-
-当框架会告诉处理函数它在为哪个应用服务时，`getter` 可以消除这个代价。`nuke_di.fastapi` 为每个共享的
-`Binding` 给每个应用一个自己的 `Binding`，在启动时于该应用的容器中解析；它的 `getter` 为每个共享的
-`Binding` 构建一个依赖，该依赖接收请求并返回请求所到达的那个应用的客户端。这样，两个使用不同容器的应用就能
-同时服务同一个函数。
+签名，就选择 `False`。`nuke_di.fastapi` 避免了这个代价，因为 FastAPI 的依赖可以接收请求：每个应用都在
+自己的容器中解析每个 `Binding` 的一份副本，而请求会选用其所属应用的那份副本，因此两个使用不同容器的应用
+能够同时服务同一个函数。
 
 ## <a id="a-framework-without-depends"></a>不带 `Depends` 的框架
 
