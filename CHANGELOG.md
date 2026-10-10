@@ -6,6 +6,21 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.18.1] - 2026-10-10
+
+### Documentation
+
+- Servers without dependency injection of their own run inside a `@worker` (#73), and a new guide page,
+  `docs/guide/servers-in-workers.md`, in every language, shows each of them with its code, the command and the
+  output of a run stopped by SIGTERM in the middle of a call: grpc.aio (the servicer is a client,
+  `server.stop(grace)`), aiohttp (`AppRunner` instead of `web.run_app()`, `shutdown_timeout`), websockets
+  (`close_timeout`; a message in flight loses its reply), APScheduler 3 and 4 (a running coroutine job is
+  cancelled on shutdown, so a lock lets it finish), Textual (`App.run_async()`, Ctrl+C is a key, a test with
+  `run_test()`) and Temporal (#105: the activities class is a client, `temporalio.client.Client` is wrapped in
+  one, `graceful_shutdown_timeout`, workflows never take clients, a test on the time-skipping server). Linked
+  from the README, `docs/guide/integrations.md`, `docs/guide/workers-and-jobs.md`, the Agent Skill and
+  `context7.json`. No code in the package.
+
 ## [1.14.3] - 2026-10-10
 
 ### Changed
@@ -626,7 +641,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.14.3...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.1...HEAD
+[1.18.1]: https://github.com/troyan-dy/nuke-di/compare/v1.18.0...v1.18.1
 [1.14.3]: https://github.com/troyan-dy/nuke-di/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/troyan-dy/nuke-di/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/troyan-dy/nuke-di/compare/v1.14.0...v1.14.1
