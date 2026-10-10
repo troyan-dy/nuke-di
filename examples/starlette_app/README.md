@@ -1,35 +1,35 @@
-# Starlette, or any framework without an integration
+# Starlette
 
-nuke-di ships integrations for FastAPI, Litestar and FastStream. For any other framework, plain
-Starlette here, aiohttp, Sanic and the rest, the recipe is the same: bind the handlers with `inject()`
-and wrap the app's lifespan in `async with DI`. `wiring.py` does both in one small class.
+Starlette has no dependency injection, so its handlers take clients from `nuke_di.asgi.lifespan()`: the
+app's lifespan connects the clients it lists on startup and disconnects them on shutdown, and a handler
+asks it for one with `clients.get(UserService)`. Quart, aiohttp and a plain ASGI app use the same object,
+see [ASGI](../../docs/guide/asgi.md).
 
-| File          | What it holds                                                                      |
-|---------------|------------------------------------------------------------------------------------|
-| `clients.py`  | `Database` and `UserService` that depends on it                                    |
-| `wiring.py`   | `Wiring`: turns a handler that takes clients into an endpoint, and the lifespan    |
-| `app.py`      | Two handlers that take clients, the routes and `lifespan=wiring.lifespan`           |
-| `test_app.py` | Starlette's `TestClient` with `Database` replaced through `DI.override()`          |
+| File          | What it holds                                                                        |
+|---------------|--------------------------------------------------------------------------------------|
+| `clients.py`  | `Database` and `UserService` that depends on it                                      |
+| `app.py`      | `clients = lifespan(DI, UserService, Database)`, two handlers and `lifespan=clients` |
+| `test_app.py` | Starlette's `TestClient` with `Database` replaced through `DI.override()`            |
 
 ## Run
 
 ```console
 $ cd examples
 $ uv run --with uvicorn uvicorn starlette_app.app:app
-INFO:     Started server process [66986]
+INFO:     Started server process [45493]
 INFO:     Waiting for application startup.
 database: connected
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:53321 - "GET /users/1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53323 - "GET /users/42 HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:53325 - "GET /me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49986 - "GET /users/1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49988 - "GET /users/42 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49990 - "GET /me HTTP/1.1" 200 OK
 ^C
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 database: disconnected
 INFO:     Application shutdown complete.
-INFO:     Finished server process [66986]
+INFO:     Finished server process [45493]
 ```
 
 In another terminal:
@@ -47,18 +47,18 @@ You are bob
 
 ```console
 $ uv run pytest -q starlette_app
-...                                                                      [100%]
-3 passed in 0.06s
+....                                                                     [100%]
+4 passed in 0.07s
 ```
 
 ## What to look at
 
-- On import `wiring.endpoint(greet_user)` only records the handler; the framework gets a plain
-  `async def call(request)`, the shape every framework accepts.
-- The lifespan calls `DI.inject()` for every handler on **every startup**, then `async with DI`. Binding
-  once at import looks simpler but breaks twice: `disconnect()` flushes the container, so a second start
-  (the next test) would reuse clients that are no longer connected, and `DI.override()` needs a container
-  with nothing resolved yet. `test_restarts_with_fresh_clients` checks the first.
-- Another framework needs the same two steps in its own startup hooks: in aiohttp a `cleanup_ctx`
-  generator, in Sanic `before_server_start` and `after_server_stop`. Only the request and response types
-  in `wiring.py` change.
+- `lifespan(DI, UserService, Database)` lists the clients the handlers take; `Database` is listed
+  because `me` takes it, not because `UserService` depends on it. A handler that asks for a client
+  the list lacks gets a `RuntimeError` that says to list it.
+- Importing `app.py` resolves nothing: the clients are resolved on **every startup**, so
+  `DI.override()` before `TestClient` starts the app replaces `Database`, and a second start (the next
+  test) gets fresh, connected clients. `test_restarts_with_fresh_clients` checks the second.
+- Without the lifespan, `TestClient(app).get(...)` outside `with`, a handler raises
+  `RuntimeError: UserService is not connected: start the app with its lifespan`, followed by how;
+  `test_without_the_lifespan` shows it.
