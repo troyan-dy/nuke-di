@@ -175,6 +175,10 @@ PROGRAMS = [
         ("fastmcp_server",),
         output=("tool recommend(): The book to start with.", "count_books(genre='fantasy') = {'result': 3}"),
     ),
+    Program(
+        "aiogram_bot.demo",
+        output=("startup: bot 42, 0 users so far", "bot -> chat 8: 2 users so far", "database: disconnected, 2 users"),
+    ),
     Program("testing.main", output=("registered user 4",)),
     Program(
         "testing.jobs.reminders", ("--limit", "1", "--dry-run"), output=("reminders: would remind bob@example.com",)

@@ -24,6 +24,7 @@ GUIDE = [
     "litestar",
     "faststream",
     "mcp",
+    "aiogram",
     "integrations",
     "testing",
     "configuration",

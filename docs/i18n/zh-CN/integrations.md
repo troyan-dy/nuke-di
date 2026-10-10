@@ -5,7 +5,7 @@
 ← [文档](../README.zh-CN.md#documentation)
 
 与框架的集成要做两件事：框架的处理函数通过框架自身的依赖注入，按类型提示接收客户端；容器在应用启动时连接，
-在应用停止时断开。[FastAPI](fastapi.md)、[Litestar](litestar.md)、[FastStream](faststream.md) 和 [MCP](mcp.md) 的集成
+在应用停止时断开。[FastAPI](fastapi.md)、[Litestar](litestar.md)、[FastStream](faststream.md)、[MCP](mcp.md) 和 [aiogram](aiogram.md) 的集成
 都基于 `nuke_di.integration` 构建；与其他框架的集成，除了它和公开 API 之外，不需要 nuke-di 的任何其他东西。
 
 | 名称 | 作用 |
@@ -111,7 +111,9 @@ def _bindings(app: FastStream, container: Dependencies) -> list[Binding]:
 Litestar 按名称提供依赖项，aiogram 则从中间件按名称传递依赖。在这些框架中 `bind()` 不适用：用 `Framework`
 提供消息，用 `client_of()` 找出处理函数的客户端参数，为每个客户端创建一个 `Binding`，由框架以自己的方式
 调用它的 `get`，并在应用的 lifespan 中使用 `running()`。`nuke_di.litestar` 就是完整的示例：它以参数名
-注册 `Provide(binding.get)`。
+注册 `Provide(binding.get)`。`nuke_di.aiogram` 是另一个示例：dispatcher 的一个内层中间件把 `binding.instance`
+放进 update 的数据中，键名就是与该 update 匹配的处理函数里每个客户端参数的名称；`running()` 则包裹
+dispatcher 的启动和关闭。
 
 ## <a id="checking-an-integration"></a>检查集成
 

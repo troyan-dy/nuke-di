@@ -12,7 +12,7 @@
 
 依存関係は普通の型ヒントで宣言します。`nuke-di` は依存関係ツリーを構築し、各クライアントを一度だけ生成して、その非同期ライフサイクルを管理します。起動時には `connect()` を、終了時には `disconnect()` を呼び出します。各クライアントは自身の依存先の接続が終わるとすぐに起動し、準備ができた他のすべてのクライアントと並行して接続されます。
 
-さらに、デコレーターをひとつ付けるだけで async 関数がコマンドライン引数を持つプロセスになり、FastAPI、Litestar、FastStream のハンドラーと MCP ツールも、同じように型ヒントでクライアントを受け取ります。
+さらに、デコレーターをひとつ付けるだけで async 関数がコマンドライン引数を持つプロセスになり、FastAPI、Litestar、FastStream、aiogram のハンドラーと MCP ツールも、同じように型ヒントでクライアントを受け取ります。
 
 本番運用されている Python マイクロサービスフレームワークの DI 機構を切り出したもので、実行時の依存パッケージはありません。
 
@@ -348,20 +348,20 @@ $ pytest -q tests/test_api.py
 1 passed in 0.23s
 ```
 
-ルーター、WebSocket、アプリ自身の lifespan については [FastAPI](ja/fastapi.md) で説明しています。[Litestar](ja/litestar.md)、[FastStream](ja/faststream.md)、[MCP サーバー](ja/mcp.md)も同じように動作します。
+ルーター、WebSocket、アプリ自身の lifespan については [FastAPI](ja/fastapi.md) で説明しています。[Litestar](ja/litestar.md)、[FastStream](ja/faststream.md)、[MCP サーバー](ja/mcp.md)、[aiogram](ja/aiogram.md) も同じように動作します。
 
 ## <a id="documentation"></a>ドキュメント
 
 - [クライアント](ja/clients.md)：`Client` と `NotSingletonClient`、ライフサイクル、データクラスのクライアント、接続順序、起動時間、依存グラフ、接続エラーと解決エラー
 - [コンテナ](ja/container.md)：`Dependencies` とグローバルな `DI`、`resolve()`、`inject()`、`mock()`、`override()`
 - [ワーカーとジョブ](ja/workers-and-jobs.md)：`@job` と `@worker`、コマンドラインパラメータ、`Shutdown`、猶予期間、バックグラウンドタスク、終了コード、フック、Kubernetes
-- フレームワーク：[FastAPI](ja/fastapi.md)、[Litestar](ja/litestar.md)、[FastStream](ja/faststream.md)、SDK と FastMCP の上の [MCP サーバー](ja/mcp.md)、
+- フレームワーク：[FastAPI](ja/fastapi.md)、[Litestar](ja/litestar.md)、[FastStream](ja/faststream.md)、SDK と FastMCP の上の [MCP サーバー](ja/mcp.md)、[aiogram](ja/aiogram.md)、
   そして `nuke_di.integration` でほかのフレームワーク向けに[インテグレーションを書く](ja/integrations.md)
 - [テスト](ja/testing.md)：`mock()`、`override()`、pytest フィクスチャ、配線の確認
 - [設定](ja/configuration.md)：タイムアウト、並行数、猶予期間
 - [エラー](ja/errors.md)：すべての例外と、それが送出される条件
-- [サンプル](../../examples/README.md): すぐに動かせる 22 のシナリオ。単発のスクリプトやキューの worker から
-  FastAPI、Litestar、FastStream、Starlette、MCP サーバー、サービス全体まで、それぞれ出力とテスト付き
+- [サンプル](../../examples/README.md): すぐに動かせる 23 のシナリオ。単発のスクリプトやキューの worker から
+  FastAPI、Litestar、FastStream、aiogram、Starlette、MCP サーバー、サービス全体まで、それぞれ出力とテスト付き
 - [ベンチマーク](../benchmarks.md)：すべてのシナリオ、Python 3.11–3.14 のベースライン、他のライブラリとの比較
 - [コーディングエージェント](ja/agents.md)：Agent Skill、`AGENTS.md` 用のブロック、
   [`llms.txt`](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms.txt)、Context7、JSON としての依存グラフ

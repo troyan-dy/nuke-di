@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/troyan-dy/nuke-di/master/skills/nuk
 
 This project uses nuke-di. A dependency is a `nuke_di.Client` subclass whose `__init__` takes its own
 dependencies as type-hinted arguments; I/O goes in `async def connect()` / `disconnect()`, never in `__init__`.
-Functions, `@job` / `@worker` entrypoints, FastAPI / Litestar / FastStream handlers and MCP tools take clients by type hint.
+Functions, `@job` / `@worker` entrypoints, FastAPI / Litestar / FastStream / aiogram handlers and MCP tools take clients by type hint.
 
 Do not write what nuke-di rejects:
 - provider or factory functions: wrap a third-party object in a Client that creates it in connect();
@@ -73,7 +73,7 @@ Manual: https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt
 | Файл | Содержимое |
 |------|------------|
 | [`llms.txt`](../../../llms.txt) | Оглавление в формате [llms.txt](https://llmstxt.org): что `nuke-di` делает и чего не делает, ссылка на каждую страницу |
-| [`llms-full.txt`](../../../llms-full.txt) | README и всё руководство одним файлом, около 26 тысяч токенов |
+| [`llms-full.txt`](../../../llms-full.txt) | README и всё руководство одним файлом, около 32 тысяч токенов |
 
 Дайте агенту raw-ссылку `https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt`,
 и он прочитает всё руководство за один запрос.

@@ -65,6 +65,7 @@ docker run -d --rm --name nats -p 4222:4222 nats:2.10
 | [starlette_app](starlette_app/)             | A framework without an integration: `inject()` and a lifespan by hand       |
 | [faststream_nats](faststream_nats/)         | FastStream on NATS: a subscriber with clients and a publisher               |
 | [mcp_server](mcp_server/)                   | An MCP server on the SDK and on FastMCP: tools, a resource and a prompt     |
+| [aiogram_bot](aiogram_bot/)                 | An aiogram Telegram bot: handlers with clients, run against a fake Telegram |
 
 ### Putting it together
 

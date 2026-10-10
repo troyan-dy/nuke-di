@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "1.15.0"
+version = "1.16.0"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
@@ -24,6 +24,8 @@ keywords = [
   "cli",
   "fastapi",
   "litestar",
+  "aiogram",
+  "telegram-bot",
   "faststream",
   "mcp",
   "fastmcp",
@@ -60,6 +62,9 @@ Changelog = "https://github.com/troyan-dy/nuke-di/blob/master/CHANGELOG.md"
 nuke_di = "nuke_di.pytest_plugin"
 
 [project.optional-dependencies]
+aiogram = [
+    "aiogram>=3.2",
+]
 fastapi = [
     "fastapi>=0.105",
 ]
@@ -85,6 +90,7 @@ compare = [
     "wireup>=2.12.1",
 ]
 dev = [
+  "aiogram>=3.31",
   "fastapi>=0.142.4",
   "fastmcp>=4.1.0",
   "faststream[nats]>=0.7.7",

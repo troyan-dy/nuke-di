@@ -4,7 +4,7 @@
 
 ← [ドキュメント](../README.ja.md#documentation)
 
-フレームワークとのインテグレーションが行うことは 2 つです。フレームワークのハンドラーが、そのフレームワーク自身の依存性注入を通じて型ヒントでクライアントを受け取ること、そしてアプリの起動時にコンテナが接続し、停止時に切断することです。[FastAPI](fastapi.md)、[Litestar](litestar.md)、[FastStream](faststream.md)、[MCP](mcp.md) のインテグレーションは `nuke_di.integration` の上に作られており、ほかのフレームワークとのインテグレーションが nuke-di から必要とするのは、これと公開 API だけです。
+フレームワークとのインテグレーションが行うことは 2 つです。フレームワークのハンドラーが、そのフレームワーク自身の依存性注入を通じて型ヒントでクライアントを受け取ること、そしてアプリの起動時にコンテナが接続し、停止時に切断することです。[FastAPI](fastapi.md)、[Litestar](litestar.md)、[FastStream](faststream.md)、[MCP](mcp.md)、[aiogram](aiogram.md) のインテグレーションは `nuke_di.integration` の上に作られており、ほかのフレームワークとのインテグレーションが nuke-di から必要とするのは、これと公開 API だけです。
 
 | 名前 | 役割 |
 |---|---|
@@ -92,7 +92,7 @@ def _bindings(app: FastStream, container: Dependencies) -> list[Binding]:
 
 ## <a id="a-framework-without-depends"></a>`Depends` のないフレームワーク
 
-Litestar は依存関係を名前で提供し、aiogram はミドルウェアから名前で渡します。この場合 `bind()` は使えません。メッセージには `Framework`、ハンドラーのクライアント引数を見つけるには `client_of()`、クライアントごとに 1 つの `Binding`（その `get` はフレームワークが独自の方法で呼び出します）、そしてアプリの lifespan の中で `running()` を使います。実例は `nuke_di.litestar` です。引数の名前で `Provide(binding.get)` を登録しています。
+Litestar は依存関係を名前で提供し、aiogram はミドルウェアから名前で渡します。この場合 `bind()` は使えません。メッセージには `Framework`、ハンドラーのクライアント引数を見つけるには `client_of()`、クライアントごとに 1 つの `Binding`（その `get` はフレームワークが独自の方法で呼び出します）、そしてアプリの lifespan の中で `running()` を使います。実例は `nuke_di.litestar` です。引数の名前で `Provide(binding.get)` を登録しています。`nuke_di.aiogram` も実例の 1 つです。ディスパッチャーの inner ミドルウェアが、アップデートにマッチしたハンドラーのクライアント引数ごとに、その名前で `binding.instance` をアップデートのデータに入れ、`running()` がディスパッチャーの起動と停止を包みます。
 
 ## <a id="checking-an-integration"></a>インテグレーションを検証する
 

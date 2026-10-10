@@ -605,7 +605,7 @@ Found 2 errors in 1 file (checked 1 source file)
 - Pozostaje kontenerowi: adnotacja typu, której nie da się wyewaluować w czasie działania, a którą mypy
   i tak ewaluuje; klasa w zmiennej typu `type[...]`, która może zawierać podklasę z innym `__init__`;
   udekorowane lub przeciążone `__init__`; `inject()` klasy; trasy i handlery integracji z FastAPI,
-  Litestar i FastStream; typ, którego mypy nie zna, np. klasa z biblioteki bez adnotacji typów.
+  Litestar, FastStream i aiogram; typ, którego mypy nie zna, np. klasa z biblioteki bez adnotacji typów.
 - Zamierzony błąd, w teście tego błędu, wycisza się przez `# type: ignore[nuke-di]`.
 - Działa z mypy 1.13 i nowszym, z pamięcią podręczną (cache) i bez niej: zmiana klienta głęboko
   w drzewie powoduje ponowne sprawdzenie wywołań tego drzewa. Demon mypy, `dmypy`, może przeoczyć

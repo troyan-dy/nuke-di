@@ -16,8 +16,8 @@ cria cada cliente uma única vez e cuida do seu ciclo de vida assíncrono: `conn
 conectaram, em paralelo com todos os outros clientes que já estão prontos.
 
 Além disso, um único decorador transforma uma função assíncrona em um processo com argumentos de linha
-de comando, e os handlers do FastAPI, do Litestar e do FastStream e as tools MCP recebem clientes pelo type hint
-da mesma forma.
+de comando, e os handlers do FastAPI, do Litestar, do FastStream e do aiogram, assim como as tools MCP, recebem
+clientes pelo type hint da mesma forma.
 
 A biblioteca foi extraída da camada de DI de um framework de microsserviços Python usado em produção
 e não tem dependências em tempo de execução.
@@ -383,7 +383,7 @@ $ pytest -q tests/test_api.py
 ```
 
 Routers, websockets e o lifespan da própria aplicação são tratados em [FastAPI](pt-BR/fastapi.md);
-[Litestar](pt-BR/litestar.md), [FastStream](pt-BR/faststream.md) e [servidores MCP](pt-BR/mcp.md) funcionam da mesma forma.
+[Litestar](pt-BR/litestar.md), [FastStream](pt-BR/faststream.md), [servidores MCP](pt-BR/mcp.md) e [aiogram](pt-BR/aiogram.md) funcionam da mesma forma.
 
 ## <a id="documentation"></a>Documentação
 
@@ -394,13 +394,13 @@ Routers, websockets e o lifespan da própria aplicação são tratados em [FastA
 - [Workers e jobs](pt-BR/workers-and-jobs.md): `@job` e `@worker`, parâmetros de linha de comando,
   `Shutdown`, o período de tolerância, tarefas em segundo plano, códigos de saída, hooks, Kubernetes
 - Frameworks: [FastAPI](pt-BR/fastapi.md), [Litestar](pt-BR/litestar.md),
-  [FastStream](pt-BR/faststream.md), [servidores MCP](pt-BR/mcp.md) com o SDK e com o FastMCP, e
+  [FastStream](pt-BR/faststream.md), [servidores MCP](pt-BR/mcp.md) com o SDK e com o FastMCP, [aiogram](pt-BR/aiogram.md) e
   [como escrever uma integração](pt-BR/integrations.md) para outro framework com `nuke_di.integration`
 - [Testes](pt-BR/testing.md): `mock()`, `override()`, as fixtures do pytest, a verificação da ligação
 - [Configuração](pt-BR/configuration.md): timeouts, concorrência e o período de tolerância
 - [Erros](pt-BR/errors.md): cada exceção e quando ela é lançada
-- [Exemplos](../../examples/README.md): 22 cenários prontos para executar, de um script avulso e um worker de fila
-  a FastAPI, Litestar, FastStream, Starlette, um servidor MCP e um serviço completo, cada um com sua saída e seus testes
+- [Exemplos](../../examples/README.md): 23 cenários prontos para executar, de um script avulso e um worker de fila
+  a FastAPI, Litestar, FastStream, aiogram, Starlette, um servidor MCP e um serviço completo, cada um com sua saída e seus testes
 - [Benchmarks](../benchmarks.md): cada cenário, a linha de base no Python 3.11–3.14 e a comparação
   com outras bibliotecas
 - [Agentes de código](pt-BR/agents.md): a Agent Skill, um bloco para o `AGENTS.md`,
