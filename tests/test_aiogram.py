@@ -417,7 +417,7 @@ class FakeTelegram(Offline):
             updates, self.updates = self.updates, []
             return updates
         # Nothing more to come: stop as Ctrl+C would, and wait to be cancelled as a long poll would
-        asyncio.get_running_loop().create_task(self.dp.stop_polling())
+        self.stopping = asyncio.create_task(self.dp.stop_polling())
         await asyncio.Event().wait()
 
 

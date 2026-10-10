@@ -162,6 +162,10 @@ PROGRAMS = [
         exit_code=2,
         output=('job_exit_code{job="hooks_metrics.export.export"} 2', "invalid int value: 'three'"),
     ),
+    Program(
+        "aiogram_bot.demo",
+        output=("startup: bot 42, 0 users so far", "bot -> chat 8: 2 users so far", "database: disconnected, 2 users"),
+    ),
     Program("testing.main", output=("registered user 4",)),
     Program(
         "testing.jobs.reminders", ("--limit", "1", "--dry-run"), output=("reminders: would remind bob@example.com",)
