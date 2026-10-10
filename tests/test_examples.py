@@ -162,7 +162,28 @@ PROGRAMS = [
         exit_code=2,
         output=('job_exit_code{job="hooks_metrics.export.export"} 2', "invalid int value: 'three'"),
     ),
+    Program(
+        "mcp_server.ask",
+        output=(
+            "tool count_books(genre): How many books of a genre the shop has.",
+            "count_books(genre='fantasy') = {'result': 3}",
+            "database: disconnected",
+        ),
+    ),
+    Program(
+        "mcp_server.ask",
+        ("fastmcp_server",),
+        output=("tool recommend(): The book to start with.", "count_books(genre='fantasy') = {'result': 3}"),
+    ),
+    Program(
+        "aiogram_bot.demo",
+        output=("startup: bot 42, 0 users so far", "bot -> chat 8: 2 users so far", "database: disconnected, 2 users"),
+    ),
     Program("testing.main", output=("registered user 4",)),
+    Program(
+        "taskiq_app.main",
+        output=("send_report(1): sent to alice", "mail to admin: taskiq_app.tasks:send_reports finished"),
+    ),
     Program(
         "testing.jobs.reminders", ("--limit", "1", "--dry-run"), output=("reminders: would remind bob@example.com",)
     ),

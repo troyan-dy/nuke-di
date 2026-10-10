@@ -5,3 +5,7 @@ src = ["."]
 
 [lint.isort]
 known-third-party = ["nuke_di"]
+
+[lint.flake8-bugbear]
+# A dependency of taskiq is a default value, as in its documentation
+extend-immutable-calls = ["taskiq.TaskiqDepends"]

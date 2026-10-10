@@ -91,6 +91,50 @@ jobs:
       - run: uv sync --locked
       - run: make test-litestar-min
 
+  mcp-min:
+    # The lowest MCP SDK the `mcp` extra allows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv sync --locked
+      - run: make test-mcp-min
+
+  fastmcp-min:
+    # The lowest FastMCP the `fastmcp` extra allows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv sync --locked
+      - run: make test-fastmcp-min
+
+  aiogram-min:
+    # The lowest aiogram the `aiogram` extra allows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv sync --locked
+      - run: make test-aiogram-min
+
+  taskiq-min:
+    # The lowest taskiq and taskiq-dependencies the `taskiq` extra allows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv sync --locked
+      - run: make test-taskiq-min
+
   benchmarks:
     # A smoke run of the suite in benchmarks/, so it keeps working; the figures of a GitHub runner are too
     # noisy to gate on, docs/benchmarks.md holds the baseline

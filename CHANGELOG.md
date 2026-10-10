@@ -36,7 +36,117 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   handlers take clients from `get()` rather than from `request.state`, and why Quart connects around
   `startup()` / `shutdown()` rather than in serving hooks.
 - The Agent Skill, the `AGENTS.md` block of `docs/guide/agents.md`, `context7.json`, the plugin manifests and
-  `llms.txt` / `llms-full.txt` name the new module.
+  `llms.txt` / `llms-full.txt` name the new module; `llms-full.txt` grows to about 38k tokens.
+
+## [1.17.0] - 2026-10-10
+
+### Added
+
+- The taskiq integration (#69): `nuke_di.taskiq.setup(broker, container=DI)`, with the `taskiq` extra
+  (`taskiq>=0.11`, `taskiq-dependencies>=1.5`). A task takes a client by type hint next to its arguments,
+  `async def send_report(user_id: int, users: UserService)`, and so does every `TaskiqDepends(...)` function it
+  uses, generator dependencies included. The signatures are rewritten as in FastAPI and FastStream, when a task is
+  registered: `setup()` rewrites the tasks the broker has, shared ones included, and wraps `broker.task` (and
+  with it `register_task()`) for the tasks declared later, since `taskiq worker` reads them before it starts.
+- The container connects on `WORKER_STARTUP`, before the other startup handlers, and disconnects once
+  `broker.shutdown()` has run the shutdown handlers, the middlewares and the result backend. A process that only
+  kicks tasks connects nothing; an `InMemoryBroker`, which runs the tasks it is kicked, connects on its
+  `startup()`. A task run without the worker's startup fails with "is not connected", and a failed `connect()`
+  fails `broker.startup()` with a `RuntimeError`. `nuke_di.integration.testing.check()` passes on an
+  `InMemoryBroker`; CI runs the tests on taskiq 0.11.0 with taskiq-dependencies 1.5.0 as well (`make
+  test-taskiq-min`).
+- A dependency class whose `__init__` takes clients, `Annotated[Auth, TaskiqDepends()]`, is refused with a
+  `TypeError` when its task is registered, since taskiq builds it from that `__init__`; so is a function that
+  takes clients in FastAPI handlers, before taskiq registers the task. On an `InMemoryBroker` the shared tasks
+  declared before the broker get their clients too, and its shutdown waits for the tasks in flight before the
+  clients disconnect.
+
+### Documentation
+
+- A guide page, `docs/guide/taskiq.md`, in every language: an `InMemoryBroker` run, a real `taskiq worker` on
+  NATS, the rules, the default `= TaskiqDepends()` that lets type checkers accept `.kiq()` without the client, the
+  worker flags `--max-fails 1` and `--shutdown-timeout`, and testing. ADR-0003 names taskiq among the integrations
+  that share the rewrite. A spec, `docs/specs/taskiq.md`, and an example, `examples/taskiq_app`.
+- taskiq is named with the other integrations in the README, the integrations page, the Agent Skill, `llms.txt`,
+  `context7.json` and the plugin manifests; `llms-full.txt` grows to about 35k tokens.
+
+## [1.16.0] - 2026-10-10
+
+### Added
+
+- The aiogram integration (#70): `nuke_di.aiogram.setup(dp)`, installed with the `aiogram` extra (`aiogram>=3.2`).
+  A handler of the dispatcher or of any router included into it, before `setup()` or after, takes a client by
+  type hint next to the message, `async def start(message: Message, users: UserService)`, and nothing marks it.
+  One inner middleware per event type fills the client arguments of the handler that matched the update into
+  a copy of aiogram's data, from a dictionary by the id of the handler's callback: under 1 µs per update. A
+  handler is a function, a bound method, a `functools.partial` or a callable object; a type hint that does not
+  evaluate is skipped alone. Startup and shutdown handlers take clients too.
+- The dispatcher runs the container: the clients are resolved and connected before the startup handlers of the
+  dispatcher and its routers, so `override()` before `start_polling()` or `dp.emit_startup()` applies, and
+  disconnect after all their shutdown handlers, and after a startup handler that fails, which aiogram follows
+  with no shutdown. A failed `connect()` fails `start_polling()` with a `RuntimeError` before its first request
+  to Telegram.
+- `TypeError` on startup for a filter with a client argument, of a handler or of an observer (aiogram runs
+  filters before the middleware), for a scene whose handlers take clients, for a client argument under a name
+  aiogram passes itself (`bot`, `state`, `scenes`, `event_from_user`, the workflow data, the keyword arguments
+  of `start_polling()`), and for `setup()` on a `Router` or twice on one dispatcher. A key of an update's data
+  under a client's name, from a filter, a middleware or `feed_update()`, raises `TypeError` on that update
+  instead of being replaced, and so does an argument of `emit_shutdown()` under one.
+- A shutdown after a failed startup, which aiogram's webhook app calls on cleanup, or a second shutdown runs
+  the shutdown handlers with the caller's arguments.
+- A guide page, `docs/guide/aiogram.md`, mirrored in the six translations: the bot, a `Bot` with a session that
+  answers in the process to feed it updates with no token, the rules, testing and the errors, each with its real
+  output. `docs/specs/aiogram.md` holds the decisions and the aiogram internals read.
+- `examples/aiogram_bot`: a bot whose `start_polling()` runs against a fake Telegram, with its tests.
+- `make test-aiogram-min` and the `aiogram-min` CI job run the aiogram tests on aiogram 3.2.0.
+
+### Changed
+
+- aiogram is named with the other integrations in the README, the integrations page, the Agent Skill, `llms.txt`,
+  `context7.json` and the plugin manifests; `llms-full.txt` grows to about 32k tokens.
+
+## [1.15.0] - 2026-10-10
+
+### Added
+
+- MCP servers: tools take clients by type hint ([#67](https://github.com/troyan-dy/nuke-di/issues/67), #105),
+  the way they take `Context`, and the clients are left out of the input schema the LLM sees. The container
+  connects when the server's lifespan starts and disconnects when it ends, and `override()` before the server
+  starts replaces a client. Two modules, one per library:
+  - `nuke_di.mcp.setup(server)` for the official SDK's `MCPServer` (`pip install "nuke-di[mcp]"`, `mcp` 2.0 or
+    newer). The client arguments of a tool, and of the resolvers it uses, are handed to the SDK's own
+    `Resolve(...)` marker while the SDK reads the tool; the function is left as written, with no wrapper.
+    Functions, bound methods and callable objects take clients. The SDK has no resolvers for resources and
+    prompts, so they take no clients. `mcp` 1.x is not supported.
+  - `nuke_di.fastmcp.setup(mcp)` for FastMCP (`pip install "nuke-di[fastmcp]"`, FastMCP 4.0 or newer): tools,
+    resources, prompts and the functions of their `Depends(...)` take clients, through a `Depends` default that
+    the integration gives every client argument. A server mounted with `mount()` on one set up on the same
+    container shares its clients, which connect once.
+
+  A shape that takes no clients (a `functools.partial`, a FastMCP callable object or class in `Depends(...)`,
+  an SDK tool that returns an `InputRequiredResult`) raises a `TypeError` that says so when it is added.
+
+  Both run the contract of `nuke_di.integration.testing.check()`. ADR-0011 records why there is no wrapper and
+  why there are two modules; `docs/specs/mcp.md` lists the internals read. CI runs the tests on `mcp` 2.0.0 and
+  FastMCP 4.0.0 too (`make test-mcp-min`, `make test-fastmcp-min`).
+- `examples/mcp_server`: the bookshop on the SDK and on FastMCP, asked over stdio by a host in a few lines.
+
+### Changed
+
+- The `TypeError` of a client where pydantic expects a type names the MCP integrations next to FastAPI and
+  links to the documentation of every framework. A pydantic model that allows arbitrary types raises it too
+  when pydantic fails to generate its JSON schema, which is what the SDK does with a tool declared before
+  `setup()`; a JSON schema generator that tolerates such types keeps its own answer.
+
+### Removed
+
+- `nuke_di._integration`, deprecated in 1.14.0: import from `nuke_di.integration`.
+
+### Documentation
+
+- A guide page, `docs/guide/mcp.md`, in every language: the bookshop on the SDK and on FastMCP with the real
+  output, the rules of each, testing with `override()` and the errors. The README, the integrations page, the
+  Agent Skill, the `AGENTS.md` block, `context7.json` and `llms.txt` name the MCP integrations.
 
 ## [1.14.3] - 2026-10-10
 
@@ -660,6 +770,9 @@ First public release, extracted from the `nuke.di` package of the nuke framework
 
 [Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.0...HEAD
 [1.18.0]: https://github.com/troyan-dy/nuke-di/compare/v1.17.0...v1.18.0
+[1.17.0]: https://github.com/troyan-dy/nuke-di/compare/v1.16.0...v1.17.0
+[1.16.0]: https://github.com/troyan-dy/nuke-di/compare/v1.15.0...v1.16.0
+[1.15.0]: https://github.com/troyan-dy/nuke-di/compare/v1.14.3...v1.15.0
 [1.14.3]: https://github.com/troyan-dy/nuke-di/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/troyan-dy/nuke-di/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/troyan-dy/nuke-di/compare/v1.14.0...v1.14.1

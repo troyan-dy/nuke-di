@@ -1,6 +1,6 @@
 ---
 name: nuke-di
-description: Use when writing, changing, reviewing or testing Python code that uses nuke-di (import nuke_di) - Client classes, DI.resolve / DI.inject, @job, @worker, nuke_di.fastapi / litestar / faststream / asgi, mock() / override(), the di / global_di pytest fixtures. Gives the whole model and the recipes, and keeps out the designs nuke-di rejects - provider functions, interface binding, per-request scopes and retries in connect().
+description: Use when writing, changing, reviewing or testing Python code that uses nuke-di (import nuke_di) - Client classes, DI.resolve / DI.inject, @job, @worker, nuke_di.fastapi / litestar / faststream / mcp / fastmcp / aiogram / taskiq / asgi, mock() / override(), the di / global_di pytest fixtures. Gives the whole model and the recipes, and keeps out the designs nuke-di rejects - provider functions, interface binding, per-request scopes and retries in connect().
 ---
 
 # nuke-di
@@ -116,6 +116,17 @@ per handler.
 - FastAPI: `from nuke_di.fastapi import setup`; `setup(app)` right after `app = FastAPI()`, before the routes.
 - Litestar: `from nuke_di.litestar import ClientPlugin`; `Litestar(handlers, plugins=[ClientPlugin()])`.
 - FastStream: `from nuke_di.faststream import setup`; `setup(app)` after `app = FastStream(broker)`.
+- MCP SDK (`mcp` 2.x): `from nuke_di.mcp import setup`; `setup(server)` right after
+  `server = MCPServer(...)`, before the tools. Tools and their `Resolve(...)` resolvers take clients;
+  resources and prompts do not.
+- FastMCP: `from nuke_di.fastmcp import setup`; `setup(mcp)` right after `mcp = FastMCP(...)`, before the
+  tools, resources and prompts, which take clients, as do their `Depends(...)` functions.
+- aiogram: `from nuke_di.aiogram import setup`; `setup(dp)` on the `Dispatcher`, not on a router; a handler is
+  `async def start(message: Message, users: UserService)`. Filters and scenes take no clients.
+- taskiq: `from nuke_di.taskiq import setup`; `setup(broker)` right after the broker, before the tasks;
+  the worker connects the clients, a process that only kicks tasks connects none. A client argument of a
+  task takes `= TaskiqDepends()` as its default, so type checkers accept `.kiq()` without it.
+  Run `taskiq worker --max-fails 1`, so a failed connect exits the process instead of looping.
 
 A framework without dependency injection (Starlette, Quart, aiohttp, a plain ASGI app) lists the
 clients its handlers take: `from nuke_di.asgi import lifespan`; `clients = lifespan(DI, UserService)`;

@@ -6,9 +6,9 @@
 
 Integracja z frameworkiem robi dwie rzeczy: handlery frameworka przyjmują klientów po adnotacji typu, przez
 własny mechanizm wstrzykiwania zależności frameworka, a kontener łączy się, gdy aplikacja startuje, i rozłącza,
-gdy się zatrzymuje. Integracje z [FastAPI](fastapi.md), [Litestar](litestar.md) i [FastStream](faststream.md)
-są zbudowane na `nuke_di.integration`, a integracja z innym frameworkiem nie potrzebuje od nuke-di niczego
-poza nim i publicznym API.
+gdy się zatrzymuje. Integracje z [FastAPI](fastapi.md), [Litestar](litestar.md), [FastStream](faststream.md),
+[MCP](mcp.md), [aiogram](aiogram.md) i [taskiq](taskiq.md) są zbudowane na `nuke_di.integration`, a integracja
+z innym frameworkiem nie potrzebuje od nuke-di niczego poza nim i publicznym API.
 Framework bez własnego wstrzykiwania zależności, taki jak Starlette czy Quart, nie potrzebuje integracji:
 [`nuke_di.asgi.lifespan()`](asgi.md), zbudowany na tym samym zestawie, łączy klientów, a handlery
 pobierają ich od niego.
@@ -121,7 +121,9 @@ Litestar dostarcza zależności po nazwie, a aiogram przekazuje je po nazwie z m
 zastosowania: użyj `Framework` dla komunikatów, `client_of()`, aby znaleźć argumenty-klientów handlera,
 jednego `Binding` na klienta, którego `get` framework wywołuje własnymi środkami, oraz `running()` wewnątrz
 lifespan aplikacji. `nuke_di.litestar` to gotowy przykład: rejestruje `Provide(binding.get)` pod nazwą
-argumentu.
+argumentu. `nuke_di.aiogram` to kolejny: wewnętrzny middleware dispatchera wkłada `binding.instance` do danych
+update'u pod nazwą każdego argumentu-klienta handlera, który do niego pasował, a `running()` obejmuje start
+i zatrzymanie dispatchera.
 
 ## <a id="checking-an-integration"></a>Sprawdzanie integracji
 
@@ -206,6 +208,3 @@ FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 (Tracebacki skrócone.) Framework, który zgłasza błąd handlera w odpowiedzi zamiast go rzucić, potrzebuje
 `send()`, które go zgłosi: klient testowy frameworka HTTP zwraca 500, więc `send()` sprawdza status. Litestar
 umieszcza błąd w odpowiedzi tylko z `debug=True`.
-
-`nuke_di._integration`, prywatny moduł, w którym ten zestaw znajdował się przed 1.14.0, nadal się importuje
-z `DeprecationWarning` i zostanie usunięty w 1.15.0.
