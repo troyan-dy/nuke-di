@@ -40,16 +40,22 @@ Two modules, one per distribution, each installed with its extra: `nuke_di.mcp` 
 1. Wraps the lifespan of the server's low-level `Server` (`server._lowlevel_server.lifespan`), which every transport and the in-memory `Client` enter, with `wrap_lifespan()`: on entry the clients of every tool added so far are resolved and the container connects, then the server's own `lifespan=` runs; on exit the reverse. A failed startup is rolled back, flushed and raised as a `RuntimeError`. Raises `TypeError` when called twice.
 2. Replaces `server.add_tool` on the instance; `@server.tool()` calls it. For the time the SDK's `add_tool` reads the function, the annotation of every client argument becomes `Annotated[<hint>, Resolve(binding.get)]`, in the tool and in every resolver it reaches through `Annotated[T, Resolve(fn)]`; afterwards the annotations are as written. The SDK keeps the markers it read in the `Tool`, so a function added to two servers on two containers gets a `Binding` per server.
 
-An argument already annotated with a `Resolve(...)` is the user's. A bound method is annotated through its function; a callable object, or a function whose annotations do not evaluate (`NameError`), is left to the SDK.
+An argument already annotated with a `Resolve(...)` is the user's; one with a plain default (`= None`) is filled. A bound method is annotated through its function and a callable object through its class's `__call__`, which is where the SDK reads them; a function whose annotations do not evaluate (`NameError`) is left to the SDK. The annotations are set and restored entry by entry in the same dict: assigning `__annotations__` would drop `__annotate__` on Python 3.14, and `annotationlib`'s `STRING` format with it. The window is synchronous, `add_tool` awaits nothing; adding one function from two threads at once is not supported.
+
+Refused with a `TypeError` when added: a `functools.partial` that takes clients (the SDK reads `__name__` and the annotations of the partial, not of its function), and a tool with clients that returns an `InputRequiredResult`, which the SDK refuses to combine with `Resolve(...)` (its `InvalidSignature` is re-raised with the reason, as the user wrote no `Resolve`).
 
 ### `nuke_di.fastmcp.setup(server, container=DI)`
 
 `server` is a `fastmcp.FastMCP`.
 
-1. Wraps `server._lifespan`, which FastMCP enters once for every transport and client (ref-counted), with `wrap_lifespan()`.
+1. Wraps `server._lifespan`, which FastMCP enters once for every transport and client (ref-counted), with a lifespan built on `running()`, like the kit's `wrap_lifespan()` with one addition for mounted servers (below). Raises `TypeError` when called twice.
 2. Replaces `add_tool`, `add_resource` and `add_prompt` of `server.local_provider` on the instance; the server's decorators and its own `add_*` methods call them with the function. Every client argument gets `Depends(binding.get)` as its default and becomes keyword-only, sorted after the other arguments by kind, in the function and in every function of a `Depends(...)` default it uses. FastMCP reads dependencies from defaults only: a `Depends` in `Annotated[...]` is entered but its value is not passed, so the kit's `bind()` does not apply.
 
-A function is rewritten once, whatever the container: FastMCP and uncalled-for cache a function's signature and dependency parameters for good. Every server that starts resolves the same bindings from its own container, and two servers that share a function run one at a time, as in FastStream (`per_container=False` in the kit's terms). An argument with a default of its own is the user's.
+A function is rewritten once, whatever the container: FastMCP and uncalled-for cache a function's signature and dependency parameters for good. Every server that starts resolves the same bindings from its own container, and two servers that share a function run one at a time, as in FastStream (`per_container=False` in the kit's terms). The function records `__nuke_di_owner__` as the kit's `bind()` does, so a function bound for FastAPI or FastStream is refused with the kit's `TypeError`, and the kit refuses one bound for FastMCP. An argument with a marker of FastMCP as its default (`Depends(...)`, `CurrentContext()`) is the user's; one with a plain default is filled.
+
+A function with clients that uncalled-for has already cached, because it was added to a server before `setup()`, cannot be rewritten any more: `TypeError` saying so, rather than the advice to add it after `setup()`. A `functools.partial`, a callable object or a class in `Depends(...)` that takes clients raises a `TypeError` naming the shape; a `Tool`, `Resource` or `Prompt` object built beforehand is passed on untouched.
+
+3. Replaces `server.mount` on the instance and records the servers mounted after `setup()`. FastMCP enters the lifespan of a mounted server inside the lifespan of the server it is mounted on. When both are set up on the same container, the outer one resolves the clients of the servers mounted on it, at any depth, and its lifespan marks the container as running in a `ContextVar`; the inner lifespan then only runs the mounted server's own lifespan. A mounted server started on its own starts its clients itself, and one set up on another container starts its own inside. A server mounted before `setup()` of the outer one, on the same container, finds its clients not started and fails the startup with a `RuntimeError` that says to call `setup()` before `mount()`.
 
 ### Internals read
 
@@ -57,8 +63,9 @@ A function is rewritten once, whatever the container: FastMCP and uncalled-for c
 |---|---|---|
 | `mcp` 2.x | `Resolve`, `MCPServer.add_tool`, `Tool.from_function` reading annotations with `get_type_hints()` when a tool is added | yes |
 | `mcp` 2.x | `MCPServer._lowlevel_server.lifespan` | no; the SDK's own in-memory client reads it the same way |
-| `fastmcp` 4.x | `Depends`, `FastMCP.local_provider`, `LocalProvider.add_tool` / `add_resource` / `add_prompt`, called by the decorators | yes |
-| `fastmcp` 4.x | `FastMCP._lifespan` | no |
+| `fastmcp` 4.x | `Depends`, `Dependency`, `FastMCP.local_provider`, `LocalProvider.add_tool` / `add_resource` / `add_prompt`, called by the decorators, `FastMCP.mount` | yes |
+| `fastmcp` 4.x | `FastMCP._lifespan`, and that a mounted server's lifespan is entered inside its parent's, in the same task | no |
+| uncalled-for | `_Depends.factory`, the function of a `Depends`, and `introspection._parameter_cache`, to tell a function cached before `setup()` | no |
 
 CI runs the tests on the latest releases and, in the `mcp-min` and `fastmcp-min` jobs, on `mcp` 2.0.0 and FastMCP 4.0.0.
 
@@ -83,4 +90,6 @@ The in-memory `Client` of either library runs the lifespan. `server.call_tool()`
 | 5 | `per_container` for FastMCP | `False`: uncalled-for keeps `_signature_cache` and `_parameter_cache` per function forever, and FastMCP `lru_cache`s the wrapper it builds, so a second rewrite would never be read. |
 | 6 | Resources and prompts | FastMCP: yes, through the same `Depends`. SDK: no, it has no resolver there; a wrapper would be the only way. |
 | 7 | Lowest versions | `mcp` 2.0.0, the first with `Resolve`; FastMCP 4.0.0, the first on `mcp` 2 where the decorators register through `LocalProvider.add_*` and the lifespan ends before the in-memory client exits (3.0 fails the contract's disconnect check). |
-| 8 | SSE | The SDK runs the lifespan for every SSE connection, so a second connection at once fails with "the container is already connected". Documented; streamable HTTP and stdio run it once. |
+| 8 | SSE | The SDK runs the lifespan for every SSE connection, so a second connection at once fails with "the container is already connected", as do two in-memory clients open at once. Documented; streamable HTTP and stdio run it once. |
+| 9 | FastMCP `mount()` on one container (found in review) | Supported: without it, setting up both servers failed with "already connected", the parent alone could not declare the child's tools, and the child alone left the parent's tools without clients. The parent learns its children from its own `mount()`, not from FastMCP's providers, which wrap a namespaced server in private transforms. |
+| 10 | Shapes the libraries take that nuke-di does not fill (found in review) | A clear `TypeError` instead of the library's report of an unknown type: partials everywhere, callable objects and classes in `Depends(...)` in FastMCP. The SDK's callable objects are filled, as the SDK reads their `__call__`. |

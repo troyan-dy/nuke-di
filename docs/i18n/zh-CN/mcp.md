@@ -102,15 +102,18 @@ database: disconnected
 规则如下：
 
 - **在哪里填充客户端。** 在 `setup(server)` 之后用 `@server.tool()` 或 `server.add_tool()` 添加的工具的参数中，
-  以及它们用到的每个解析器 `Annotated[T, Resolve(fn)]` 的参数中，不论嵌套多深。其余参数都交给 SDK 处理：
+  以及它们用到的每个解析器 `Annotated[T, Resolve(fn)]` 的参数中，不论嵌套多深：函数、绑定方法和可调用对象都可以。
+  带有普通默认值的参数，如 `catalog: Catalog = None`，同样会被填充。其余参数都交给 SDK 处理：
   工具的输入、`Context`。带有你自己的 `Resolve(...)` 的参数归你处理，即使它的类型是客户端。
 - **只限工具。** SDK 没有为资源和提示词提供解析器，因此它们不接收客户端：请在工具中读取数据，
-  或者使用 [FastMCP](#fastmcp)。
+  或者使用 [FastMCP](#fastmcp)。`functools.partial`，以及返回 `InputRequiredResult` 的工具（SDK
+  不会把它与解析器结合使用）也不接收客户端：二者在添加时都会抛出 `TypeError`。
 - **哪些客户端会启动。** 启动时，通过 `setup()` 添加的每个工具的客户端都会启动。事先构建好、
   以 `MCPServer(tools=[...])` 传入的 `Tool` 对象不会被看到。
 - **lifespan。** 客户端在服务器自己的 `lifespan=` 之前连接、在它之后断开，因此 lifespan 可以使用它们。
   SDK 在 stdio 上每个进程运行一次 lifespan，在 streamable HTTP 上每个应用运行一次，每个内存中的 `Client`
   运行一次。在 SSE 传输上它为每个连接都运行一次，同时到来的第二个连接会启动失败：请改用 streamable HTTP 提供服务。
+  同时打开两个内存中的 `Client(server)` 也会以同样的方式失败。
 - **函数保持原样。** `Resolve` 标记只在 SDK 读取注解时（即添加工具时）存在于函数的注解中；
   测试可以用自己的客户端调用它。
 
@@ -212,15 +215,23 @@ database: disconnected
 规则如下：
 
 - **在哪里填充客户端。** 在 `setup(mcp)` 之后用服务器的装饰器或其 `add_tool()`、`add_resource()`、
-  `add_prompt()` 添加的工具、资源和提示词的参数中，以及它们用到的每个 `Depends(...)` 中函数的参数中，
-  不论嵌套多深。自带默认值的参数不会被处理，即使它的类型是客户端。
+  `add_prompt()` 以函数或绑定方法形式添加的工具、资源和提示词的参数中，以及它们用到的每个 `Depends(...)`
+  中函数的参数中，不论嵌套多深。带有普通默认值的参数，如 `catalog: Catalog = None`，同样会被填充；
+  带有 `Depends(...)` 或 FastMCP 其他标记的参数不会被处理，即使它的类型是客户端。事先构建好的 `Tool` 对象，
+  如 `mcp.add_tool(Tool.from_function(fn))`，不会被看到。接收客户端的 `functools.partial`、可调用对象或
+  `Depends(...)` 中的类会抛出 `TypeError`：请声明一个函数。
 - **签名会改变。** FastMCP 只从默认值中读取 `Depends`，因此客户端参数会变成仅限关键字参数，
   以 `Depends(...)` 为默认值，排在调用方传入的参数之后：`count_books(genre, *, catalog=Depends(...))`。
   只有内省才能看到这一点：测试按函数原本的写法调用它。
 - **lifespan。** 客户端在服务器自己的 `lifespan=` 之前连接、在它之后断开。无论有多少会话或传输共享该服务器，
   FastMCP 都只运行一次 lifespan。
 - **一次一个服务器。** FastMCP 会永久保留函数的签名，因此函数只会被重写一次，与容器无关：
-  共享同一个工具函数的两个服务器要依次运行，当第一个正在运行时，第二个会启动失败。
+  共享同一个工具函数的两个服务器要依次运行，当第一个正在运行时，第二个会启动失败。出于同样的原因，
+  一个函数只能服务于 FastMCP 或 FastAPI 之一，不能同时服务两者。
+- **挂载的服务器。** 在每个函数接收客户端的服务器上调用 `setup()`，然后再调用 `mount()`。
+  挂载到使用同一容器的服务器上的服务器由后者启动：两者的客户端只连接一次，即在你运行的服务器启动时。
+  单独启动时，它会自己启动自己的客户端。在另一个容器上完成 setup 的服务器，会在它所挂载到的服务器启动时
+  启动自己的客户端。
 
 ## <a id="testing"></a>测试
 
@@ -268,8 +279,12 @@ $ pytest -q tests/test_server.py
 
 - **没有经过 lifespan 就调用的工具**，例如在测试中不通过客户端而直接 `await server.call_tool(...)`：
   SDK 抛出 `UnexpectedToolError: Error executing tool count_books`，FastMCP 抛出 `ToolError: Error calling tool
-  'count_books': Failed to resolve dependency 'catalog' for count_books`，二者的原因都是
-  `RuntimeError: Catalog is not connected: run the server with its lifespan`。
+  'count_books': Failed to resolve dependency 'catalog' for count_books`，二者的原因都是：
+
+  ```
+  RuntimeError: Catalog is not connected: run the server with its lifespan, e.g. `async with Client(server)`
+  ```
+
 - **在服务器启动之后添加的工具**会抛出 `RuntimeError: Catalog was not started with the server:
   add its tool before the server starts`（FastMCP 中为 "its tool, resource or prompt"）。
 - **`connect()` 失败**会让启动失败：`async with Client(server)` 抛出 `RuntimeError: nuke-di
@@ -280,3 +295,18 @@ $ pytest -q tests/test_server.py
 - **两个共享同一函数的 FastMCP 服务器同时运行：** 第二个会启动失败，并抛出 `RuntimeError:
   nuke-di clients failed to start: Catalog is filled for another app that is running; apps that share a
   handler function run one at a time`。
+- **在 `setup()` 之前就被读取的 FastMCP 函数。** 把 `setup()` 提前，能在下一个进程中修复上面的 `TypeError`，
+  但在已经读取过该函数的进程中不行：FastMCP 会保留它读到的签名。在该进程中稍后把这个函数添加到已完成 setup
+  的服务器上，会抛出 `TypeError: FastMCP read count_books before setup() and keeps the signature it read for
+  good: call setup() before the function is first added to any server, and start the process again`。
+- **在其所挂载到的服务器调用 `setup()` 之前就挂载的服务器**，若使用同一个容器，会让启动失败：
+  `RuntimeError: nuke-di clients failed to start: shelf is mounted on a server that runs on the same
+  container, but not through it: call setup() of that server before mount()`。
+- **不接收客户端的形式**在添加时会抛出 `TypeError`：`Argument "catalog" of a functools.partial of
+  count_books is Catalog: nuke-di fills the clients of a function, a bound method or a callable object, so
+  declare a function instead`；在 FastMCP 中，对于 `Depends(...)` 中的类和可调用对象，是 `Argument "db" of
+  the class Reader is Database: ...`；在 SDK 中，是 `ask takes clients and returns an InputRequiredResult:
+  nuke-di fills clients through the SDK's Resolve(...), which the SDK does not combine with an
+  InputRequiredResult of the tool itself; such a tool takes no clients`。
+- **FastAPI 和 FastMCP 共用一个函数：** `TypeError: count_books takes clients in both FastAPI and FastMCP
+  handlers: nuke-di rewrites its signature for one framework, so give each framework its own function`。

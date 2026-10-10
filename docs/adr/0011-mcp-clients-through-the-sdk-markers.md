@@ -17,4 +17,5 @@ The rewrite departs from ADR-0003 in two ways. In the SDK it is in `__annotation
 - `setup()` comes before the tools; a tool declared before it fails when declared with the `TypeError` of `NotSingletonClient`, whose message names `setup()`. Tools built as `Tool` objects beforehand are not seen.
 - The SDK has no resolvers for resources and prompts, so on the SDK only tools and their resolvers take clients; FastMCP fills tools, resources, prompts and their `Depends` functions.
 - Two private attributes are read: `MCPServer._lowlevel_server.lifespan` and `FastMCP._lifespan`. CI runs the lowest supported versions, `mcp` 2.0.0 and FastMCP 4.0.0, and the latest.
-- FastMCP servers that share a function run one at a time, as FastStream apps do.
+- FastMCP servers that share a function run one at a time, as FastStream apps do, and a function records its owner as the kit's `bind()` does, so it serves FastMCP or another framework, not both.
+- A FastMCP server mounted after `setup()` on a server with the same container is started by that server; the integration keeps its own lifespan on `running()` for that, instead of `wrap_lifespan()`.

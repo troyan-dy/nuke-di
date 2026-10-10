@@ -16,11 +16,16 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   starts replaces a client. Two modules, one per library:
   - `nuke_di.mcp.setup(server)` for the official SDK's `MCPServer` (`pip install "nuke-di[mcp]"`, `mcp` 2.0 or
     newer). The client arguments of a tool, and of the resolvers it uses, are handed to the SDK's own
-    `Resolve(...)` marker while the SDK reads the tool; the function is left as written, with no wrapper. The
-    SDK has no resolvers for resources and prompts, so they take no clients. `mcp` 1.x is not supported.
+    `Resolve(...)` marker while the SDK reads the tool; the function is left as written, with no wrapper.
+    Functions, bound methods and callable objects take clients. The SDK has no resolvers for resources and
+    prompts, so they take no clients. `mcp` 1.x is not supported.
   - `nuke_di.fastmcp.setup(mcp)` for FastMCP (`pip install "nuke-di[fastmcp]"`, FastMCP 4.0 or newer): tools,
     resources, prompts and the functions of their `Depends(...)` take clients, through a `Depends` default that
-    the integration gives every client argument.
+    the integration gives every client argument. A server mounted with `mount()` on one set up on the same
+    container shares its clients, which connect once.
+
+  A shape that takes no clients (a `functools.partial`, a FastMCP callable object or class in `Depends(...)`,
+  an SDK tool that returns an `InputRequiredResult`) raises a `TypeError` that says so when it is added.
 
   Both run the contract of `nuke_di.integration.testing.check()`. ADR-0011 records why there is no wrapper and
   why there are two modules; `docs/specs/mcp.md` lists the internals read. CI runs the tests on `mcp` 2.0.0 and
@@ -31,7 +36,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 - The `TypeError` of a client where pydantic expects a type names the MCP integrations next to FastAPI and
   links to the documentation of every framework. A pydantic model that allows arbitrary types raises it too
-  when its JSON schema is generated, which is what the SDK does with a tool declared before `setup()`.
+  when pydantic fails to generate its JSON schema, which is what the SDK does with a tool declared before
+  `setup()`; a JSON schema generator that tolerates such types keeps its own answer.
 
 ### Removed
 

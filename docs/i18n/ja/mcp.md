@@ -96,10 +96,10 @@ database: disconnected
 
 ルール：
 
-- **クライアントが埋められる場所。** `setup(server)` の後に `@server.tool()` または `server.add_tool()` で追加したツールの引数と、それらが使うすべてのリゾルバー `Annotated[T, Resolve(fn)]` の引数です。深さは問いません。それ以外の引数（ツールの入力、`Context`）はすべて SDK が扱います。自前の `Resolve(...)` を付けた引数には、型がクライアントであっても手を付けません。
-- **ツールのみ。** SDK にはリソースとプロンプト用のリゾルバーがないため、これらはクライアントを受け取りません。データはツールの中で読むか、[FastMCP](#fastmcp) を使ってください。
+- **クライアントが埋められる場所。** `setup(server)` の後に `@server.tool()` または `server.add_tool()` で追加したツールの引数と、それらが使うすべてのリゾルバー `Annotated[T, Resolve(fn)]` の引数です。深さは問わず、関数、バウンドメソッド、呼び出し可能オブジェクトのいずれでも構いません。`catalog: Catalog = None` のような素のデフォルト値を持つ引数も埋められます。それ以外の引数（ツールの入力、`Context`）はすべて SDK が扱います。自前の `Resolve(...)` を付けた引数には、型がクライアントであっても手を付けません。
+- **ツールのみ。** SDK にはリソースとプロンプト用のリゾルバーがないため、これらはクライアントを受け取りません。データはツールの中で読むか、[FastMCP](#fastmcp) を使ってください。`functools.partial` と、`InputRequiredResult` を返すツール（SDK はこれをリゾルバーと組み合わせません）もクライアントを受け取りません。どちらも追加時に `TypeError` を送出します。
 - **起動するクライアント。** 起動時に、`setup()` を通じて追加されたすべてのツールのクライアントが起動します。事前に作成して `MCPServer(tools=[...])` として渡した `Tool` オブジェクトは認識されません。
-- **lifespan。** クライアントはサーバー自身の `lifespan=` より前に接続し、その後に切断するので、lifespan からクライアントを使えます。SDK は lifespan を、stdio ではプロセスごとに 1 回、streamable HTTP ではアプリごとに 1 回、インメモリの `Client` ではその `Client` ごとに 1 回実行します。SSE トランスポートでは接続ごとに実行するため、同時に 2 つ目の接続があると起動に失敗します。streamable HTTP で提供してください。
+- **lifespan。** クライアントはサーバー自身の `lifespan=` より前に接続し、その後に切断するので、lifespan からクライアントを使えます。SDK は lifespan を、stdio ではプロセスごとに 1 回、streamable HTTP ではアプリごとに 1 回、インメモリの `Client` ではその `Client` ごとに 1 回実行します。SSE トランスポートでは接続ごとに実行するため、同時に 2 つ目の接続があると起動に失敗します。streamable HTTP で提供してください。インメモリの `Client(server)` を同時に 2 つ開いた場合も同じように失敗します。
 - **関数は関数のまま。** `Resolve` マーカーがアノテーションに入っているのは、ツールの追加時に SDK がそれを読む間だけです。テストでは、自分で用意したクライアントを渡して呼び出せます。
 
 ## <a id="fastmcp"></a>FastMCP
@@ -197,10 +197,11 @@ database: disconnected
 
 ルール：
 
-- **クライアントが埋められる場所。** `setup(mcp)` の後に、サーバーのデコレーター、またはその `add_tool()`、`add_resource()`、`add_prompt()` で追加したツール、リソース、プロンプトの引数と、それらが使う `Depends(...)` 内のすべての関数の引数です。深さは問いません。独自のデフォルト値を持つ引数は、型がクライアントであってもそのままにします。
+- **クライアントが埋められる場所。** `setup(mcp)` の後に、サーバーのデコレーター、またはその `add_tool()`、`add_resource()`、`add_prompt()` で関数またはバウンドメソッドとして追加したツール、リソース、プロンプトの引数と、それらが使う `Depends(...)` 内のすべての関数の引数です。深さは問いません。`catalog: Catalog = None` のような素のデフォルト値を持つ引数も埋められます。`Depends(...)` や FastMCP の他のマーカーを持つ引数は、型がクライアントであってもそのままにします。`mcp.add_tool(Tool.from_function(fn))` のように事前に作成した `Tool` オブジェクトは認識されません。クライアントを受け取る `functools.partial`、呼び出し可能オブジェクト、`Depends(...)` 内のクラスは `TypeError` を送出します。関数として宣言してください。
 - **シグネチャが変わる。** FastMCP は `Depends` をデフォルト値からしか読まないため、クライアント引数はキーワード専用になって、呼び出し側が渡す引数の後ろに置かれ、デフォルト値として `Depends(...)` を持ちます（`count_books(genre, *, catalog=Depends(...))`）。これが見えるのはイントロスペクションだけで、テストでは書いたとおりの関数を呼び出します。
 - **lifespan。** クライアントはサーバー自身の `lifespan=` より前に接続し、その後に切断します。FastMCP は、サーバーを共有するセッションやトランスポートがいくつあっても、lifespan を 1 回だけ実行します。
-- **一度に 1 つのサーバー。** FastMCP は関数のシグネチャを保持し続けるため、関数はコンテナに関係なく一度だけ書き換えられます。そのため、ツール関数を共有する 2 つのサーバーは 1 つずつ順番に実行します。1 つ目の実行中に起動した 2 つ目のサーバーは、起動に失敗します。
+- **一度に 1 つのサーバー。** FastMCP は関数のシグネチャを保持し続けるため、関数はコンテナに関係なく一度だけ書き換えられます。そのため、ツール関数を共有する 2 つのサーバーは 1 つずつ順番に実行します。1 つ目の実行中に起動した 2 つ目のサーバーは、起動に失敗します。同じ理由で、1 つの関数は FastMCP か FastAPI のどちらか一方にしか使えません。
+- **マウントされたサーバー。** 関数がクライアントを受け取るすべてのサーバーで `setup()` を呼び、その後に `mount()` を呼びます。同じコンテナでマウント先のサーバーにマウントされたサーバーは、マウント先によって起動されます。両方のクライアントは、実行するサーバーの起動時に 1 回だけ接続します。単独で起動した場合は、自分のクライアントを自分で起動します。別のコンテナで設定されたサーバーは、マウント先のサーバーの起動時に自分のクライアントを起動します。
 
 ## <a id="testing"></a>テスト
 
@@ -245,8 +246,17 @@ FastMCP でも、`fastmcp.Client(mcp)` を使い `result.data == 1` を確かめ
   TypeError: Catalog is a nuke-di client, not a pydantic type. A pydantic model takes it only with arbitrary_types_allowed, and has no JSON schema for it. A framework fills it only as a plain type hint, not as an optional, through its nuke-di integration: e.g. in a FastAPI route declared through nuke_di.fastapi, or in an MCP tool added after setup() of nuke_di.mcp or nuke_di.fastmcp. See https://github.com/troyan-dy/nuke-di#documentation
   ```
 
-- **lifespan なしで呼び出されたツール**（テストでクライアントを使わずに `await server.call_tool(...)` を呼ぶ場合など）。SDK は `UnexpectedToolError: Error executing tool count_books` を、FastMCP は `ToolError: Error calling tool 'count_books': Failed to resolve dependency 'catalog' for count_books` を送出します。どちらも原因は `RuntimeError: Catalog is not connected: run the server with its lifespan` です。
+- **lifespan なしで呼び出されたツール**（テストでクライアントを使わずに `await server.call_tool(...)` を呼ぶ場合など）。SDK は `UnexpectedToolError: Error executing tool count_books` を、FastMCP は `ToolError: Error calling tool 'count_books': Failed to resolve dependency 'catalog' for count_books` を送出します。どちらも原因は次のエラーです。
+
+  ```
+  RuntimeError: Catalog is not connected: run the server with its lifespan, e.g. `async with Client(server)`
+  ```
+
 - **サーバーの起動後に追加されたツール**は、`RuntimeError: Catalog was not started with the server: add its tool before the server starts` を送出します（FastMCP では "its tool, resource or prompt"）。
 - **`connect()` の失敗**は起動を失敗させます。`async with Client(server)` は `RuntimeError: nuke-di clients failed to start: Database.connect() raised OSError: db.local:5432 is unreachable` を送出し（FastMCP のクライアントは先頭に `Client failed to connect: ` を付けます）、stdio のサーバーはそのエラーをトレースバックに含めて終了コード 1 で終了します。ホストはこれを、起動に失敗したサーバーとして報告します。
 - 1 つのサーバーに対する **2 回目の `setup()`**：`TypeError: setup() was already called for this app`。
 - **関数を共有する 2 つの FastMCP サーバーの同時実行：** 2 つ目は `RuntimeError: nuke-di clients failed to start: Catalog is filled for another app that is running; apps that share a handler function run one at a time` で起動に失敗します。
+- **`setup()` より前に FastMCP が読んだ関数。** `setup()` を上に移すと、上記の `TypeError` は次のプロセスでは直りますが、すでに関数を読んだプロセスでは直りません。FastMCP は読んだシグネチャを保持するためです。そのプロセスで後からその関数を設定済みのサーバーに追加すると、`TypeError: FastMCP read count_books before setup() and keeps the signature it read for good: call setup() before the function is first added to any server, and start the process again` を送出します。
+- **マウント先のサーバーの `setup()` より前にマウントされたサーバー**は、同じコンテナの場合、起動を失敗させます：`RuntimeError: nuke-di clients failed to start: shelf is mounted on a server that runs on the same container, but not through it: call setup() of that server before mount()`。
+- **クライアントを受け取れない形**は、追加時に `TypeError` を送出します：`Argument "catalog" of a functools.partial of count_books is Catalog: nuke-di fills the clients of a function, a bound method or a callable object, so declare a function instead`。FastMCP では、`Depends(...)` 内のクラスと呼び出し可能オブジェクトに対して `Argument "db" of the class Reader is Database: ...`。SDK では `ask takes clients and returns an InputRequiredResult: nuke-di fills clients through the SDK's Resolve(...), which the SDK does not combine with an InputRequiredResult of the tool itself; such a tool takes no clients`。
+- **FastAPI と FastMCP で 1 つの関数を使う場合：** `TypeError: count_books takes clients in both FastAPI and FastMCP handlers: nuke-di rewrites its signature for one framework, so give each framework its own function`。

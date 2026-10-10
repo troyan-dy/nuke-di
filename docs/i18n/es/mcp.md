@@ -105,16 +105,21 @@ Las reglas:
 
 - **Dónde se rellenan los clientes.** En los argumentos de las herramientas añadidas con `@server.tool()` o
   `server.add_tool()` después de `setup(server)`, y de cada resolver que usen, `Annotated[T, Resolve(fn)]`, a
-  cualquier profundidad. Cualquier otro argumento es del SDK: la entrada de la herramienta, `Context`. Un
-  argumento con un `Resolve(...)` propio es tuyo, aunque su tipo sea un cliente.
+  cualquier profundidad: funciones, métodos ligados y objetos invocables. Un argumento con un valor por
+  defecto simple, `catalog: Catalog = None`, también se rellena. Cualquier otro argumento es del SDK: la
+  entrada de la herramienta, `Context`. Un argumento con un `Resolve(...)` propio es tuyo, aunque su tipo sea
+  un cliente.
 - **Solo herramientas.** El SDK no tiene resolvers para resources y prompts, así que estos no reciben
-  clientes: lee los datos en una herramienta, o usa [FastMCP](#fastmcp).
+  clientes: lee los datos en una herramienta, o usa [FastMCP](#fastmcp). Tampoco reciben clientes un
+  `functools.partial` ni una herramienta que devuelve un `InputRequiredResult`, que el SDK no combina con
+  resolvers: ambos lanzan un `TypeError` al añadirse.
 - **Qué clientes arrancan.** Al arrancar, los de cada herramienta añadida a través de `setup()`. Un objeto
   `Tool` construido antes y pasado como `MCPServer(tools=[...])` no se ve.
 - **Lifespan.** Los clientes se conectan antes del `lifespan=` propio del servidor y se desconectan después
   de él, así que este puede usarlos. El SDK ejecuta el lifespan una vez por proceso en stdio, una vez por app
   en streamable HTTP y una vez por `Client` en memoria. En el transporte SSE lo ejecuta en cada conexión, y
-  una segunda conexión simultánea no logra arrancar: sirve por streamable HTTP.
+  una segunda conexión simultánea no logra arrancar: sirve por streamable HTTP. Dos `Client(server)` en
+  memoria abiertos a la vez fallan del mismo modo.
 - **La función queda tal como se escribió.** Los marcadores `Resolve` están en sus anotaciones solo mientras
   el SDK las lee, al añadir la herramienta; una prueba puede llamarla con sus propios clientes.
 
@@ -216,10 +221,14 @@ database: disconnected
 
 Las reglas:
 
-- **Dónde se rellenan los clientes.** En los argumentos de las herramientas, resources y prompts añadidos con
-  los decoradores del servidor o con sus `add_tool()`, `add_resource()`, `add_prompt()` después de
-  `setup(mcp)`, y de cada función en un `Depends(...)` que usen, a cualquier profundidad. Un argumento con un
-  valor por defecto propio se deja como está, aunque su tipo sea un cliente.
+- **Dónde se rellenan los clientes.** En los argumentos de las herramientas, resources y prompts añadidos como
+  funciones o métodos ligados con los decoradores del servidor o con sus `add_tool()`, `add_resource()`,
+  `add_prompt()` después de `setup(mcp)`, y de cada función en un `Depends(...)` que usen, a cualquier
+  profundidad. Un argumento con un valor por defecto simple, `catalog: Catalog = None`, también se rellena;
+  uno con un `Depends(...)` u otro marcador de FastMCP se deja como está, aunque su tipo sea un cliente. Un
+  objeto `Tool` construido de antemano, como en `mcp.add_tool(Tool.from_function(fn))`, no se ve. Un
+  `functools.partial`, un objeto invocable o una clase en `Depends(...)` que recibe clientes lanza un
+  `TypeError`: declara una función.
 - **La firma cambia.** FastMCP solo lee `Depends` de los valores por defecto, así que un argumento de tipo
   cliente pasa a ser keyword-only, con `Depends(...)` como valor por defecto, después de los argumentos que
   pasa quien llama: `count_books(genre, *, catalog=Depends(...))`. Solo la introspección lo ve: una prueba
@@ -228,7 +237,13 @@ Las reglas:
   él. FastMCP ejecuta el lifespan una sola vez, por muchas sesiones o transportes que compartan el servidor.
 - **Un servidor a la vez.** FastMCP conserva la firma de una función para siempre, así que una función se
   reescribe una sola vez, sea cual sea el contenedor: dos servidores que comparten una función de herramienta
-  se ejecutan uno tras otro, y el segundo que arranca mientras corre el primero no logra arrancar.
+  se ejecutan uno tras otro, y el segundo que arranca mientras corre el primero no logra arrancar. Por la
+  misma razón, una función sirve a FastMCP o a FastAPI, no a ambos.
+- **Servidores montados.** Llama a `setup()` en cada servidor cuyas funciones reciben clientes, y a `mount()`
+  después. Un servidor montado sobre otro con el mismo contenedor lo arranca este: los clientes de ambos se
+  conectan una sola vez, cuando arranca el servidor que ejecutas. Arrancado por su cuenta, arranca sus
+  clientes él mismo. Un servidor configurado sobre otro contenedor arranca los suyos cuando arranca el
+  servidor sobre el que está montado.
 
 ## <a id="testing"></a>Pruebas
 
@@ -277,8 +292,12 @@ conecta, por eso `FakeDatabase` tiene sus libros desde `__init__`.
 
 - **Una herramienta llamada sin el lifespan**, p. ej. `await server.call_tool(...)` en una prueba, sin un
   cliente: el SDK lanza `UnexpectedToolError: Error executing tool count_books`, y FastMCP `ToolError: Error calling tool
-  'count_books': Failed to resolve dependency 'catalog' for count_books`, ambos causados por
-  `RuntimeError: Catalog is not connected: run the server with its lifespan`.
+  'count_books': Failed to resolve dependency 'catalog' for count_books`, ambos causados por:
+
+  ```
+  RuntimeError: Catalog is not connected: run the server with its lifespan, e.g. `async with Client(server)`
+  ```
+
 - **Una herramienta añadida después de que el servidor arrancó** lanza `RuntimeError: Catalog was not started with the server:
   add its tool before the server starts` (FastMCP: "its tool, resource or prompt").
 - **Un `connect()` fallido** hace fallar el arranque: `async with Client(server)` lanza `RuntimeError: nuke-di
@@ -289,3 +308,19 @@ conecta, por eso `FakeDatabase` tiene sus libros desde `__init__`.
 - **Dos servidores FastMCP que comparten una función, a la vez:** el segundo no logra arrancar con `RuntimeError:
   nuke-di clients failed to start: Catalog is filled for another app that is running; apps that share a
   handler function run one at a time`.
+- **Una función de FastMCP leída antes de `setup()`.** Subir `setup()` corrige el `TypeError` de arriba en el
+  siguiente proceso, no en el que ya leyó la función: FastMCP conserva la firma que leyó. Añadir la función a
+  un servidor configurado más tarde en ese proceso lanza `TypeError: FastMCP read count_books before setup()
+  and keeps the signature it read for good: call setup() before the function is first added to any server,
+  and start the process again`.
+- **Un servidor montado antes del `setup()`** del servidor sobre el que se monta, con el mismo contenedor, hace
+  fallar el arranque: `RuntimeError: nuke-di clients failed to start: shelf is mounted on a server that runs
+  on the same container, but not through it: call setup() of that server before mount()`.
+- **Las formas que no reciben clientes** lanzan un `TypeError` al añadirse: `Argument "catalog" of a
+  functools.partial of count_books is Catalog: nuke-di fills the clients of a function, a bound method or a
+  callable object, so declare a function instead`; en FastMCP, `Argument "db" of the class Reader is
+  Database: ...` para una clase en `Depends(...)` y un objeto invocable; en el SDK, `ask takes clients and
+  returns an InputRequiredResult: nuke-di fills clients through the SDK's Resolve(...), which the SDK does not
+  combine with an InputRequiredResult of the tool itself; such a tool takes no clients`.
+- **Una función para FastAPI y FastMCP:** `TypeError: count_books takes clients in both FastAPI and FastMCP
+  handlers: nuke-di rewrites its signature for one framework, so give each framework its own function`.
