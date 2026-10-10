@@ -6,6 +6,24 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.14.3] - 2026-10-10
+
+### Changed
+
+- The slow-connection comparison runs on the backend of a product page instead of 10 independent clients: an HTTP
+  API, four features and four connections of 100–300 ms under each, 21 clients (`PRODUCT_PAGE_TREE` in
+  `benchmarks/compare.py`). `nuke-di` starts it in 336 ms, its longest chain; dishka and wireup in 3.41 s, ten
+  times as long, since they connect one client after another; wireup in 947 ms with the four features gathered by
+  hand; dependency-injector in 336 ms with a `Resource` per client, which stops in 657 ms against 365 ms, since
+  its layers add up the 300 ms that `Checkout` and `EventsProducer` take to stop.
+- The summary of `compare.py` marks in bold every figure within 1% of the best, a difference inside the noise.
+
+### Documentation
+
+- The README Performance section opens with the product page: a picture of the tree with the startup and the
+  shutdown of every library, `docs/product-page.svg`, drawn by `benchmarks/product_page.py` from the JSON of the
+  run, `docs/benchmarks/connect-py3.11.json`, in every language.
+
 ## [1.14.2] - 2026-10-10
 
 ### Added
@@ -607,7 +625,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.14.2...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.14.3...HEAD
+[1.14.3]: https://github.com/troyan-dy/nuke-di/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/troyan-dy/nuke-di/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/troyan-dy/nuke-di/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/troyan-dy/nuke-di/compare/v1.13.0...v1.14.0

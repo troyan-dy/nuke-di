@@ -122,7 +122,7 @@ database: disconnected
 С настоящими подключениями старт стоит ожидания, и его длительность решает структура дерева. Бэкенд страницы
 товара: API, четыре фичи, у каждой фичи четыре подключения по 100–300 ms, всего 21 клиент:
 
-![Страница товара из 21 клиента: подключения, фичи и API. nuke-di и dependency-injector стартуют за 0.34 s, dishka и wireup за 3.41 s](https://raw.githubusercontent.com/troyan-dy/nuke-di/3efd8360d874302ef376637456e3108de544377c/docs/product-page.svg)
+![Страница товара из 21 клиента: подключения, фичи и API. nuke-di и dependency-injector стартуют за 0.34 s, dishka и wireup за 3.41 s](https://raw.githubusercontent.com/troyan-dy/nuke-di/619f35923db67226c5999324b693a90d8b0e0903/docs/product-page.svg)
 
 `nuke-di` подключает каждого клиента, как только подключились его собственные зависимости, поэтому старт
 длится столько, сколько самая длинная цепочка, 0,34 s. dishka и wireup подключают клиентов по одному внутри
@@ -134,15 +134,15 @@ database: disconnected
 
 ```console
 $ uv run python benchmarks/compare.py --only connect --summary
-nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit ea5b28c · N = 10, 100, 1000 · 20 repeats
+nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 1c9fd59 · N = 10, 100, 1000 · 20 repeats
 nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 
-| Lower is better                          | nuke-di       | dishka         | wireup         | dependency-injector | injector |
-|------------------------------------------|--------------:|---------------:|---------------:|--------------------:|---------:|
-| Startup: 8 clients, connect() of 1–60 ms | **70.9 ms**   | 156 ms (2.2×)  | 157 ms (2.2×)  | 71.4 ms (1.0×)      | —        |
-| Shutdown: the same 8 clients             | **18.7 ms**   | 29.8 ms (1.6×) | 30.5 ms (1.6×) | 26.1 ms (1.4×)      | —        |
-| Startup: the product page, 21 clients    | 336 ms (1.0×) | 3.41 s (10.2×) | 3.41 s (10.2×) | **336 ms**          | —        |
-| Shutdown: the product page               | **366 ms**    | 849 ms (2.3×)  | 849 ms (2.3×)  | 657 ms (1.8×)       | —        |
+| Lower is better                          | nuke-di     | dishka         | wireup         | dependency-injector | injector |
+|------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
+| Startup: 8 clients, connect() of 1–60 ms | **71.0 ms** | 156 ms (2.2×)  | 156 ms (2.2×)  | 71.8 ms (1.0×)      | —        |
+| Shutdown: the same 8 clients             | **18.7 ms** | 30.8 ms (1.6×) | 30.7 ms (1.6×) | 26.0 ms (1.4×)      | —        |
+| Startup: the product page, 21 clients    | **336 ms**  | 3.41 s (10.2×) | 3.41 s (10.2×) | **336 ms**          | —        |
+| Shutdown: the product page               | **365 ms**  | 850 ms (2.3×)  | 851 ms (2.3×)  | 657 ms (1.8×)       | —        |
 ```
 
 Ни одна из трёх библиотек ничего не подключает при создании контейнера: если приложение не запросит корень

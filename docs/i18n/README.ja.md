@@ -100,7 +100,7 @@ database: disconnected
 実際の接続では起動のコストは待ち時間であり、それを決めるのは依存ツリーの構造です。商品ページのバックエンドを例にします。
 API が 4 つの機能を必要とし、各機能がそれぞれ 100–300 ms かかる接続を 4 つずつ持つ、合計 21 クライアントです:
 
-![21 クライアントの商品ページ: 接続、機能、API。nuke-di と dependency-injector は 0.34 s、dishka と wireup は 3.41 s で起動](https://raw.githubusercontent.com/troyan-dy/nuke-di/3efd8360d874302ef376637456e3108de544377c/docs/product-page.svg)
+![21 クライアントの商品ページ: 接続、機能、API。nuke-di と dependency-injector は 0.34 s、dishka と wireup は 3.41 s で起動](https://raw.githubusercontent.com/troyan-dy/nuke-di/619f35923db67226c5999324b693a90d8b0e0903/docs/product-page.svg)
 
 `nuke-di` は各クライアントを、その依存先が接続し終えた時点で接続するため、起動時間は最長のチェーン、0.34 s です。
 dishka と wireup は 1 回の `get()` の中でクライアントを 1 つずつ接続するため 3.41 s、10 倍かかり、ツリーが広いほど
@@ -111,15 +111,15 @@ dishka と wireup は 1 回の `get()` の中でクライアントを 1 つず�
 
 ```console
 $ uv run python benchmarks/compare.py --only connect --summary
-nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit ea5b28c · N = 10, 100, 1000 · 20 repeats
+nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 1c9fd59 · N = 10, 100, 1000 · 20 repeats
 nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 
-| Lower is better                          | nuke-di       | dishka         | wireup         | dependency-injector | injector |
-|------------------------------------------|--------------:|---------------:|---------------:|--------------------:|---------:|
-| Startup: 8 clients, connect() of 1–60 ms | **70.9 ms**   | 156 ms (2.2×)  | 157 ms (2.2×)  | 71.4 ms (1.0×)      | —        |
-| Shutdown: the same 8 clients             | **18.7 ms**   | 29.8 ms (1.6×) | 30.5 ms (1.6×) | 26.1 ms (1.4×)      | —        |
-| Startup: the product page, 21 clients    | 336 ms (1.0×) | 3.41 s (10.2×) | 3.41 s (10.2×) | **336 ms**          | —        |
-| Shutdown: the product page               | **366 ms**    | 849 ms (2.3×)  | 849 ms (2.3×)  | 657 ms (1.8×)       | —        |
+| Lower is better                          | nuke-di     | dishka         | wireup         | dependency-injector | injector |
+|------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
+| Startup: 8 clients, connect() of 1–60 ms | **71.0 ms** | 156 ms (2.2×)  | 156 ms (2.2×)  | 71.8 ms (1.0×)      | —        |
+| Shutdown: the same 8 clients             | **18.7 ms** | 30.8 ms (1.6×) | 30.7 ms (1.6×) | 26.0 ms (1.4×)      | —        |
+| Startup: the product page, 21 clients    | **336 ms**  | 3.41 s (10.2×) | 3.41 s (10.2×) | **336 ms**          | —        |
+| Shutdown: the product page               | **365 ms**  | 850 ms (2.3×)  | 851 ms (2.3×)  | 657 ms (1.8×)       | —        |
 ```
 
 3 つのライブラリはいずれも、コンテナーの作成時には何も接続しません。アプリケーションが起動時にルートを取得しなければ、
