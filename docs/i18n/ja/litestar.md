@@ -114,9 +114,9 @@ $ pytest -q tests/test_litestar_api.py
 | | FastAPI | Litestar |
 |---|---|---|
 | セットアップ | ルートより前に `setup(app)`。ルーターは `ClientRouter` で作成する | `plugins=` に `ClientPlugin()`。ルーターやコントローラーは何でもよい |
-| 検出されるハンドラー | `setup(app)` の後に、アプリまたはインクルードした `ClientRouter` で宣言されたすべてのルート | アプリの作成時に渡されたハンドラー。後から `app.register()` で追加したものは検出されない |
+| 検出されるハンドラー | `setup(app)` の後に、アプリまたはインクルードした `ClientRouter` や `APIRouter(route_class=ClientRoute)` で宣言されたすべてのルート | アプリの作成時に渡されたハンドラー。後から `app.register()` で追加したものは検出されない |
 | 引数名 | 自由：こちらで `users: UserService`、あちらで `users: Billing` としてよい | アプリ全体で 1 つの名前に 1 つのクライアント。1 つの名前に 2 つのクライアントがあると、アプリの作成時に `TypeError` が送出される |
-| `NotSingletonClient` | 引数ごとに 1 インスタンス | 引数名ごとに 1 インスタンスで、その名前を使うすべてのハンドラーが共有する |
+| `NotSingletonClient`（削除予定、[ADR-0006](../../adr/0006-clients-live-as-long-as-the-container.md)） | 引数ごとに 1 インスタンス | 引数名ごとに 1 インスタンスで、その名前を使うすべてのハンドラーが共有する |
 | 関数で変わるもの | `__signature__`。`get_type_hints()` は引き続き `UserService` を返す | `__annotations__`。`get_type_hints(include_extras=True)` は `Annotated[UserService, Dependency(), SkipValidationMarker()]` を返す |
 | WebSocket | `@app.websocket` エンドポイント | `@websocket` ハンドラー。WebSocket リスナーは `TypeError` を送出する |
 | アプリ自身の lifespan | その内側で実行される：クライアントはその前に接続し、その後に切断する | クライアントは `lifespan=` と `on_startup=` より前に接続し、`on_shutdown=` の後に切断する |
@@ -223,5 +223,5 @@ $ pytest -q -W ignore::DeprecationWarning tests/test_litestar_graphql.py
 
 - **コンテキストゲッターは関数にする。** Strawberry の Litestar 用 `BaseContext` は msgspec の `Struct` です。クラスそのものを `context_getter=Context` として渡すと、すべてのリクエストが `msgspec.ValidationError` で失敗します。
 - **サブスクリプション**は同じコントローラーの WebSocket ハンドラーで実行されます。`ClientPlugin` はこのハンドラーも検出し、コンテキストは同じゲッターから渡されます。
-- **非推奨の警告は Strawberry によるもの。** Litestar 2.24 では、Strawberry 0.332 のコントローラーが自身の依存関係 `context`、`root_value`、`response` を名前だけで宣言しており、Litestar はそれぞれについて警告を出します。テストを `-W ignore::DeprecationWarning` 付きで実行しているのはそのためです。`get_context` の引数 `users` は警告を出しません。
-- FastAPI と異なり、ほかに必要なものはありません。Litestar はコントローラーの依存関係をそのまま `ClientPlugin` に渡します。違いについては [FastAPI](fastapi.md#strawberry-graphql) を参照してください。
+- **非推奨の警告は Strawberry によるもの。** Litestar 2.24 では、Strawberry 0.332 のコントローラーが自身の依存関係 `custom_context`、`context`、`context_ws`、`root_value`、`response` を名前だけで宣言しており、Litestar はそれぞれについて警告を出します。テストを `-W ignore::DeprecationWarning` 付きで実行しているのはそのためです。`get_context` の引数 `users` は警告を出しません。
+- ほかに必要なものはありません。Litestar はコントローラーの依存関係をそのまま `ClientPlugin` に渡します。FastAPI ではルーターに `route_class=ClientRoute` を指定します。[FastAPI](fastapi.md#strawberry-graphql) を参照してください。

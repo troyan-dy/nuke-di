@@ -130,9 +130,9 @@ $ pytest -q tests/test_litestar_api.py
 | | FastAPI | Litestar |
 |---|---|---|
 | 设置方式 | 在路由之前调用 `setup(app)`；路由器通过 `ClientRouter` 创建 | 在 `plugins=` 中加入 `ClientPlugin()`；任意路由器或控制器均可 |
-| 能看到哪些处理函数 | 在 `setup(app)` 之后声明的每个路由，无论在应用上还是在被包含的 `ClientRouter` 上 | 创建应用时传入的处理函数；之后通过 `app.register()` 添加的看不到 |
+| 能看到哪些处理函数 | 在 `setup(app)` 之后声明的每个路由，无论在应用上，还是在被包含的 `ClientRouter` 或 `APIRouter(route_class=ClientRoute)` 上 | 创建应用时传入的处理函数；之后通过 `app.register()` 添加的看不到 |
 | 参数名 | 自由：这里写 `users: UserService`，那里写 `users: Billing` | 整个应用中一个名称只对应一个客户端；同名的两个客户端会在创建应用时抛出 `TypeError` |
-| `NotSingletonClient` | 每个参数一个实例 | 每个参数名一个实例，由所有使用该名称的处理函数共享 |
+| `NotSingletonClient`（计划移除，[ADR-0006](../../adr/0006-clients-live-as-long-as-the-container.md)） | 每个参数一个实例 | 每个参数名一个实例，由所有使用该名称的处理函数共享 |
 | 函数中被改动的部分 | 它的 `__signature__`；`get_type_hints()` 仍显示 `UserService` | 它的 `__annotations__`；`get_type_hints(include_extras=True)` 显示 `Annotated[UserService, Dependency(), SkipValidationMarker()]` |
 | WebSocket | `@app.websocket` 端点 | `@websocket` 处理函数；WebSocket 监听器会抛出 `TypeError` |
 | 应用自己的 lifespan | 在内部运行：客户端在它之前连接、在它之后断开 | 客户端在 `lifespan=` 和 `on_startup=` 之前连接，在 `on_shutdown=` 之后断开 |
@@ -251,7 +251,8 @@ $ pytest -q -W ignore::DeprecationWarning tests/test_litestar_graphql.py
 - **订阅**运行在同一控制器的 websocket 处理函数上，`ClientPlugin` 同样能看到它，并从同一个获取函数
   得到上下文。
 - **弃用警告来自 Strawberry。** 在 Litestar 2.24 上，Strawberry 0.332 的控制器仅按名称声明了自己的
-  依赖项 `context`、`root_value`、`response`，Litestar 会对每一个发出警告，因此测试要带上
-  `-W ignore::DeprecationWarning` 运行。`get_context` 的参数 `users` 不会引发任何警告。
-- 与 FastAPI 不同，这里不需要其他任何设置：Litestar 会把控制器的依赖项原样交给 `ClientPlugin`，
-  区别参见 [FastAPI](fastapi.md#strawberry-graphql)。
+  依赖项 `custom_context`、`context`、`context_ws`、`root_value` 和 `response`，Litestar 会对每一个
+  发出警告，因此测试要带上 `-W ignore::DeprecationWarning` 运行。`get_context` 的参数 `users` 不会
+  引发任何警告。
+- 不需要其他任何设置：Litestar 会把控制器的依赖项原样交给 `ClientPlugin`。在 FastAPI 上，路由器要
+  传入 `route_class=ClientRoute`，参见 [FastAPI](fastapi.md#strawberry-graphql)。

@@ -136,9 +136,9 @@ app ([ADR-0004](../../adr/0004-litestar-clients-by-name.md)).
 | | FastAPI | Litestar |
 |---|---|---|
 | Configuración | `setup(app)` antes de las rutas; routers a través de `ClientRouter` | `ClientPlugin()` en `plugins=`; cualquier router o controller |
-| Handlers que ve | Cada ruta declarada después de `setup(app)`, en la app o en un `ClientRouter` incluido | Los handlers con los que se crea la app; uno añadido después con `app.register()`, no |
+| Handlers que ve | Cada ruta declarada después de `setup(app)`, en la app o en un `ClientRouter` o `APIRouter(route_class=ClientRoute)` incluido | Los handlers con los que se crea la app; uno añadido después con `app.register()`, no |
 | Nombres de argumento | Libres: `users: UserService` aquí y `users: Billing` allá | Un nombre, un cliente en toda la app; dos clientes con el mismo nombre lanzan `TypeError` al crear la app |
-| Un `NotSingletonClient` | Una instancia por argumento | Una instancia por nombre de argumento, compartida por todos los handlers que usan ese nombre |
+| Un `NotSingletonClient` (pendiente de eliminación, [ADR-0006](../../adr/0006-clients-live-as-long-as-the-container.md)) | Una instancia por argumento | Una instancia por nombre de argumento, compartida por todos los handlers que usan ese nombre |
 | Qué cambia en la función | Su `__signature__`; `get_type_hints()` sigue mostrando `UserService` | Sus `__annotations__`; `get_type_hints(include_extras=True)` muestra `Annotated[UserService, Dependency(), SkipValidationMarker()]` |
 | Websockets | Endpoints `@app.websocket` | Handlers `@websocket`; un websocket listener lanza `TypeError` |
 | El lifespan propio de la app | Se ejecuta por dentro: los clientes se conectan antes y se desconectan después | Los clientes se conectan antes de `lifespan=` y `on_startup=`, y se desconectan después de `on_shutdown=` |
@@ -262,8 +262,8 @@ Las reglas:
 - **Las suscripciones** corren en el handler websocket del mismo controller, que `ClientPlugin` también
   ve, y reciben el contexto del mismo getter.
 - **Las advertencias de deprecación son de Strawberry.** En Litestar 2.24, el controller de Strawberry
-  0.332 declara sus propias dependencias, `context`, `root_value`, `response`, solo por nombre, y Litestar
-  avisa sobre cada una; por eso la prueba se ejecuta con `-W ignore::DeprecationWarning`. El argumento
-  `users` de `get_context` no genera ninguna.
-- A diferencia de FastAPI, no hace falta nada más: Litestar le pasa a `ClientPlugin` las dependencias del
-  controller tal como son; consulta [FastAPI](fastapi.md#strawberry-graphql) para ver la diferencia.
+  0.332 declara sus propias dependencias, `custom_context`, `context`, `context_ws`, `root_value` y
+  `response`, solo por nombre, y Litestar avisa sobre cada una; por eso la prueba se ejecuta con
+  `-W ignore::DeprecationWarning`. El argumento `users` de `get_context` no genera ninguna.
+- No hace falta nada más: Litestar le pasa a `ClientPlugin` las dependencias del controller tal como son.
+  En FastAPI el router recibe `route_class=ClientRoute`, consulta [FastAPI](fastapi.md#strawberry-graphql).

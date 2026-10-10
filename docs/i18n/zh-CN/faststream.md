@@ -225,9 +225,17 @@ $ pytest -q tests/test_notify.py
 
 规则如下：
 
-- **broker 属于应用。** FastStream 在客户端连接之后启动它，在客户端断开之前停止它。客户端在应用运行
-  期间从自己的方法中发布消息；在它的 `connect()` 或 `disconnect()` 中调用 `publish()` 会抛出
-  `faststream.exceptions.IncorrectState`，因为此时 broker 尚未启动或已经停止。
+- **broker 属于应用。** FastStream 在客户端连接之后启动它，在客户端断开之前停止它，因此这个客户端
+  不像第三方对象的客户端通常那样在 `connect()` 中创建自己的 broker
+  （[ADR-0005](../../adr/0005-third-party-objects-as-client-classes.md)）：broker 归 FastStream 所有。
+  客户端在应用运行期间从自己的方法中发布消息。
+- **不要在 `connect()` 或 `disconnect()` 中发布。** 在真实的 broker 上，`connect()` 中的 `publish()`
+  会抛出 `faststream.exceptions.IncorrectState`，因为 broker 尚未启动，应用会启动失败，报错
+  `RuntimeError: nuke-di clients failed to start: Notifications.connect() raised IncorrectState`。在
+  `disconnect()` 中它会抛出同样的异常，因为 broker 已经停止，但 nuke-di 只会记录失败的 `disconnect()`，
+  应用照常退出。在 `TestNatsBroker` 下，前者抛出
+  ``SetupError: You should setup `HandlerItem` at first.``，后者则静默通过，因此测试发现不了
+  `disconnect()` 中的发布。
 - **broker 是参数的默认值**，而不是客户端：nuke-di 只填充类型为客户端的参数，其余参数保留默认值。
   单元测试可以直接构建 `Notifications(nats=AsyncMock())`。
 - **在 `TestNatsBroker` 下**，被打补丁的是同一个 broker 对象，因此客户端在内存中发布消息，
@@ -290,5 +298,5 @@ $ pytest -q tests/test_containers.py
   failed to start: UserService is filled for another app that is running; apps that share a handler
   function run one at a time`，而不是把第一个应用的客户端交给第二个应用。
 - **在模块级应用上使用 `DI.override()`，或每个测试一个容器**，两种方式都可以；按其余测试的用法来选择。
-- 与此不同，FastAPI 会为每个容器分别重写函数，它在不同容器上的应用可以同时运行，唯一的例外参见
-  [FastAPI](fastapi.md#an-app-per-test-container)。
+- 与此不同，FastAPI 的请求拿到的是它所到达的那个应用的客户端，因此不同容器上的 FastAPI 应用可以同时
+  服务同样的函数，参见 [FastAPI](fastapi.md#an-app-per-test-container)。

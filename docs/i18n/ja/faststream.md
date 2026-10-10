@@ -211,7 +211,8 @@ $ pytest -q tests/test_notify.py
 
 ルール：
 
-- **ブローカーはアプリのもの。** FastStream はクライアントが接続した後にブローカーを起動し、クライアントが切断する前に停止します。クライアントは、アプリの実行中にメソッドからパブリッシュします。`connect()` や `disconnect()` の中で `publish()` を呼ぶと、ブローカーがまだ起動していないか、すでに停止しているため、`faststream.exceptions.IncorrectState` が送出されます。
+- **ブローカーはアプリのもの。** FastStream はクライアントが接続した後にブローカーを起動し、クライアントが切断する前に停止します。そのため、このクライアントは、サードパーティのオブジェクトのクライアントがほかの場合にするように `connect()` でブローカーを作成することはしません（[ADR-0005](../../adr/0005-third-party-objects-as-client-classes.md)）。ブローカーは FastStream が所有します。クライアントは、アプリの実行中にメソッドからパブリッシュします。
+- **`connect()` や `disconnect()` からはパブリッシュしない。** 実際のブローカーでは、`connect()` の中の `publish()` は、ブローカーがまだ起動していないため `faststream.exceptions.IncorrectState` を送出し、アプリは `RuntimeError: nuke-di clients failed to start: Notifications.connect() raised IncorrectState` で起動に失敗します。`disconnect()` の中でも、ブローカーがすでに停止しているため同じ例外が送出されますが、nuke-di は失敗した `disconnect()` をログに記録するだけなので、アプリは正常に終了します。`TestNatsBroker` の下では、前者は ``SetupError: You should setup `HandlerItem` at first.`` を送出し、後者は何事もなく通ってしまうため、`disconnect()` の中のパブリッシュはテストでは検出できません。
 - **ブローカーはデフォルト引数**であり、クライアントではありません。nuke-di はクライアント型の引数を埋め、それ以外の引数はデフォルト値のままにします。単体テストでは `Notifications(nats=AsyncMock())` を構築できます。
 - **`TestNatsBroker` の下では**同じブローカーオブジェクトにパッチが当てられるので、クライアントはメモリ内でパブリッシュし、`show.mock` がそのメッセージを受け取ります。`override(Notifications, ...)` は、そのクライアントを受け取るすべてのサブスクライバーに対してクライアントを差し替えます。
 - **FastStream アプリを持たないプロセス**（たとえばメッセージを送る `@job`）は、自分の接続を自分で持ちます。その場合、ブローカーはクライアントの `connect()` で作成し、`disconnect()` で停止します。[examples/faststream_nats/publish.py](../../../examples/faststream_nats/publish.py) の `Nats` がその例です。
@@ -263,4 +264,4 @@ $ pytest -q tests/test_containers.py
 - **アプリを起動するテストは 1 つずつ順番に実行する。** pytest はそのように実行します。pytest-xdist はテストをそれぞれ別のプロセスで実行し、プロセス同士は何も共有しません。
 - **同じサブスクライバー関数を使う 2 つのアプリを同時に起動しない。** たとえば、`TestApp` の中で別の `TestApp` を起動する場合です。2 つ目のアプリは、最初のアプリのクライアントを受け取るのではなく、`RuntimeError: nuke-di clients failed to start: UserService is filled for another app that is running; apps that share a handler function run one at a time` で起動に失敗します。
 - **モジュールレベルのアプリでの `DI.override()` も、テストごとのコンテナも**、どちらでもかまいません。他のテストで使っている方に合わせて選んでください。
-- これとは異なり、FastAPI はコンテナごとに関数を書き換えるので、異なるコンテナ上のアプリを同時に実行できます。唯一の例外については [FastAPI](fastapi.md#an-app-per-test-container) を参照してください。
+- これとは異なり、FastAPI のリクエストは届いた先のアプリのクライアントを受け取るので、異なるコンテナ上の FastAPI アプリは同じ関数を同時に提供できます。[FastAPI](fastapi.md#an-app-per-test-container) を参照してください。

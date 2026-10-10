@@ -462,10 +462,9 @@ $ pytest -q tests/test_factory.py
 ルール：
 
 - **アプリ全体で `override()` は 1 回。** `di.override(Database, FakeDatabase())` は、依存関係 `current_user`、`UserService`、そのほか `Database` を受け取るすべてのものに対してデータベースを差し替えます。FastAPI だけで同じことをするには、依存関係の関数ごとに `app.dependency_overrides` のエントリーが必要です。
-- **複数のコンテナで使われる関数。** `setup(app, di)` は、新しいアプリごとに、そのコンテナ向けに `get_user` と `current_user` を書き換えます。元になるのは書かれたとおりのシグネチャで、前のアプリが残したシグネチャではありません。
+- **複数のコンテナで使われる関数。** `get_user` と `current_user` が書き換えられるのは 1 回だけです。各アプリは起動時にそれらのクライアントを自分のコンテナで解決し、リクエストは届いた先のアプリのクライアントを受け取ります。異なるコンテナで構築したアプリは、順番にでも同時にでも、同じ関数を提供できます。
 - **ルーターはアプリごとに。** `ClientRouter` は 1 つのコンテナからクライアントを埋めます。別のコンテナのルーターをインクルードしたアプリは `TypeError: the router fills clients from another container than this app` を送出します。ルーターはファクトリーの中で作成してください。
 - **`app.dependency_overrides`** は 1 つのアプリに属し、引き続き使えます。上の `current_user` のように、クライアントを受け取る依存関係に対しても同様です。
-- **各アプリは起動の直前に構築する。** FastAPI 0.137 以降では、インクルードしたルーターのルートはアプリへの最初のリクエスト時に、その時点で関数が持っているシグネチャから構築されます。それは最後にバインドされたコンテナのシグネチャです。それより前に構築したアプリ（たとえば、他のテストがそれぞれのアプリを構築した後でテストがインポートする、モジュールレベルの `app = make_app(DI)`）は、`/me` で `RuntimeError: Database is not connected: start the app with its lifespan` となって失敗します。また、2 つのアプリが同時に動いている場合は、そこで古いほうのアプリが新しいほうのクライアントを受け取ってしまいます。そのため、サーバーは `uvicorn --factory` でアプリを構築し、テストはフィクスチャで 1 テストずつ順番にアプリを構築します。`/users/{user_id}` のようにアプリ自身で宣言したルートは、自分のコンテナを保ちます。
 
 ## <a id="strawberry-graphql"></a>Strawberry GraphQL
 
@@ -480,7 +479,7 @@ pip install "nuke-di[fastapi]" strawberry-graphql
 from collections.abc import AsyncIterator
 
 import strawberry
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from strawberry.fastapi import BaseContext, GraphQLRouter
 
 from app.clients import UserService
@@ -513,24 +512,24 @@ schema = strawberry.Schema(query=Query, subscription=Subscription)
 
 app = FastAPI()
 setup(app)
-graphql = GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute, dependencies=[Depends(Context)])
+graphql = GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute)
 app.include_router(graphql, prefix="/graphql")
 ```
 
 ```console
 $ uvicorn app.graphql:app
-INFO:     Started server process [51045]
+INFO:     Started server process [61129]
 INFO:     Waiting for application startup.
 database: connected
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:51840 - "POST /graphql HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51979 - "POST /graphql HTTP/1.1" 200 OK
 ^C
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 database: disconnected
 INFO:     Application shutdown complete.
-INFO:     Finished server process [51045]
+INFO:     Finished server process [61129]
 ```
 
 ```console
@@ -578,13 +577,13 @@ def test_subscription() -> None:
 ```console
 $ pytest -q tests/test_graphql.py
 ..                                                                       [100%]
-2 passed in 0.26s
+2 passed in 0.21s
 ```
 
 ルール：
 
 - **コンテキストがクライアントを受け取り、リゾルバーがコンテキストを受け取る。** FastAPI はリクエストと WebSocket 接続のたびに `Context` を構築し、そこにコンテナの接続済みクライアントを入れます。`strawberry.Info[Context]` はリゾルバーにその型を伝えます。リゾルバーは型ヒントでクライアントを受け取りません。Strawberry には独自の依存性注入がなく、値を下に渡す手段は `info.context` です。
-- **`route_class=ClientRoute` と `dependencies=[Depends(Context)]` の両方が必要。** Strawberry はコンテキストゲッターを独自の依存関係でラップしており、その型ヒントは型チェッカー向けにだけインポートされるクラスを指しているため、nuke-di はそれをたどって `Context` に到達できません。`dependencies=` に並べると、クラスに直接到達できます。FastAPI はリクエスト内で依存関係をキャッシュするので、`Context` はやはりリクエストごとに一度だけ構築されます。これがないと、`GraphQLRouter(...)` は `TypeError: UserService is a nuke-di client, not a pydantic type` を送出します。
-- **サブスクリプション**は同じルーターの WebSocket ルートで実行され、同じ方法で `Context` を受け取ります。
-- **別のコンテナ**：`route_class=ClientRouter(container=container).route_class`。
-- Strawberry の Litestar コントローラーには、このどれも必要ありません。[Litestar](litestar.md#strawberry-graphql) を参照してください。
+- **`route_class=ClientRoute`** を指定すると、ほかの `APIRouter` と同じように、ルーターのルートがクライアントを埋めます。Strawberry はコンテキストゲッターを独自の依存関係でラップして FastAPI に渡しますが、nuke-di はそれをたどって `Context` まで到達します。
+- **サブスクリプション。** FastAPI は、`APIRouter` 上のほかの WebSocket と同じく、ルーターの WebSocket ルートをルートクラスなしで構築します。それでもこのルートはクライアント入りの `Context` を受け取ります。Strawberry のコンテキストの依存関係を GET と POST のルートと共有しており、ルーターはそれらのルートを先に `ClientRoute` で宣言するからです。それらのルートが `Context` を書き換え、そのクライアントをアプリの起動処理に組み込みます。このようなルーターに自分で追加した WebSocket エンドポイントは、引き続き `TypeError` を送出します。[サポートされていないもの](#not-supported) を参照してください。
+- **別のコンテナ**：`setup(app, container)` の後に `route_class=app.router.route_class`。
+- Strawberry の Litestar コントローラーは `ClientPlugin` を通じてクライアントを受け取ります。[Litestar](litestar.md#strawberry-graphql) を参照してください。

@@ -136,9 +136,9 @@ $ pytest -q tests/test_litestar_api.py
 | | FastAPI | Litestar |
 |---|---|---|
 | Подключение | `setup(app)` до маршрутов; роутеры через `ClientRouter` | `ClientPlugin()` в `plugins=`; любой роутер или контроллер |
-| Какие обработчики видны | Каждый маршрут, объявленный после `setup(app)`, на приложении или на включённом `ClientRouter` | Обработчики, с которыми создано приложение; добавленный позже через `app.register()` — нет |
+| Какие обработчики видны | Каждый маршрут, объявленный после `setup(app)`, на приложении или на включённом `ClientRouter` или `APIRouter(route_class=ClientRoute)` | Обработчики, с которыми создано приложение; добавленный позже через `app.register()` — нет |
 | Имена аргументов | Свободные: `users: UserService` здесь и `users: Billing` там | Одно имя — один клиент во всём приложении; два клиента под одним именем выбрасывают `TypeError` при создании приложения |
-| `NotSingletonClient` | Один экземпляр на аргумент | Один экземпляр на имя аргумента, общий для всех обработчиков, которые используют это имя |
+| `NotSingletonClient` (будет удалён, [ADR-0006](../../adr/0006-clients-live-as-long-as-the-container.md)) | Один экземпляр на аргумент | Один экземпляр на имя аргумента, общий для всех обработчиков, которые используют это имя |
 | Что меняется в функции | Её `__signature__`; `get_type_hints()` по-прежнему показывает `UserService` | Её `__annotations__`; `get_type_hints(include_extras=True)` показывает `Annotated[UserService, Dependency(), SkipValidationMarker()]` |
 | WebSocket | Эндпоинты `@app.websocket` | Обработчики `@websocket`; WebSocket-слушатель выбрасывает `TypeError` |
 | Собственный lifespan приложения | Выполняется внутри: клиенты подключаются до него и отключаются после | Клиенты подключаются до `lifespan=` и `on_startup=`, отключаются после `on_shutdown=` |
@@ -262,8 +262,8 @@ $ pytest -q -W ignore::DeprecationWarning tests/test_litestar_graphql.py
 - **Подписки** работают на websocket-обработчике того же контроллера, который `ClientPlugin` тоже видит,
   и получают контекст из той же функции.
 - **Предупреждения об устаревании — от Strawberry.** На Litestar 2.24 контроллер Strawberry 0.332
-  объявляет собственные зависимости `context`, `root_value`, `response` только по имени, и Litestar
-  предупреждает о каждой, поэтому тест запускается с `-W ignore::DeprecationWarning`. Аргумент `users`
-  функции `get_context` предупреждений не вызывает.
-- В отличие от FastAPI, больше ничего не нужно: Litestar передаёт зависимости контроллера в
-  `ClientPlugin` как есть; в чём разница, см. [FastAPI](fastapi.md#strawberry-graphql).
+  объявляет собственные зависимости `custom_context`, `context`, `context_ws`, `root_value` и `response`
+  только по имени, и Litestar предупреждает о каждой, поэтому тест запускается с
+  `-W ignore::DeprecationWarning`. Аргумент `users` функции `get_context` предупреждений не вызывает.
+- Больше ничего не нужно: Litestar передаёт зависимости контроллера в `ClientPlugin` как есть. На FastAPI
+  роутер принимает `route_class=ClientRoute`, см. [FastAPI](fastapi.md#strawberry-graphql).

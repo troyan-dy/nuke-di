@@ -229,9 +229,17 @@ $ pytest -q tests/test_notify.py
 Zasady:
 
 - **Broker należy do aplikacji.** FastStream uruchamia go po połączeniu klientów i zatrzymuje, zanim
-  klienci się rozłączą. Klient publikuje ze swoich metod, gdy aplikacja działa; `publish()` w jego
-  `connect()` lub `disconnect()` zgłasza `faststream.exceptions.IncorrectState`, bo broker jeszcze nie
-  wystartował albo jest już zatrzymany.
+  klienci się rozłączą, więc ten klient nie tworzy swojego brokera w `connect()`, jak w innych przypadkach
+  robi to klient obiektu z zewnętrznej biblioteki
+  ([ADR-0005](../../adr/0005-third-party-objects-as-client-classes.md)): brokerem zarządza FastStream.
+  Klient publikuje ze swoich metod, gdy aplikacja działa.
+- **Nie z `connect()` ani `disconnect()`.** Na prawdziwym brokerze `publish()` w `connect()` zgłasza
+  `faststream.exceptions.IncorrectState`, bo broker jeszcze nie wystartował, a aplikacja nie startuje
+  z błędem `RuntimeError: nuke-di clients failed to start: Notifications.connect() raised IncorrectState`.
+  W `disconnect()` zgłasza to samo, bo broker jest już zatrzymany, ale nuke-di jedynie loguje nieudane
+  `disconnect()`, a aplikacja kończy działanie normalnie. Pod `TestNatsBroker` pierwszy przypadek zgłasza
+  ``SetupError: You should setup `HandlerItem` at first.``, a drugi przechodzi po cichu, więc testy nie
+  wychwycą publikacji w `disconnect()`.
 - **Broker jest argumentem domyślnym**, a nie klientem: nuke-di wypełnia argumenty z typem klienta,
   a pozostałym zostawia ich wartości domyślne. Test jednostkowy może zbudować
   `Notifications(nats=AsyncMock())`.
@@ -298,5 +306,6 @@ Co z tym zrobić:
   function run one at a time`, zamiast dostać klientów pierwszej aplikacji.
 - **`DI.override()` na aplikacji z poziomu modułu albo kontener na test** — oba podejścia są
   w porządku; wybierz według tego, czego używa reszta testów.
-- W odróżnieniu od tego FastAPI przepisuje funkcję dla każdego kontenera, a jego aplikacje na różnych
-  kontenerach mogą działać jednocześnie; jedyny wyjątek opisuje [FastAPI](fastapi.md#an-app-per-test-container).
+- W odróżnieniu od tego żądanie FastAPI dostaje klientów aplikacji, do której trafiło, więc aplikacje
+  FastAPI na różnych kontenerach obsługują te same funkcje jednocześnie; zob.
+  [FastAPI](fastapi.md#an-app-per-test-container).

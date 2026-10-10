@@ -135,9 +135,9 @@ na poziomie aplikacji ([ADR-0004](../../adr/0004-litestar-clients-by-name.md)).
 | | FastAPI | Litestar |
 |---|---|---|
 | Konfiguracja | `setup(app)` przed trasami; routery przez `ClientRouter` | `ClientPlugin()` w `plugins=`; dowolny router lub kontroler |
-| Widoczne handlery | Każda trasa zadeklarowana po `setup(app)`, na aplikacji lub na dołączonym `ClientRouter` | Handlery, z którymi tworzona jest aplikacja; handler dodany później przez `app.register()` nie jest widoczny |
+| Widoczne handlery | Każda trasa zadeklarowana po `setup(app)`, na aplikacji lub na dołączonym `ClientRouter` albo `APIRouter(route_class=ClientRoute)` | Handlery, z którymi tworzona jest aplikacja; handler dodany później przez `app.register()` nie jest widoczny |
 | Nazwy argumentów | Dowolne: `users: UserService` tutaj i `users: Billing` tam | Jedna nazwa, jeden klient w całej aplikacji; dwaj klienci pod jedną nazwą zgłaszają `TypeError` przy tworzeniu aplikacji |
-| `NotSingletonClient` | Jedna instancja na argument | Jedna instancja na nazwę argumentu, współdzielona przez każdy handler, który używa tej nazwy |
+| `NotSingletonClient` (do usunięcia, [ADR-0006](../../adr/0006-clients-live-as-long-as-the-container.md)) | Jedna instancja na argument | Jedna instancja na nazwę argumentu, współdzielona przez każdy handler, który używa tej nazwy |
 | Co zmienia się w funkcji | Jej `__signature__`; `get_type_hints()` nadal pokazuje `UserService` | Jej `__annotations__`; `get_type_hints(include_extras=True)` pokazuje `Annotated[UserService, Dependency(), SkipValidationMarker()]` |
 | Websockety | Endpointy `@app.websocket` | Handlery `@websocket`; listener websocket zgłasza `TypeError` |
 | Własny lifespan aplikacji | Działa wewnątrz: klienci łączą się przed nim i rozłączają po nim | Klienci łączą się przed `lifespan=` i `on_startup=`, a rozłączają po `on_shutdown=` |
@@ -261,9 +261,10 @@ Zasady:
   `msgspec.ValidationError`.
 - **Subskrypcje** działają na handlerze websocket tego samego kontrolera, który `ClientPlugin` również
   widzi, i dostają kontekst z tego samego gettera.
-- **Ostrzeżenia o przestarzałości pochodzą od Strawberry.** W Litestar 2.24 kontroler ze Strawberry
-  0.332 deklaruje własne zależności, `context`, `root_value`, `response`, wyłącznie po nazwie, a Litestar
-  ostrzega o każdej z nich — dlatego test jest uruchamiany z `-W ignore::DeprecationWarning`. Argument
-  `users` funkcji `get_context` nie wywołuje żadnego ostrzeżenia.
-- W odróżnieniu od FastAPI nic więcej nie jest potrzebne: Litestar przekazuje zależności kontrolera
-  do `ClientPlugin` bez zmian; różnicę opisuje [FastAPI](fastapi.md#strawberry-graphql).
+- **Ostrzeżenia o przestarzałości pochodzą od Strawberry.** W Litestar 2.24 kontroler ze Strawberry 0.332
+  deklaruje własne zależności, `custom_context`, `context`, `context_ws`, `root_value` i `response`,
+  wyłącznie po nazwie, a Litestar ostrzega o każdej z nich — dlatego test jest uruchamiany
+  z `-W ignore::DeprecationWarning`. Argument `users` funkcji `get_context` nie wywołuje żadnego
+  ostrzeżenia.
+- Nic więcej nie jest potrzebne: Litestar przekazuje zależności kontrolera do `ClientPlugin` bez zmian.
+  W FastAPI router przyjmuje `route_class=ClientRoute`, zob. [FastAPI](fastapi.md#strawberry-graphql).

@@ -507,22 +507,15 @@ Las reglas:
   datos para la dependencia `current_user`, para `UserService` y para todo lo demás que recibe un
   `Database`, mientras que FastAPI por sí solo necesita una entrada de `app.dependency_overrides` por cada
   función de dependencia.
-- **Una función sobre varios contenedores.** `setup(app, di)` reescribe `get_user` y `current_user` para el
-  contenedor de cada app nueva, a partir de la firma tal como está escrita, no de la que dejó la app anterior.
+- **Una función sobre varios contenedores.** `get_user` y `current_user` se reescriben una sola vez; cada
+  app resuelve sus clientes en su propio contenedor al arrancar, y una petición recibe los clientes de la
+  app a la que llegó. Apps construidas sobre contenedores distintos sirven las mismas funciones, una tras
+  otra o a la vez.
 - **Un router por app.** Un `ClientRouter` rellena clientes desde un solo contenedor; una app que incluye un
   router de otro contenedor lanza `TypeError: the router fills clients from another container than
   this app`. Crea los routers dentro de la fábrica.
 - **`app.dependency_overrides`** pertenece a una sola app y sigue funcionando, también para una dependencia
   que recibe clientes, como `current_user` arriba.
-- **Construye cada app justo antes de que arranque.** En FastAPI 0.137 y posteriores, las rutas de un router
-  incluido se construyen en la primera petición de la app, a partir de la firma que tiene la función en ese
-  momento, que es la del último contenedor vinculado. Una app construida antes, por ejemplo un
-  `app = make_app(DI)` a nivel de módulo que una prueba importa después de que otras pruebas construyeran
-  sus propias apps, falla entonces en `/me` con `RuntimeError: Database is not connected: start the app with its lifespan`,
-  y de dos apps que corren a la vez, la más antigua recibe ahí los clientes de la más nueva. Por eso el
-  servidor construye su app con `uvicorn --factory`, y las pruebas construyen las suyas en un fixture, una
-  prueba tras otra. Las rutas declaradas en la propia app, como `/users/{user_id}`, conservan su propio
-  contenedor.
 
 ## <a id="strawberry-graphql"></a>Strawberry GraphQL
 
@@ -539,7 +532,7 @@ pip install "nuke-di[fastapi]" strawberry-graphql
 from collections.abc import AsyncIterator
 
 import strawberry
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from strawberry.fastapi import BaseContext, GraphQLRouter
 
 from app.clients import UserService
@@ -572,24 +565,24 @@ schema = strawberry.Schema(query=Query, subscription=Subscription)
 
 app = FastAPI()
 setup(app)
-graphql = GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute, dependencies=[Depends(Context)])
+graphql = GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute)
 app.include_router(graphql, prefix="/graphql")
 ```
 
 ```console
 $ uvicorn app.graphql:app
-INFO:     Started server process [51045]
+INFO:     Started server process [61129]
 INFO:     Waiting for application startup.
 database: connected
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:51840 - "POST /graphql HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51979 - "POST /graphql HTTP/1.1" 200 OK
 ^C
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 database: disconnected
 INFO:     Application shutdown complete.
-INFO:     Finished server process [51045]
+INFO:     Finished server process [61129]
 ```
 
 ```console
@@ -637,7 +630,7 @@ def test_subscription() -> None:
 ```console
 $ pytest -q tests/test_graphql.py
 ..                                                                       [100%]
-2 passed in 0.26s
+2 passed in 0.21s
 ```
 
 Las reglas:
@@ -647,14 +640,14 @@ Las reglas:
   `strawberry.Info[Context]` les da a los resolvers su tipo. Un resolver no recibe ningún cliente por type
   hint: Strawberry no tiene inyección de dependencias propia, e `info.context` es su forma de pasarles las
   cosas.
-- **`route_class=ClientRoute` y `dependencies=[Depends(Context)]`, ambos.** Strawberry envuelve el context
-  getter en una dependencia propia cuyos type hints nombran clases que importa solo para los type checkers,
-  así que nuke-di no puede seguirla hasta `Context`. Listada en `dependencies=`, la clase se alcanza
-  directamente, y FastAPI cachea una dependencia dentro de una petición, así que `Context` se sigue
-  construyendo una vez por petición. Sin ella, `GraphQLRouter(...)` lanza `TypeError: UserService is a
-  nuke-di client, not a pydantic type`.
-- **Las suscripciones** corren en la ruta websocket del mismo router y reciben un `Context` de la misma
-  manera.
-- **Otro contenedor**: `route_class=ClientRouter(container=container).route_class`.
-- El controller de Strawberry para Litestar no necesita nada de esto, consulta
+- **`route_class=ClientRoute`** hace que las rutas del router rellenen clientes, como en cualquier
+  `APIRouter`. Strawberry le pasa el context getter a FastAPI envuelto en una dependencia propia, y nuke-di
+  la sigue hasta `Context`.
+- **Suscripciones.** FastAPI construye la ruta websocket del router sin la route class, como cualquier
+  websocket de un `APIRouter`, y aun así recibe un `Context` con los clientes: comparte la dependencia de
+  contexto de Strawberry con las rutas GET y POST, que el router declara antes a través de `ClientRoute`.
+  Estas reescriben `Context` y llevan sus clientes al arranque de la app. Un endpoint websocket propio en
+  un router así sigue lanzando `TypeError`, consulta [No admitido](#not-supported).
+- **Otro contenedor**: `route_class=app.router.route_class`, después de `setup(app, container)`.
+- El controller de Strawberry para Litestar recibe clientes a través de `ClientPlugin`, consulta
   [Litestar](litestar.md#strawberry-graphql).

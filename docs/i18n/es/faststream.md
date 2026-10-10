@@ -230,9 +230,17 @@ $ pytest -q tests/test_notify.py
 Las reglas:
 
 - **El broker es de la app.** FastStream lo arranca después de que se conectan los clientes y lo detiene
-  antes de que se desconecten. Un cliente publica desde sus métodos mientras la app corre; un `publish()`
-  en su `connect()` o `disconnect()` lanza `faststream.exceptions.IncorrectState`, ya que el broker todavía
-  no ha arrancado, o ya se detuvo.
+  antes de que se desconecten, así que este cliente no crea su broker en `connect()` como lo hace en otros
+  casos un cliente de un objeto de terceros
+  ([ADR-0005](../../adr/0005-third-party-objects-as-client-classes.md)): es de FastStream. Un cliente
+  publica desde sus métodos, mientras la app corre.
+- **Ni desde `connect()` ni desde `disconnect()`.** Con un broker real, un `publish()` en `connect()` lanza
+  `faststream.exceptions.IncorrectState`, ya que el broker todavía no ha arrancado, y la app no arranca con
+  `RuntimeError: nuke-di clients failed to start: Notifications.connect() raised IncorrectState`. En
+  `disconnect()` lanza lo mismo, ya que el broker ya se detuvo, pero nuke-di solo registra en el log un
+  `disconnect()` fallido y la app termina con normalidad. Bajo `TestNatsBroker` el primero lanza
+  ``SetupError: You should setup `HandlerItem` at first.`` y el segundo pasa en silencio, así que las
+  pruebas no detectan un publish en `disconnect()`.
 - **El broker es un argumento con valor por defecto**, no un cliente: nuke-di rellena los argumentos
   tipados como clientes y deja los demás con sus valores por defecto. Una prueba unitaria puede construir
   `Notifications(nats=AsyncMock())`.
@@ -300,6 +308,6 @@ Qué hacer al respecto:
   function run one at a time`, en lugar de pasarle a la segunda los clientes de la primera.
 - **`DI.override()` sobre la app a nivel de módulo o un contenedor por prueba**: ambos sirven; elige según lo
   que use el resto de las pruebas.
-- A diferencia de esto, FastAPI reescribe una función para cada contenedor, y sus apps sobre contenedores
-  distintos pueden correr a la vez; consulta [FastAPI](fastapi.md#an-app-per-test-container) para la única
-  excepción.
+- A diferencia de esto, una petición de FastAPI recibe los clientes de la app a la que llegó, así que las
+  apps de FastAPI sobre contenedores distintos sirven las mismas funciones a la vez; consulta
+  [FastAPI](fastapi.md#an-app-per-test-container).

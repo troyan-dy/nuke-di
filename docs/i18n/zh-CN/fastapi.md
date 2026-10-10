@@ -502,20 +502,14 @@ $ pytest -q tests/test_factory.py
 - **整个应用只需一个 `override()`。** `di.override(Database, FakeDatabase())` 会为依赖项
   `current_user`、为 `UserService` 以及其他所有接收 `Database` 的地方替换数据库；而只用 FastAPI 时，
   每个依赖函数都需要在 `app.dependency_overrides` 中单独写一条。
-- **一个函数，多个容器。** `setup(app, di)` 会针对每个新应用的容器重写 `get_user` 和 `current_user`，
-  依据的是函数原本写下的签名，而不是上一个应用留下的签名。
+- **一个函数，多个容器。** `get_user` 和 `current_user` 只重写一次；每个应用在启动时从自己的容器中
+  解析它们的客户端，而请求拿到的是它所到达的那个应用的客户端。基于不同容器构建的应用可以服务同样的
+  函数，既可以先后运行，也可以同时运行。
 - **每个应用一个路由器。** `ClientRouter` 从一个容器中填充客户端；如果应用包含了属于另一个容器的
   路由器，会抛出 `TypeError: the router fills clients from another container than
   this app`。请在工厂内部创建路由器。
 - **`app.dependency_overrides`** 属于单个应用，并且依然有效，对接收客户端的依赖项（如上面的
   `current_user`）也同样适用。
-- **在每个应用启动前一刻再构建它。** 在 FastAPI 0.137 及更高版本中，被包含的路由器中的路由会在应用
-  收到第一个请求时才构建，依据的是函数在那一刻的签名，也就是最后绑定的那个容器的签名。提前构建的应用
-  （例如模块级的 `app = make_app(DI)`，被某个测试在其他测试已构建了各自的应用之后才导入）在访问 `/me`
-  时会失败，报错 `RuntimeError: Database is not connected: start the app with its lifespan`；而同时
-  运行的两个应用中，较旧的那个在这些路由上会拿到较新那个的客户端。因此服务器用 `uvicorn --factory`
-  构建应用，测试则在 fixture 中逐个构建各自的应用。直接声明在应用上的路由（如 `/users/{user_id}`）
-  会保留自己的容器。
 
 ## <a id="strawberry-graphql"></a>Strawberry GraphQL
 
@@ -532,7 +526,7 @@ pip install "nuke-di[fastapi]" strawberry-graphql
 from collections.abc import AsyncIterator
 
 import strawberry
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from strawberry.fastapi import BaseContext, GraphQLRouter
 
 from app.clients import UserService
@@ -565,24 +559,24 @@ schema = strawberry.Schema(query=Query, subscription=Subscription)
 
 app = FastAPI()
 setup(app)
-graphql = GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute, dependencies=[Depends(Context)])
+graphql = GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute)
 app.include_router(graphql, prefix="/graphql")
 ```
 
 ```console
 $ uvicorn app.graphql:app
-INFO:     Started server process [51045]
+INFO:     Started server process [61129]
 INFO:     Waiting for application startup.
 database: connected
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:51840 - "POST /graphql HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51979 - "POST /graphql HTTP/1.1" 200 OK
 ^C
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 database: disconnected
 INFO:     Application shutdown complete.
-INFO:     Finished server process [51045]
+INFO:     Finished server process [61129]
 ```
 
 ```console
@@ -630,7 +624,7 @@ def test_subscription() -> None:
 ```console
 $ pytest -q tests/test_graphql.py
 ..                                                                       [100%]
-2 passed in 0.26s
+2 passed in 0.21s
 ```
 
 规则如下：
@@ -639,11 +633,12 @@ $ pytest -q tests/test_graphql.py
   `Context`，其中是容器中已连接的客户端；`strawberry.Info[Context]` 把它的类型告诉 resolver。
   resolver 不通过类型提示接收客户端：Strawberry 没有自己的依赖注入，`info.context` 就是它向下传递
   数据的方式。
-- **`route_class=ClientRoute` 和 `dependencies=[Depends(Context)]` 缺一不可。** Strawberry 把上下文
-  获取函数包装进它自己的一个依赖项中，该依赖项的类型提示引用的是仅为类型检查器导入的类，因此 nuke-di
-  无法顺着它找到 `Context`。把这个类列在 `dependencies=` 中，就能直接触达它；而 FastAPI 会在一个请求
-  内缓存依赖项，所以 `Context` 仍然每个请求只构建一次。如果不这样做，`GraphQLRouter(...)` 会抛出
-  `TypeError: UserService is a nuke-di client, not a pydantic type`。
-- **订阅**运行在同一路由器的 websocket 路由上，以同样的方式获得 `Context`。
-- **使用其他容器**：`route_class=ClientRouter(container=container).route_class`。
-- Strawberry 的 Litestar 控制器不需要以上任何设置，参见 [Litestar](litestar.md#strawberry-graphql)。
+- **`route_class=ClientRoute`** 让路由器的路由填充客户端，与任何 `APIRouter` 一样。Strawberry 把
+  上下文获取函数包装进它自己的一个依赖项后交给 FastAPI，nuke-di 会顺着这个依赖项找到 `Context`。
+- **订阅。** FastAPI 构建路由器的 websocket 路由时不使用路由类，这与 `APIRouter` 上的任何 websocket
+  一样；但它仍能得到带有客户端的 `Context`：它与 GET 和 POST 路由共用 Strawberry 的上下文依赖项，而
+  路由器会先通过 `ClientRoute` 声明这两个路由。它们会重写 `Context`，并把它的客户端纳入应用的启动过程。
+  在这样的路由器上自己声明的 websocket 端点仍会抛出 `TypeError`，参见[不支持的情况](#not-supported)。
+- **使用其他容器**：在 `setup(app, container)` 之后使用 `route_class=app.router.route_class`。
+- Strawberry 的 Litestar 控制器通过 `ClientPlugin` 接收客户端，参见
+  [Litestar](litestar.md#strawberry-graphql)。
