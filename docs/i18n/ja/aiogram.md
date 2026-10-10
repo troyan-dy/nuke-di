@@ -130,15 +130,82 @@ database: disconnected
 
 ## <a id="the-rules"></a>ルール
 
-- **クライアントが埋められる場所。** ディスパッチャーと、それにインクルードされたすべてのルーターのハンドラーの引数です。ルーターの深さは問わず、インクルードは `setup()` の前でも後でもかまいません。メッセージ、コールバッククエリ、インラインクエリ、エラーハンドラーなど、あらゆる種類のアップデートが対象です。ハンドラーは関数、束縛メソッド、`functools.wraps` でラップされた関数、または aiogram がスレッドで実行する普通の `def` のいずれでもかまいません。型ヒントがクライアントである引数がクライアントになり、`Annotated[UserService, ...]` の中にあっても同様です。
-- **起動ハンドラーと停止ハンドラー。** `@dp.startup()` と `@dp.shutdown()` のハンドラーも、ルーターのそれらも、`bot` や aiogram が渡すほかの引数と並んでクライアントを受け取ります。aiogram はそれらすべてに同じ引数を渡すので、その中ではひとつの名前はひとつのクライアントを意味します。
-- **名前で、ハンドラーごとに。** aiogram はデータの項目を名前でハンドラーに渡します。nuke-di が追加するのはアップデートにマッチしたハンドラーのクライアント引数なので、2 つのハンドラーが同じ名前で別々のクライアントを受け取ってもかまいません。aiogram 自身が渡す名前を使うと、起動時に `TypeError` が送出されます。該当するのは `bot`、`state`、`event_from_user` などの名前、`Dispatcher(name=...)` や `dp["name"]` のワークフローデータ、そして `start_polling()` のキーワード引数です。
-- **起動時に解決。** クライアントはディスパッチャーの起動時に解決されます。つまり `start_polling()`、Webhook アプリの起動、テストでの `await dp.emit_startup()` のときです。そのため、それより前に `override()` すればクライアントを差し替えられ、ボットをインポートしただけでは何も構築されません。
-- **起動と停止の順序。** クライアントは、ディスパッチャーとそのルーターの起動ハンドラーより前に接続し、すべての停止ハンドラーの後に切断します（aiogram はルーターの停止ハンドラーをディスパッチャーのものの後に呼び出します）。起動ハンドラーが失敗した場合は、クライアントを再び切断します。`start_polling()` は起動に失敗した後に停止処理を呼び出さないためです。停止時には、ワーカーと同じように、クライアントが切断される前に `Shutdown` がセットされ、`BackgroundTasks` が止められます。
-- **まだ実行中のハンドラー。** `start_polling()` はアップデートを 1 つずつタスクで処理し、停止時にそれらの完了を待ちません。クライアントの切断時にまだ実行中のハンドラーからは、クライアントは切断済みに見えます。
-- **アップデートあたりのコスト。** ハンドラーをキーにした辞書の検索が 1 回と、クライアント引数ごとにデータの項目が 1 つです。アップデートあたり約 0.3 µs で、aiogram 自身によるメッセージのディスパッチの 22 µs と比べてわずかです（Python 3.14）。
+- **クライアントが埋められる場所。** ディスパッチャーと、それにインクルードされたすべてのルーターのハンドラーの引数です。ルーターの深さは問わず、インクルードは `setup()` の前でも後でもかまいません。メッセージ、コールバッククエリ、インラインクエリ、エラーハンドラーなど、あらゆる種類のアップデートが対象です。ハンドラーは関数、束縛メソッド、`functools.wraps` でラップされた関数、`functools.partial`（それが束縛する引数は除きます）、呼び出し可能オブジェクト、または aiogram がスレッドで実行する普通の `def` のいずれでもかまいません。型ヒントがクライアントである引数がクライアントになり、`Annotated[UserService, ...]` の中にあっても同様です。評価できないヒント（たとえば `TYPE_CHECKING` の下でインポートされた名前）は aiogram に任され、ほかの引数はそれでも埋められます。
+- **起動ハンドラーと停止ハンドラー。** `@dp.startup()` と `@dp.shutdown()` のハンドラーも、ルーターのそれらも、`bot` や aiogram が渡すほかの引数と並んでクライアントを受け取ります。aiogram はそれらすべてに同じ引数を渡すので、その中ではひとつの名前はひとつのクライアントを意味し、その名前で `dp.emit_shutdown()` にキーワード引数を渡すと `TypeError` が送出されます。
+- **名前で、ハンドラーごとに。** aiogram はデータの項目を名前でハンドラーに渡します。nuke-di が追加するのはアップデートにマッチしたハンドラーのクライアント引数なので、2 つのハンドラーが同じ名前で別々のクライアントを受け取ってもかまいません。aiogram 自身が渡す名前を使うと、起動時に `TypeError` が送出されます。該当するのは `bot`、`state`、`event_from_user` などの名前、`Dispatcher(name=...)` や `dp["name"]` のワークフローデータ、そして `start_polling()` のキーワード引数です。1 つのアップデートのデータにクライアントの名前のキーが入ってきた場合（そのキーを返すフィルター、ミドルウェア、`dp.feed_update(..., name=...)` から）、置き換えられるのではなく、そのアップデートで `TypeError` が送出されます。ハンドラーはデータのコピーを受け取るので、`SkipHandler` の後の次のハンドラーには、スキップされたハンドラーのクライアントは見えません。
+- **起動時に解決。** クライアントはディスパッチャーの起動時に解決されます。つまり `start_polling()`、Webhook アプリの起動、テストでの `await dp.emit_startup()` のときです。そのため、それより前に `override()` すればクライアントを差し替えられ、ボットをインポートしただけでは何も構築されません。起動後にインクルードされたルーターのハンドラーは、コンテナがほかのハンドラーのために、またはそれらの依存関係として接続したクライアントを受け取ります。
+- **起動と停止の順序。** クライアントは、ディスパッチャーとそのルーターの起動ハンドラーより前に接続し、すべての停止ハンドラーの後に切断します（aiogram はルーターの停止ハンドラーをディスパッチャーのものの後に呼び出します）。起動ハンドラーが失敗した場合は、クライアントを再び切断します。`start_polling()` は起動に失敗した後に停止処理を呼び出さないためです。起動に失敗した後の停止（Webhook アプリがクリーンアップ時に呼び出します）や 2 回目の停止では、停止ハンドラーはその呼び出しの引数だけで実行されます。停止時には、ワーカーと同じように、クライアントが切断される前に `Shutdown` がセットされ、`BackgroundTasks` が止められます。
+- **まだ実行中のハンドラー。** `start_polling()` はアップデートを 1 つずつタスクで処理します。Webhook の `SimpleRequestHandler` も、デフォルトの `handle_in_background=True` では同様です。どちらも停止時にそれらの完了を待たないので、クライアントの切断時にまだ実行中のハンドラーからは、クライアントは切断済みに見えます。
+- **アップデートあたりのコスト。** ハンドラーをキーにした辞書の検索が 1 回と、クライアントを持つハンドラーでは、クライアント引数ごとに 1 項目を加えたデータのコピーです。アップデートあたり 1 µs 未満で、aiogram 自身によるメッセージのディスパッチの 22 µs と比べてわずかです（Python 3.14）。
 - **関数は関数のまま。** 関数の中身は何も書き換えられません。たとえば単体テストで、クライアントを渡して直接呼び出すことは、これまでどおりできます。
 - **別のコンテナ。** `setup(dp, container)` を使います。1 つのコンテナ上の 2 つのディスパッチャーは、一度に 1 つずつしか実行できません。2 つ目の起動は `RuntimeError: nuke-di clients failed to start: the container is already connected` を送出します。
+
+## <a id="your-own-middleware"></a>独自のミドルウェア
+
+nuke-di は自身の inner ミドルウェアから、ハンドラーのためだけにクライアントをデータに入れます。そのため、ボットの outer ミドルウェアや、`setup()` より前に登録された inner ミドルウェアからは、そこにクライアントは見えません。ミドルウェアは代わりに、起動ハンドラーからクライアントを受け取ります。
+
+```python
+# app/audit.py
+import asyncio
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from aiogram import BaseMiddleware, Bot
+from aiogram.types import TelegramObject
+
+from app.bot import dp
+from app.clients import Database
+from app.telegram import PrintingSession, message
+
+
+class Audit(BaseMiddleware):
+    """
+    A middleware of the bot's own: it gets its client from a startup handler.
+    """
+
+    def __init__(self) -> None:
+        self.db: Database | None = None
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        assert self.db is not None, "the dispatcher has not started"
+        print(f"audit: an update from {await self.db.fetch_user(data['event_chat'].id)}")
+        return await handler(event, data)
+
+
+audit = Audit()
+dp.update.outer_middleware(audit)
+
+
+@dp.startup()
+async def connect_audit(db: Database) -> None:
+    audit.db = db  # connected already: the clients connect before the startup handlers
+
+
+async def main() -> None:
+    bot = Bot("42:TEST", session=PrintingSession())
+    await dp.emit_startup(bot=bot)
+    try:
+        await dp.feed_update(bot, message(bot, "/start"))
+    finally:
+        await dp.emit_shutdown(bot=bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+```console
+$ python -m app.audit
+database: connected
+audit: an update from user-42
+bot -> chat 42: Hello, user-42!
+database: disconnected
+```
 
 ## <a id="testing"></a>テスト
 
@@ -240,10 +307,14 @@ $ echo $?
 | 誰も要求していないクライアントのハンドラーを持つルーターが、起動後にインクルードされた | `RuntimeError: Billing was not started with the dispatcher: register its handler before the dispatcher starts` |
 | aiogram 自身が渡す名前のクライアント引数 | `TypeError: Argument "state" of stateful is UserService, but aiogram passes "state" to handlers itself: rename the argument` |
 | フィルターがクライアントを受け取っている | `TypeError: Argument "db" of the filter is_known is Database: aiogram calls filters before the middlewares that fill clients, so a filter takes no clients; check it in the handler instead` |
+| フィルター、ミドルウェア、または `feed_update()` がクライアントの名前をデータに入れた | `TypeError: "users" is in the data of the update already, and start takes the client UserService under that name: a filter, a middleware or feed_update() passed it; rename the argument or the key` |
+| シーンがクライアントを受け取っている | ``TypeError: Argument "db" of the scene handler Quiz.ask is Database: aiogram calls the handlers of a scene from its own machinery, so a scene takes no clients; pass what it needs from a handler outside it, e.g. `await scenes.enter(Quiz, ...)` `` |
+| `dp.emit_shutdown()` にクライアントの名前が渡された | `TypeError: "users" is passed to emit_shutdown(), but it is the client UserService of a startup or shutdown handler: rename the argument or the key` |
 | `setup()` にルーターが渡された | `TypeError: setup() takes the Dispatcher, not <Router '0x109bbea50'>: the routers included into it are covered` |
 
 ## <a id="not-supported"></a>サポートされていないもの
 
-- **フィルター**はクライアントを受け取れず、起動時に `TypeError` を送出します。aiogram はハンドラーのフィルターをミドルウェアより前に実行するので、その時点ではデータにまだクライアントがありません。確認はハンドラーの中で行ってください。
+- **フィルター**はクライアントを受け取れず（ハンドラーのフィルターも、オブザーバーのフィルター `router.message.filter(...)` も同様です）、起動時に `TypeError` を送出します。aiogram はそれらをミドルウェアより前に実行するので、その時点ではデータにまだクライアントがありません。確認はハンドラーの中で行ってください。
+- **シーン**（`aiogram.fsm.scene`）はクライアントを受け取れず、起動時に `TypeError` を送出します。aiogram はシーンのアクションのハンドラー（`on.message.enter()` など）を自身の仕組みから呼び出すので、ミドルウェアの手が届きません。シーンが必要とするものは、シーンの外のハンドラーから `await scenes.enter(Quiz, questions=...)` で渡してください。aiogram はそれを enter ハンドラーに渡します。シーンはディスパッチャーのルーター上にあるそのハンドラーを通じて検出されます。アクションだけのシーンは検出されず、代わりに aiogram 自身の引数不足のエラーで失敗します。
 - **クラスベースのハンドラー**（`MessageHandler` やほかの `BaseHandler` クラスのサブクラス）はクライアントを受け取れません。aiogram はデータを `self.data` として渡し、その `__init__` は aiogram のものだからです。
 - **ルーターに対する `setup()`。** `setup()` が受け取るのは `Dispatcher` です。ルーターは 1 つのディスパッチャーにしかインクルードできず（aiogram がそれを強制します）、ディスパッチャーのミドルウェアがその下のルーターをカバーします。

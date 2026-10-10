@@ -117,7 +117,7 @@ per handler.
 - Litestar: `from nuke_di.litestar import ClientPlugin`; `Litestar(handlers, plugins=[ClientPlugin()])`.
 - FastStream: `from nuke_di.faststream import setup`; `setup(app)` after `app = FastStream(broker)`.
 - aiogram: `from nuke_di.aiogram import setup`; `setup(dp)` on the `Dispatcher`, not on a router; a handler is
-  `async def start(message: Message, users: UserService)`. Filters take no clients.
+  `async def start(message: Message, users: UserService)`. Filters and scenes take no clients.
 
 **Per-request state** (a transaction, a unit of work, a request id) is not a client: open it in
 the handler through a method of a long-lived client, e.g. `async with db.transaction() as tx:`.

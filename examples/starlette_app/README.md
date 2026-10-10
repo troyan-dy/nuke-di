@@ -1,6 +1,6 @@
 # Starlette, or any framework without an integration
 
-nuke-di ships integrations for FastAPI, Litestar and FastStream. For any other framework, plain
+nuke-di ships integrations for FastAPI, Litestar, FastStream and aiogram. For any other framework, plain
 Starlette here, aiohttp, Sanic and the rest, the recipe is the same: bind the handlers with `inject()`
 and wrap the app's lifespan in `async with DI`. `wiring.py` does both in one small class.
 

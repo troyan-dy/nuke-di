@@ -141,33 +141,112 @@ Telegram.
 - **Where clients are filled.** In the arguments of the handlers of the dispatcher and of every router
   included into it, at any depth and before `setup()` or after, for every kind of update: messages,
   callback queries, inline queries, error handlers and the rest. A handler is a function, a bound method,
-  a function wrapped with `functools.wraps`, or a plain `def`, which aiogram runs in a thread. An argument
-  is a client when its type hint is a client, also inside `Annotated[UserService, ...]`.
+  a function wrapped with `functools.wraps`, a `functools.partial`, without the arguments it binds, a
+  callable object, or a plain `def`, which aiogram runs in a thread. An argument is a client when its type
+  hint is a client, also inside `Annotated[UserService, ...]`; a hint that does not evaluate, e.g. a name
+  imported under `TYPE_CHECKING`, is left to aiogram, and the other arguments are still filled.
 - **Startup and shutdown handlers.** `@dp.startup()` and `@dp.shutdown()` handlers, and those of the
   routers, take clients too, next to the `bot` and the other arguments aiogram passes them. aiogram passes
-  them all the same arguments, so among them one name means one client.
+  them all the same arguments, so among them one name means one client, and a keyword argument of
+  `dp.emit_shutdown()` under that name raises `TypeError`.
 - **By name, per handler.** aiogram passes a handler the items of its data by name; nuke-di adds the
   client arguments of the handler that matched the update, so two handlers may give different clients
   one name. A name aiogram passes itself raises `TypeError` on startup: `bot`, `state`, `event_from_user`
   and its other names, the workflow data of `Dispatcher(name=...)` or `dp["name"]`, and the keyword
-  arguments of `start_polling()`.
+  arguments of `start_polling()`. A key that comes into the data of one update under a client's name, from a
+  filter that returns it, a middleware or `dp.feed_update(..., name=...)`, raises `TypeError` on that update
+  instead of being replaced. The handler gets a copy of the data, so the next one after a `SkipHandler`
+  does not see the clients of the skipped one.
 - **Resolved on startup.** The clients are resolved when the dispatcher starts: `start_polling()`, the
   startup of the webhook app, or `await dp.emit_startup()` in a test. So `override()` before that replaces
-  them, and importing the bot builds nothing.
+  them, and importing the bot builds nothing. A handler of a router included after the startup gets the
+  clients the container connected, for other handlers or as their dependencies.
 - **Startup and shutdown order.** The clients connect before the startup handlers of the dispatcher and
   of its routers, and disconnect after all their shutdown handlers, which aiogram calls for the routers
   after the dispatcher's. A startup handler that fails disconnects them again: `start_polling()` does not
-  call the shutdown after a failed startup. On shutdown `Shutdown` is set and `BackgroundTasks` are
-  stopped before the clients disconnect, as in a worker.
-- **Handlers still running.** `start_polling()` handles each update in a task and does not wait for them
-  when it stops: a handler that is still running when the clients disconnect finds them disconnected.
-- **Cost of an update.** One dictionary lookup by the handler, and one item of the data per client
-  argument: about 0.3 µs per update, against 22 µs of aiogram's own dispatch of a message (Python 3.14).
+  call the shutdown after a failed startup. A shutdown after a failed startup, which the webhook app calls
+  on cleanup, or a second shutdown runs the shutdown handlers with the arguments of the call alone. On
+  shutdown `Shutdown` is set and `BackgroundTasks` are stopped before the clients disconnect, as in a worker.
+- **Handlers still running.** `start_polling()` handles each update in a task, and so does the webhook's
+  `SimpleRequestHandler` with `handle_in_background=True`, its default; neither waits for them when it
+  stops, so a handler that is still running when the clients disconnect finds them disconnected.
+- **Cost of an update.** One dictionary lookup by the handler, and for a handler with clients a copy of
+  the data with one item per client argument: under 1 µs per update, against 22 µs of aiogram's own
+  dispatch of a message (Python 3.14).
 - **The function stays a function.** Nothing in it is rewritten; calling it directly with a client, e.g.
   in a unit test, works as before.
 - **Another container.** `setup(dp, container)`. Two dispatchers on one container run one at a time: the
   second startup raises `RuntimeError: nuke-di clients failed to start: the container is already
   connected`.
+
+## Your own middleware
+
+nuke-di puts the clients into the data from its own inner middleware, for the handler alone, so the outer
+middlewares of the bot, and the inner ones registered before `setup()`, do not find them there. A
+middleware gets its client from a startup handler instead:
+
+```python
+# app/audit.py
+import asyncio
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from aiogram import BaseMiddleware, Bot
+from aiogram.types import TelegramObject
+
+from app.bot import dp
+from app.clients import Database
+from app.telegram import PrintingSession, message
+
+
+class Audit(BaseMiddleware):
+    """
+    A middleware of the bot's own: it gets its client from a startup handler.
+    """
+
+    def __init__(self) -> None:
+        self.db: Database | None = None
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        assert self.db is not None, "the dispatcher has not started"
+        print(f"audit: an update from {await self.db.fetch_user(data['event_chat'].id)}")
+        return await handler(event, data)
+
+
+audit = Audit()
+dp.update.outer_middleware(audit)
+
+
+@dp.startup()
+async def connect_audit(db: Database) -> None:
+    audit.db = db  # connected already: the clients connect before the startup handlers
+
+
+async def main() -> None:
+    bot = Bot("42:TEST", session=PrintingSession())
+    await dp.emit_startup(bot=bot)
+    try:
+        await dp.feed_update(bot, message(bot, "/start"))
+    finally:
+        await dp.emit_shutdown(bot=bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+```console
+$ python -m app.audit
+database: connected
+audit: an update from user-42
+bot -> chat 42: Hello, user-42!
+database: disconnected
+```
 
 ## Testing
 
@@ -270,12 +349,21 @@ $ echo $?
 | A router with a handler of a client nobody asked for is included after the startup | `RuntimeError: Billing was not started with the dispatcher: register its handler before the dispatcher starts` |
 | A client argument under a name aiogram passes itself | `TypeError: Argument "state" of stateful is UserService, but aiogram passes "state" to handlers itself: rename the argument` |
 | A filter takes a client | `TypeError: Argument "db" of the filter is_known is Database: aiogram calls filters before the middlewares that fill clients, so a filter takes no clients; check it in the handler instead` |
+| A filter, a middleware or `feed_update()` puts a client's name into the data | `TypeError: "users" is in the data of the update already, and start takes the client UserService under that name: a filter, a middleware or feed_update() passed it; rename the argument or the key` |
+| A scene takes a client | ``TypeError: Argument "db" of the scene handler Quiz.ask is Database: aiogram calls the handlers of a scene from its own machinery, so a scene takes no clients; pass what it needs from a handler outside it, e.g. `await scenes.enter(Quiz, ...)` `` |
+| `dp.emit_shutdown()` gets a client's name | `TypeError: "users" is passed to emit_shutdown(), but it is the client UserService of a startup or shutdown handler: rename the argument or the key` |
 | `setup()` is given a router | `TypeError: setup() takes the Dispatcher, not <Router '0x109bbea50'>: the routers included into it are covered` |
 
 ## Not supported
 
-- **Filters** take no clients, and raise `TypeError` on startup: aiogram runs a handler's filters before
-  its middlewares, so no client is in the data yet. Check it in the handler.
+- **Filters** take no clients, those of a handler and those of an observer, `router.message.filter(...)`,
+  and raise `TypeError` on startup: aiogram runs them before its middlewares, so no client is in the data
+  yet. Check it in the handler.
+- **Scenes** (`aiogram.fsm.scene`) take no clients, and raise `TypeError` on startup: aiogram calls the
+  handlers of a scene's actions, such as `on.message.enter()`, from its own machinery, out of reach of the
+  middleware. Pass what the scene needs from a handler outside it, `await scenes.enter(Quiz, questions=...)`,
+  which aiogram hands to the enter handler. A scene is seen through its handlers on the routers of the
+  dispatcher; a scene with actions alone is not, and fails with aiogram's missing argument instead.
 - **Class-based handlers**, subclasses of `MessageHandler` and the other `BaseHandler` classes, take no
   clients: aiogram passes them the data as `self.data`, and their `__init__` is aiogram's.
 - **`setup()` on a router.** It takes the `Dispatcher`: a router is included into one dispatcher only,

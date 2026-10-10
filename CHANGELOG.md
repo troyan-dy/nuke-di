@@ -14,16 +14,22 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   A handler of the dispatcher or of any router included into it, before `setup()` or after, takes a client by
   type hint next to the message, `async def start(message: Message, users: UserService)`, and nothing marks it.
   One inner middleware per event type fills the client arguments of the handler that matched the update into
-  aiogram's data, from a dictionary by the handler's callback: about 0.3 µs per update. Startup and shutdown
-  handlers take clients too.
+  a copy of aiogram's data, from a dictionary by the id of the handler's callback: under 1 µs per update. A
+  handler is a function, a bound method, a `functools.partial` or a callable object; a type hint that does not
+  evaluate is skipped alone. Startup and shutdown handlers take clients too.
 - The dispatcher runs the container: the clients are resolved and connected before the startup handlers of the
   dispatcher and its routers, so `override()` before `start_polling()` or `dp.emit_startup()` applies, and
   disconnect after all their shutdown handlers, and after a startup handler that fails, which aiogram follows
   with no shutdown. A failed `connect()` fails `start_polling()` with a `RuntimeError` before its first request
   to Telegram.
-- `TypeError` on startup for a filter with a client argument (aiogram runs filters before the middleware), for a
-  client argument under a name aiogram passes itself (`bot`, `state`, `event_from_user`, the workflow data, the
-  keyword arguments of `start_polling()`), and for `setup()` on a `Router` or twice on one dispatcher.
+- `TypeError` on startup for a filter with a client argument, of a handler or of an observer (aiogram runs
+  filters before the middleware), for a scene whose handlers take clients, for a client argument under a name
+  aiogram passes itself (`bot`, `state`, `scenes`, `event_from_user`, the workflow data, the keyword arguments
+  of `start_polling()`), and for `setup()` on a `Router` or twice on one dispatcher. A key of an update's data
+  under a client's name, from a filter, a middleware or `feed_update()`, raises `TypeError` on that update
+  instead of being replaced, and so does an argument of `emit_shutdown()` under one.
+- A shutdown after a failed startup, which aiogram's webhook app calls on cleanup, or a second shutdown runs
+  the shutdown handlers with the caller's arguments.
 - A guide page, `docs/guide/aiogram.md`, mirrored in the six translations: the bot, a `Bot` with a session that
   answers in the process to feed it updates with no token, the rules, testing and the errors, each with its real
   output. `docs/specs/aiogram.md` holds the decisions and the aiogram internals read.
@@ -33,7 +39,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - aiogram is named with the other integrations in the README, the integrations page, the Agent Skill, `llms.txt`,
-  `context7.json` and the plugin manifests; `llms-full.txt` grows to about 28k tokens.
+  `context7.json` and the plugin manifests; `llms-full.txt` grows to about 29k tokens.
 
 ## [1.14.3] - 2026-10-10
 

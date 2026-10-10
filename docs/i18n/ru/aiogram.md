@@ -141,36 +141,115 @@ database: disconnected
 - **Где заполняются клиенты.** В аргументах обработчиков диспетчера и всех включённых в него роутеров на
   любой глубине, объявленных как до `setup()`, так и после, для любого вида апдейтов: сообщений,
   callback-запросов, inline-запросов, обработчиков ошибок и всего остального. Обработчиком может быть
-  функция, связанный метод, функция, обёрнутая через `functools.wraps`, или обычная `def`, которую aiogram
-  выполняет в потоке. Аргумент считается клиентом, если его аннотация типа — клиент, в том числе внутри
-  `Annotated[UserService, ...]`.
+  функция, связанный метод, функция, обёрнутая через `functools.wraps`, `functools.partial` (без
+  аргументов, которые он связывает), вызываемый объект или обычная `def`, которую aiogram выполняет в
+  потоке. Аргумент считается клиентом, если его аннотация типа — клиент, в том числе внутри
+  `Annotated[UserService, ...]`; аннотация, которая не вычисляется, например имя, импортированное под
+  `TYPE_CHECKING`, остаётся на усмотрение aiogram, а остальные аргументы всё равно заполняются.
 - **Обработчики старта и остановки.** Обработчики `@dp.startup()` и `@dp.shutdown()`, а также такие же
   обработчики роутеров, тоже получают клиенты — рядом с `bot` и другими аргументами, которые им передаёт
-  aiogram. Всем им aiogram передаёт одни и те же аргументы, поэтому среди них одно имя — один клиент.
+  aiogram. Всем им aiogram передаёт одни и те же аргументы, поэтому среди них одно имя — один клиент, а
+  именованный аргумент `dp.emit_shutdown()` под этим именем выбрасывает `TypeError`.
 - **По имени, для каждого обработчика.** aiogram передаёт обработчику элементы своих данных по имени;
   nuke-di добавляет аргументы-клиенты того обработчика, который подошёл апдейту, поэтому два обработчика
   могут получать под одним именем разные клиенты. Имя, которое aiogram передаёт сам, приводит к `TypeError`
   при старте: `bot`, `state`, `event_from_user` и другие его имена, workflow data из `Dispatcher(name=...)`
-  или `dp["name"]`, а также именованные аргументы `start_polling()`.
+  или `dp["name"]`, а также именованные аргументы `start_polling()`. Ключ, который попадает в данные
+  одного апдейта под именем клиента — из фильтра, который его возвращает, из middleware или из
+  `dp.feed_update(..., name=...)`, — не подменяется, а выбрасывает `TypeError` на этом апдейте. Обработчик
+  получает копию данных, поэтому следующий обработчик после `SkipHandler` не видит клиентов пропущенного.
 - **Разрешаются при старте.** Клиенты разрешаются, когда стартует диспетчер: в `start_polling()`, при
   старте webhook-приложения или в `await dp.emit_startup()` в тесте. Поэтому `override()` до этого момента
-  подменяет их, а импорт бота ничего не создаёт.
+  подменяет их, а импорт бота ничего не создаёт. Обработчик роутера, включённого после старта, получает
+  клиенты, которые контейнер уже подключил — для других обработчиков или как их зависимости.
 - **Порядок старта и остановки.** Клиенты подключаются до обработчиков старта диспетчера и его роутеров и
   отключаются после всех их обработчиков остановки, которые aiogram вызывает для роутеров после
   обработчиков диспетчера. Если обработчик старта падает, клиенты снова отключаются: после неудачного
-  старта `start_polling()` остановку не вызывает. При остановке выставляется `Shutdown` и
-  останавливаются `BackgroundTasks` — до отключения клиентов, как в воркере.
-- **Обработчики, которые ещё работают.** `start_polling()` обрабатывает каждый апдейт в отдельной задаче и
-  при остановке их не дожидается: обработчик, который всё ещё работает, когда клиенты отключаются,
-  застаёт их уже отключёнными.
-- **Цена апдейта.** Один поиск в словаре по обработчику и по одному элементу данных на каждый
-  аргумент-клиент: около 0,3 мкс на апдейт против 22 мкс собственной диспетчеризации сообщения в aiogram
-  (Python 3.14).
+  старта `start_polling()` остановку не вызывает. Остановка после неудачного старта, которую
+  webhook-приложение вызывает при очистке, или повторная остановка запускает обработчики остановки только
+  с аргументами самого вызова. При остановке выставляется `Shutdown` и останавливаются `BackgroundTasks` —
+  до отключения клиентов, как в воркере.
+- **Обработчики, которые ещё работают.** `start_polling()` обрабатывает каждый апдейт в отдельной задаче,
+  как и `SimpleRequestHandler` webhook-а с `handle_in_background=True` — это его значение по умолчанию;
+  ни тот, ни другой не дожидается этих задач при остановке, поэтому обработчик, который всё ещё работает,
+  когда клиенты отключаются, застаёт их уже отключёнными.
+- **Цена апдейта.** Один поиск в словаре по обработчику, а для обработчика с клиентами — копия данных с
+  одним элементом на каждый аргумент-клиент: меньше 1 мкс на апдейт против 22 мкс собственной
+  диспетчеризации сообщения в aiogram (Python 3.14).
 - **Функция остаётся функцией.** В ней ничего не переписывается; прямой вызов с клиентом, например в
   юнит-тесте, работает как раньше.
 - **Другой контейнер.** `setup(dp, container)`. Два диспетчера на одном контейнере работают только по
   очереди: второй старт выбрасывает `RuntimeError: nuke-di clients failed to start: the container is already
   connected`.
+
+## <a id="your-own-middleware"></a>Свой middleware
+
+nuke-di кладёт клиенты в данные из собственного inner middleware и только для обработчика, поэтому outer
+middleware бота, а также inner middleware, зарегистрированные до `setup()`, их там не находят. Вместо
+этого middleware получает свой клиент из обработчика старта:
+
+```python
+# app/audit.py
+import asyncio
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from aiogram import BaseMiddleware, Bot
+from aiogram.types import TelegramObject
+
+from app.bot import dp
+from app.clients import Database
+from app.telegram import PrintingSession, message
+
+
+class Audit(BaseMiddleware):
+    """
+    A middleware of the bot's own: it gets its client from a startup handler.
+    """
+
+    def __init__(self) -> None:
+        self.db: Database | None = None
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        assert self.db is not None, "the dispatcher has not started"
+        print(f"audit: an update from {await self.db.fetch_user(data['event_chat'].id)}")
+        return await handler(event, data)
+
+
+audit = Audit()
+dp.update.outer_middleware(audit)
+
+
+@dp.startup()
+async def connect_audit(db: Database) -> None:
+    audit.db = db  # connected already: the clients connect before the startup handlers
+
+
+async def main() -> None:
+    bot = Bot("42:TEST", session=PrintingSession())
+    await dp.emit_startup(bot=bot)
+    try:
+        await dp.feed_update(bot, message(bot, "/start"))
+    finally:
+        await dp.emit_shutdown(bot=bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+```console
+$ python -m app.audit
+database: connected
+audit: an update from user-42
+bot -> chat 42: Hello, user-42!
+database: disconnected
+```
 
 ## <a id="testing"></a>Тестирование
 
@@ -275,13 +354,22 @@ $ echo $?
 | После старта включён роутер с обработчиком клиента, которого больше никто не запрашивал | `RuntimeError: Billing was not started with the dispatcher: register its handler before the dispatcher starts` |
 | Аргумент-клиент под именем, которое aiogram передаёт сам | `TypeError: Argument "state" of stateful is UserService, but aiogram passes "state" to handlers itself: rename the argument` |
 | Фильтр принимает клиент | `TypeError: Argument "db" of the filter is_known is Database: aiogram calls filters before the middlewares that fill clients, so a filter takes no clients; check it in the handler instead` |
+| Фильтр, middleware или `feed_update()` кладёт в данные имя клиента | `TypeError: "users" is in the data of the update already, and start takes the client UserService under that name: a filter, a middleware or feed_update() passed it; rename the argument or the key` |
+| Сцена принимает клиент | ``TypeError: Argument "db" of the scene handler Quiz.ask is Database: aiogram calls the handlers of a scene from its own machinery, so a scene takes no clients; pass what it needs from a handler outside it, e.g. `await scenes.enter(Quiz, ...)` `` |
+| `dp.emit_shutdown()` получает имя клиента | `TypeError: "users" is passed to emit_shutdown(), but it is the client UserService of a startup or shutdown handler: rename the argument or the key` |
 | В `setup()` передан роутер | `TypeError: setup() takes the Dispatcher, not <Router '0x109bbea50'>: the routers included into it are covered` |
 
 ## <a id="not-supported"></a>Что не поддерживается
 
-- **Фильтры** клиенты не принимают и выбрасывают `TypeError` при старте: aiogram выполняет фильтры
-  обработчика раньше его middleware, так что в данных ещё нет ни одного клиента. Проверяйте это в
-  обработчике.
+- **Фильтры** клиенты не принимают — ни фильтры обработчика, ни фильтры observer-а,
+  `router.message.filter(...)`, — и выбрасывают `TypeError` при старте: aiogram выполняет их раньше своих
+  middleware, так что в данных ещё нет ни одного клиента. Проверяйте это в обработчике.
+- **Сцены** (`aiogram.fsm.scene`) клиенты не принимают и выбрасывают `TypeError` при старте: обработчики
+  действий сцены, например `on.message.enter()`, aiogram вызывает из собственной машинерии, куда
+  middleware не дотягивается. Передайте сцене то, что ей нужно, из обработчика вне её:
+  `await scenes.enter(Quiz, questions=...)` — aiogram отдаст это обработчику входа. Сцену видно через её
+  обработчики на роутерах диспетчера; сцену, у которой есть только действия, не видно, и она падает с
+  ошибкой aiogram об отсутствующем аргументе.
 - **Обработчики-классы** — подклассы `MessageHandler` и других классов `BaseHandler` — клиенты не
   принимают: aiogram передаёт им данные через `self.data`, а их `__init__` принадлежит aiogram.
 - **`setup()` на роутере.** Он принимает `Dispatcher`: роутер можно включить только в один диспетчер, и

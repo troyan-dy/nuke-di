@@ -73,7 +73,7 @@ Dwa pliki w katalogu głównym repozytorium, generowane z angielskich stron:
 | Plik | Zawartość |
 |------|-----------|
 | [`llms.txt`](../../../llms.txt) | Indeks w formacie [llms.txt](https://llmstxt.org): czym `nuke-di` jest i czego nie robi, link do każdej strony |
-| [`llms-full.txt`](../../../llms-full.txt) | README i cały przewodnik w jednym pliku, około 28 tys. tokenów |
+| [`llms-full.txt`](../../../llms-full.txt) | README i cały przewodnik w jednym pliku, około 29 tys. tokenów |
 
 Daj agentowi surowy URL, `https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt`,
 a przeczyta cały podręcznik jednym pobraniem.

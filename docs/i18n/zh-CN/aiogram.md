@@ -138,31 +138,107 @@ database: disconnected
 
 - **在哪里填充客户端。** 在 dispatcher 以及包含进它的每个路由器的处理函数的参数中，不论嵌套多深，
   不论路由器是在 `setup()` 之前还是之后包含进来，适用于每种 update：消息、回调查询、内联查询、
-  错误处理函数等等。处理函数可以是函数、绑定方法、用 `functools.wraps` 包装的函数，或者普通的
-  `def`（aiogram 会在线程中运行它）。类型提示是客户端的参数就是客户端参数，写在
-  `Annotated[UserService, ...]` 中也一样。
+  错误处理函数等等。处理函数可以是函数、绑定方法、用 `functools.wraps` 包装的函数、`functools.partial`
+  （不含它已绑定的参数）、可调用对象，或者普通的 `def`（aiogram 会在线程中运行它）。类型提示是客户端的
+  参数就是客户端参数，写在 `Annotated[UserService, ...]` 中也一样；无法求值的类型提示（例如在
+  `TYPE_CHECKING` 下导入的名称）交给 aiogram 处理，其余参数照常填充。
 - **启动和关闭处理函数。** `@dp.startup()` 和 `@dp.shutdown()` 处理函数，以及路由器上的同类处理函数，
   同样接收客户端，与 `bot` 以及 aiogram 传给它们的其他参数并列。aiogram 给它们全部传入相同的参数，
-  因此在它们之间，一个名称只对应一个客户端。
+  因此在它们之间，一个名称只对应一个客户端，而以该名称传给 `dp.emit_shutdown()` 的关键字参数会抛出
+  `TypeError`。
 - **按名称、按处理函数提供。** aiogram 按名称把数据中的各项传给处理函数；nuke-di 添加的是与该 update
   匹配的那个处理函数的客户端参数，因此两个处理函数可以用同一个名称接收不同的客户端。如果使用了
   aiogram 自己传入的名称，启动时会抛出 `TypeError`：`bot`、`state`、`event_from_user` 及其他名称，
   `Dispatcher(name=...)` 或 `dp["name"]` 中的 workflow data，以及 `start_polling()` 的关键字参数。
+  如果某个 update 的数据中出现了与客户端同名的键（来自返回它的过滤器、中间件或
+  `dp.feed_update(..., name=...)`），该 update 会抛出 `TypeError`，而不是把它替换掉。处理函数拿到的是
+  数据的副本，因此 `SkipHandler` 之后的下一个处理函数看不到被跳过的那个处理函数的客户端。
 - **在启动时解析。** 客户端在 dispatcher 启动时解析：`start_polling()`、webhook 应用的启动，或者
   测试中的 `await dp.emit_startup()`。因此在此之前调用 `override()` 就能替换它们，而导入 bot 时
-  什么都不会构建。
+  什么都不会构建。启动之后才包含进来的路由器，其处理函数得到的是容器已经连接的客户端，无论这些客户端
+  是为其他处理函数连接的，还是作为它们的依赖连接的。
 - **启动和关闭顺序。** 客户端在 dispatcher 及其路由器的启动处理函数之前连接，在它们所有的关闭处理函数
   之后断开；aiogram 先调用 dispatcher 的关闭处理函数，再调用路由器的。如果某个启动处理函数失败，
-  客户端会重新断开：`start_polling()` 在启动失败后不会调用关闭流程。关闭时，与 worker 中一样，
+  客户端会重新断开：`start_polling()` 在启动失败后不会调用关闭流程。启动失败后的关闭（webhook 应用
+  在清理时会调用它）或第二次关闭，只用调用本身的参数运行关闭处理函数。关闭时，与 worker 中一样，
   先设置 `Shutdown` 并停止 `BackgroundTasks`，然后客户端才断开。
-- **仍在运行的处理函数。** `start_polling()` 在单独的任务中处理每个 update，停止时并不等待这些任务：
-  客户端断开时仍在运行的处理函数会发现客户端已经断开。
-- **每个 update 的开销。** 处理函数一次字典查找，每个客户端参数在数据中占一项：每个 update 约
-  0.3 µs，而 aiogram 自身分发一条消息需要 22 µs（Python 3.14）。
+- **仍在运行的处理函数。** `start_polling()` 在单独的任务中处理每个 update，webhook 的
+  `SimpleRequestHandler` 在 `handle_in_background=True`（其默认值）时也是如此；两者停止时都不等待这些
+  任务，因此客户端断开时仍在运行的处理函数会发现客户端已经断开。
+- **每个 update 的开销。** 处理函数一次字典查找，对于带客户端的处理函数，再加上一份数据副本，每个
+  客户端参数占一项：每个 update 不到 1 µs，而 aiogram 自身分发一条消息需要 22 µs（Python 3.14）。
 - **函数仍然是函数。** 其中没有任何东西被重写；直接用客户端调用它（例如在单元测试中）仍和以前一样可行。
 - **使用其他容器。** `setup(dp, container)`。共用一个容器的两个 dispatcher 只能依次运行：第二次启动会抛出
   `RuntimeError: nuke-di clients failed to start: the container is already
   connected`。
+
+## <a id="your-own-middleware"></a>自己的中间件
+
+nuke-di 通过它自己的内层中间件把客户端放进数据中，而且只为处理函数放入，因此 bot 的外层中间件，以及在
+`setup()` 之前注册的内层中间件，都无法在数据中找到它们。中间件改为从启动处理函数获取自己的客户端：
+
+```python
+# app/audit.py
+import asyncio
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from aiogram import BaseMiddleware, Bot
+from aiogram.types import TelegramObject
+
+from app.bot import dp
+from app.clients import Database
+from app.telegram import PrintingSession, message
+
+
+class Audit(BaseMiddleware):
+    """
+    A middleware of the bot's own: it gets its client from a startup handler.
+    """
+
+    def __init__(self) -> None:
+        self.db: Database | None = None
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        assert self.db is not None, "the dispatcher has not started"
+        print(f"audit: an update from {await self.db.fetch_user(data['event_chat'].id)}")
+        return await handler(event, data)
+
+
+audit = Audit()
+dp.update.outer_middleware(audit)
+
+
+@dp.startup()
+async def connect_audit(db: Database) -> None:
+    audit.db = db  # connected already: the clients connect before the startup handlers
+
+
+async def main() -> None:
+    bot = Bot("42:TEST", session=PrintingSession())
+    await dp.emit_startup(bot=bot)
+    try:
+        await dp.feed_update(bot, message(bot, "/start"))
+    finally:
+        await dp.emit_shutdown(bot=bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+```console
+$ python -m app.audit
+database: connected
+audit: an update from user-42
+bot -> chat 42: Hello, user-42!
+database: disconnected
+```
 
 ## <a id="testing"></a>测试
 
@@ -265,12 +341,21 @@ $ echo $?
 | 启动之后才包含进来的路由器，其处理函数需要一个此前没人请求过的客户端 | `RuntimeError: Billing was not started with the dispatcher: register its handler before the dispatcher starts` |
 | 客户端参数使用了 aiogram 自己传入的名称 | `TypeError: Argument "state" of stateful is UserService, but aiogram passes "state" to handlers itself: rename the argument` |
 | 过滤器接收客户端 | `TypeError: Argument "db" of the filter is_known is Database: aiogram calls filters before the middlewares that fill clients, so a filter takes no clients; check it in the handler instead` |
+| 过滤器、中间件或 `feed_update()` 把客户端的名称放进了数据 | `TypeError: "users" is in the data of the update already, and start takes the client UserService under that name: a filter, a middleware or feed_update() passed it; rename the argument or the key` |
+| 场景接收客户端 | ``TypeError: Argument "db" of the scene handler Quiz.ask is Database: aiogram calls the handlers of a scene from its own machinery, so a scene takes no clients; pass what it needs from a handler outside it, e.g. `await scenes.enter(Quiz, ...)` `` |
+| `dp.emit_shutdown()` 收到了客户端的名称 | `TypeError: "users" is passed to emit_shutdown(), but it is the client UserService of a startup or shutdown handler: rename the argument or the key` |
 | 传给 `setup()` 的是路由器 | `TypeError: setup() takes the Dispatcher, not <Router '0x109bbea50'>: the routers included into it are covered` |
 
 ## <a id="not-supported"></a>不支持的情况
 
-- **过滤器**不接收客户端，启动时会抛出 `TypeError`：aiogram 在处理函数的中间件之前运行它的过滤器，
-  此时数据中还没有任何客户端。请改在处理函数中检查。
+- **过滤器**不接收客户端，无论是处理函数的过滤器还是 observer 的过滤器 `router.message.filter(...)`，
+  启动时都会抛出 `TypeError`：aiogram 在它的中间件之前运行它们，此时数据中还没有任何客户端。请改在
+  处理函数中检查。
+- **场景**（`aiogram.fsm.scene`）不接收客户端，启动时会抛出 `TypeError`：aiogram 从它自己的机制中调用
+  场景动作的处理函数（例如 `on.message.enter()`），中间件够不到那里。请从场景之外的处理函数传入场景
+  所需的内容：`await scenes.enter(Quiz, questions=...)`，aiogram 会把它交给进入处理函数。场景是通过它在
+  dispatcher 各路由器上的处理函数被发现的；只有动作的场景不会被发现，它会以 aiogram 的缺少参数错误
+  失败。
 - **基于类的处理函数**，即 `MessageHandler` 及其他 `BaseHandler` 类的子类，不接收客户端：aiogram 以
   `self.data` 的形式把数据传给它们，而它们的 `__init__` 属于 aiogram。
 - **在路由器上调用 `setup()`。** 它接收的是 `Dispatcher`：一个路由器只能包含进一个 dispatcher，这由
