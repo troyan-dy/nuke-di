@@ -1,7 +1,8 @@
 """
 The kit the framework integrations are built on: client arguments filled by the framework's own DI, and the
-container connected for the time an app runs. `nuke_di.fastapi`, `nuke_di.faststream` and `nuke_di.litestar`
-are built on it, and an integration with another framework needs nothing private of nuke-di besides it.
+container connected for the time an app runs. `nuke_di.fastapi`, `nuke_di.faststream`, `nuke_di.litestar` and
+`nuke_di.asgi` are built on it, and an integration with another framework needs nothing private of nuke-di
+besides it.
 
 See docs/guide/integrations.md and docs/adr/0003-fastapi-signature-rewrite.md.
 """

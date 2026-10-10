@@ -193,13 +193,15 @@ $ pytest -q tests/test_starlette_api.py
 $ python -c "from starlette.testclient import TestClient; from app.starlette_api import app; TestClient(app).get('/users/1')"
 Traceback (most recent call last):
   ...
-RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)`
+RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` in Starlette or `async with app.test_app()` in Quart
 ```
 
 ## <a id="quart"></a>Quart
 
-Quart has no `lifespan=` argument: it runs `before_serving` hooks on startup and `after_serving` hooks on
-shutdown. One `AsyncExitStack` keeps the clients connected in between:
+Quart has no `lifespan=` argument: it runs its `before_serving` hooks on startup and its `after_serving`
+hooks on shutdown, each kind in the order it was registered, and skips the rest of them when one fails. A
+subclass of `Quart` connects the clients around all of them, so every hook of the app can use the clients,
+and a hook that fails still leaves them disconnected:
 
 ```python
 # app/quart_api.py
@@ -212,18 +214,41 @@ from nuke_di import DI
 from nuke_di.asgi import lifespan
 
 clients = lifespan(DI, UserService, Database)
-app = Quart(__name__)
 running = AsyncExitStack()
 
 
+class ClientsQuart(Quart):
+    """
+    Connects the clients before every before_serving hook and disconnects them after every after_serving
+    hook, also when one of the hooks fails.
+    """
+
+    async def startup(self) -> None:
+        await running.enter_async_context(clients(self))
+        try:
+            await super().startup()
+        except BaseException:
+            await running.aclose()
+            raise
+
+    async def shutdown(self) -> None:
+        try:
+            await super().shutdown()
+        finally:
+            await running.aclose()
+
+
+app = ClientsQuart(__name__)
+
+
 @app.before_serving
-async def connect() -> None:
-    await running.enter_async_context(clients(app))
+async def warm_up() -> None:
+    print("warm-up:", await clients.get(UserService).greet(0))
 
 
 @app.after_serving
-async def disconnect() -> None:
-    await running.aclose()
+async def goodbye() -> None:
+    print("goodbye:", await clients.get(UserService).greet(1))
 
 
 @app.get("/users/<int:user_id>")
@@ -238,19 +263,21 @@ async def me() -> str:
 
 ```console
 $ uvicorn app.quart_api:app
-INFO:     Started server process [44067]
+INFO:     Started server process [72984]
 INFO:     Waiting for application startup.
 database: connected
+warm-up: Hello, user-0!
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:49372 - "GET /users/42 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49374 - "GET /me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57604 - "GET /users/42 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57606 - "GET /me HTTP/1.1" 200 OK
 ^C
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
+goodbye: Hello, user-1!
 database: disconnected
 INFO:     Application shutdown complete.
-INFO:     Finished server process [44067]
+INFO:     Finished server process [72984]
 ```
 
 A test starts the app with `test_app()`:
@@ -277,13 +304,17 @@ async def test_get_user() -> None:
 ```console
 $ pytest -q tests/test_quart_api.py
 .                                                                        [100%]
-1 passed in 0.15s
+1 passed in 0.13s
 ```
 
-Quart calls the hooks of each kind in the order they are registered: `connect` goes before your own
-`before_serving` hooks, so they see the clients, and `disconnect` after your own `after_serving` hooks.
-Quart's `while_serving` would read shorter, but it creates its generator once, when it is registered, so the
-app could start only once per process, and the second test that starts it fails.
+Why not two hooks of the app, one that connects and one that disconnects: each would run in its turn
+among the app's own hooks. A `disconnect` in `after_serving` runs before the `after_serving` hooks
+registered after it, which then find the clients disconnected; a `before_serving` hook that fails after
+the one that connected leaves the container connected, since Quart then calls no `after_serving` hook, and
+the next start fails with `the container is already connected`. `Quart.startup()` and `Quart.shutdown()`
+run every hook, so the subclass connects before the first and disconnects after the last, whichever of
+them fails. Quart's `while_serving` would read shorter, but it creates its generator once, when it is
+registered, so the app could start only once per process, and the second test that starts it would fail.
 
 ## <a id="aiohttp"></a>aiohttp
 
@@ -397,7 +428,7 @@ INFO:     Finished server process [48646]
 
 | When | What is raised |
 |---|---|
-| A handler runs without the app's lifespan, or after it stopped | ``RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` `` |
+| A handler runs without the app's lifespan, or after it stopped | ``RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` in Starlette or `async with app.test_app()` in Quart `` |
 | `get()` of a client the list lacks | ``RuntimeError: Database is not a client of this lifespan: list it in `lifespan(container, ...)` `` |
 | A client's `connect()` fails | `RuntimeError: nuke-di clients failed to start: Database.connect() raised OSError: connection refused`; the server reports a failed startup and exits, and the container is left flushed |
 | The container is connected already, e.g. by another app | `RuntimeError: nuke-di clients failed to start: the container is already connected` |

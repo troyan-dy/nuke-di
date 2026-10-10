@@ -3,7 +3,7 @@ import subprocess
 import sys
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
-from typing import Any, get_type_hints
+from typing import Annotated, Any, get_type_hints
 
 import pytest
 from starlette.applications import Starlette
@@ -87,8 +87,9 @@ def test_a_handler_without_the_lifespan_is_told_to_start_the_app() -> None:
     with pytest.raises(RuntimeError) as exc:
         TestClient(make_app(clients)).get("/greet")
 
-    assert (
-        str(exc.value) == "UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)`"
+    assert str(exc.value) == (
+        "UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` in Starlette "
+        "or `async with app.test_app()` in Quart"
     )
     assert events == []
 
@@ -181,19 +182,40 @@ def test_a_client_listed_twice_is_one_client() -> None:
     assert events == ["database: connected", "database: disconnected"]
 
 
-def test_the_container_comes_first() -> None:
+class Broken(Client):
+    async def connect(self) -> None:
+        raise OSError("connection refused")
+
+
+def test_a_failed_connect_fails_the_startup_and_flushes_the_container() -> None:
+    container = Dependencies()
+    clients = lifespan(container, UserService, Broken)
+
+    with pytest.raises(RuntimeError) as exc, TestClient(make_app(clients)):
+        pass  # pragma: no cover
+
+    assert str(exc.value) == "nuke-di clients failed to start: Broken.connect() raised OSError: connection refused"
+    assert not container.connected
+    assert not container.clients
+    with pytest.raises(RuntimeError, match="Broken is not connected"):
+        clients.get(Broken)
+
+
+@pytest.mark.parametrize("make", [lifespan, Lifespan])
+def test_the_container_comes_first(make: Callable[..., Lifespan]) -> None:
     with pytest.raises(TypeError) as exc:
-        lifespan(Database)  # type: ignore[arg-type]
+        make(Database)
 
     assert str(exc.value).startswith(
         "lifespan() takes the container first, then the clients, e.g. lifespan(DI, Database); got <class "
     )
 
 
-@pytest.mark.parametrize("item", [str, "Database", None])
-def test_only_clients_are_listed(item: Any) -> None:
+@pytest.mark.parametrize("make", [lifespan, Lifespan])
+@pytest.mark.parametrize("item", [str, "Database", None, Annotated[Database, "x"]])
+def test_only_clients_are_listed(make: Callable[..., Lifespan], item: Any) -> None:
     with pytest.raises(TypeError) as exc:
-        lifespan(Dependencies(), Database, item)
+        make(Dependencies(), Database, item)
 
     assert str(exc.value) == f"{item!r} is not a client: subclass Client or NotSingletonClient"
 

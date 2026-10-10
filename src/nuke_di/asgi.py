@@ -9,8 +9,8 @@ See docs/specs/asgi.md and docs/guide/asgi.md.
 from contextlib import AbstractAsyncContextManager
 from typing import TypeVar, cast
 
-from nuke_di.core import Dependencies
-from nuke_di.integration import Binding, Framework, client_of, running
+from nuke_di.core import Dependencies, isnotsingleton
+from nuke_di.integration import Binding, Framework, running
 from nuke_di.types import NotSingletonClient
 from nuke_di.utils import sname
 
@@ -21,18 +21,30 @@ CT = TypeVar("CT", bound=NotSingletonClient)
 _ASGI = Framework(
     name="ASGI",
     not_started="{client} is not a client of this lifespan: list it in `lifespan(container, ...)`",
-    not_connected="{client} is not connected: start the app with its lifespan, e.g. `with TestClient(app)`",
+    not_connected=(
+        "{client} is not connected: start the app with its lifespan, e.g. `with TestClient(app)` in Starlette "
+        "or `async with app.test_app()` in Quart"
+    ),
 )
 
 
 class Lifespan:
     """
     The lifespan of an app, `Starlette(lifespan=clients)`, and where its handlers take the clients it lists,
-    `clients.get(UserService)`. Made by `lifespan()`.
+    `clients.get(UserService)`. `lifespan(container, *clients)` makes one.
     """
 
-    def __init__(self, container: Dependencies, clients: tuple[type[NotSingletonClient], ...]) -> None:
-        self.container = container
+    def __init__(self, container: Dependencies, *clients: type[NotSingletonClient]) -> None:
+        if not isinstance(container, Dependencies):
+            raise TypeError(
+                f"lifespan() takes the container first, then the clients, e.g. lifespan(DI, Database); "
+                f"got {container!r}"
+            )
+        for cls in clients:
+            # The class itself, as resolve() takes it: not `Annotated[Database, ...]`
+            if not isnotsingleton(cls):
+                raise TypeError(f"{cls!r} is not a client: subclass Client or NotSingletonClient")
+        self._container = container
         # Resolved on every startup, not now: a test replaces a client with override() before the app starts
         self._bindings = {cls: Binding(cls, container, _ASGI) for cls in clients}
 
@@ -41,7 +53,7 @@ class Lifespan:
         Resolve the clients and connect the container until the block exits; `app` is not used, it is what a
         framework passes to its lifespan.
         """
-        return running(self.container, list(self._bindings.values()))
+        return running(self._container, list(self._bindings.values()))
 
     def get(self, cls: type[CT]) -> CT:
         """
@@ -62,11 +74,4 @@ def lifespan(container: Dependencies, *clients: type[NotSingletonClient]) -> Lif
     A lifespan that connects `clients` and every client they depend on for the time the app runs, for a
     framework that calls `lifespan(app)` and enters the async context manager it returns, as Starlette does.
     """
-    if not isinstance(container, Dependencies):
-        raise TypeError(
-            f"lifespan() takes the container first, then the clients, e.g. lifespan(DI, Database); got {container!r}"
-        )
-    for cls in clients:
-        if client_of(cls) is None:
-            raise TypeError(f"{cls!r} is not a client: subclass Client or NotSingletonClient")
-    return Lifespan(container, clients)
+    return Lifespan(container, *clients)

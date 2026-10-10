@@ -178,12 +178,12 @@ $ pytest -q tests/test_starlette_api.py
 $ python -c "from starlette.testclient import TestClient; from app.starlette_api import app; TestClient(app).get('/users/1')"
 Traceback (most recent call last):
   ...
-RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)`
+RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` in Starlette or `async with app.test_app()` in Quart
 ```
 
 ## <a id="quart"></a>Quart
 
-Quart には `lifespan=` 引数がありません。起動時に `before_serving` フックを、終了時に `after_serving` フックを実行します。その間、1 つの `AsyncExitStack` がクライアントを接続したまま保ちます。
+Quart には `lifespan=` 引数がありません。起動時に `before_serving` フックを、終了時に `after_serving` フックを、それぞれ登録された順に実行し、1 つが失敗すると残りを飛ばします。`Quart` のサブクラスがそれらすべてのフックの外側でクライアントを接続するので、アプリのどのフックからもクライアントを使え、フックが失敗してもクライアントは確実に切断されます。
 
 ```python
 # app/quart_api.py
@@ -196,18 +196,41 @@ from nuke_di import DI
 from nuke_di.asgi import lifespan
 
 clients = lifespan(DI, UserService, Database)
-app = Quart(__name__)
 running = AsyncExitStack()
 
 
+class ClientsQuart(Quart):
+    """
+    Connects the clients before every before_serving hook and disconnects them after every after_serving
+    hook, also when one of the hooks fails.
+    """
+
+    async def startup(self) -> None:
+        await running.enter_async_context(clients(self))
+        try:
+            await super().startup()
+        except BaseException:
+            await running.aclose()
+            raise
+
+    async def shutdown(self) -> None:
+        try:
+            await super().shutdown()
+        finally:
+            await running.aclose()
+
+
+app = ClientsQuart(__name__)
+
+
 @app.before_serving
-async def connect() -> None:
-    await running.enter_async_context(clients(app))
+async def warm_up() -> None:
+    print("warm-up:", await clients.get(UserService).greet(0))
 
 
 @app.after_serving
-async def disconnect() -> None:
-    await running.aclose()
+async def goodbye() -> None:
+    print("goodbye:", await clients.get(UserService).greet(1))
 
 
 @app.get("/users/<int:user_id>")
@@ -222,19 +245,21 @@ async def me() -> str:
 
 ```console
 $ uvicorn app.quart_api:app
-INFO:     Started server process [44067]
+INFO:     Started server process [72984]
 INFO:     Waiting for application startup.
 database: connected
+warm-up: Hello, user-0!
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:49372 - "GET /users/42 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49374 - "GET /me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57604 - "GET /users/42 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57606 - "GET /me HTTP/1.1" 200 OK
 ^C
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
+goodbye: Hello, user-1!
 database: disconnected
 INFO:     Application shutdown complete.
-INFO:     Finished server process [44067]
+INFO:     Finished server process [72984]
 ```
 
 テストでは `test_app()` でアプリを起動します。
@@ -261,10 +286,10 @@ async def test_get_user() -> None:
 ```console
 $ pytest -q tests/test_quart_api.py
 .                                                                        [100%]
-1 passed in 0.15s
+1 passed in 0.13s
 ```
 
-Quart は同じ種類のフックを登録された順に呼び出します。`connect` は自分で書いた `before_serving` フックより前に来るので、それらのフックからクライアントが見えます。`disconnect` は自分で書いた `after_serving` フックの後に来ます。Quart の `while_serving` を使えばもっと短く書けますが、これは登録時にジェネレーターを一度だけ作るため、アプリはプロセスごとに一度しか起動できず、アプリを起動する 2 つ目のテストが失敗します。
+接続するフックと切断するフックの 2 つをアプリに登録しないのはなぜか。それぞれがアプリ自身のフックの間で自分の順番に実行されるからです。`after_serving` の `disconnect` は、その後に登録された `after_serving` フックより先に実行されるので、それらのフックからはクライアントが切断済みに見えます。接続したフックの後で `before_serving` フックが失敗すると、Quart は `after_serving` フックを 1 つも呼ばないのでコンテナは接続されたまま残り、次の起動は `the container is already connected` で失敗します。`Quart.startup()` と `Quart.shutdown()` はすべてのフックを実行するので、サブクラスは最初のフックの前に接続し、どのフックが失敗しても最後のフックの後に切断します。Quart の `while_serving` を使えばもっと短く書けますが、これは登録時にジェネレーターを一度だけ作るため、アプリはプロセスごとに一度しか起動できず、アプリを起動する 2 つ目のテストが失敗します。
 
 ## <a id="aiohttp"></a>aiohttp
 
@@ -377,7 +402,7 @@ INFO:     Finished server process [48646]
 
 | 状況 | 送出される例外 |
 |---|---|
-| アプリの lifespan なしで、または停止後にハンドラーが実行された | ``RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` `` |
+| アプリの lifespan なしで、または停止後にハンドラーが実行された | ``RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` in Starlette or `async with app.test_app()` in Quart `` |
 | リストにないクライアントを `get()` した | ``RuntimeError: Database is not a client of this lifespan: list it in `lifespan(container, ...)` `` |
 | クライアントの `connect()` が失敗した | `RuntimeError: nuke-di clients failed to start: Database.connect() raised OSError: connection refused`。サーバーは起動の失敗を報告して終了し、コンテナはフラッシュされた状態になる |
 | コンテナがすでに接続されている（別のアプリによってなど） | `RuntimeError: nuke-di clients failed to start: the container is already connected` |

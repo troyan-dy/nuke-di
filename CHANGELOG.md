@@ -17,8 +17,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   `BackgroundTasks` and disconnects, and a failed connect fails the startup with a `RuntimeError`, all through
   `nuke_di.integration.running()`. A handler takes a client with `clients.get(UserService)`, typed for mypy and
   pyright; a client the list lacks, or a handler run without the lifespan, raises a `RuntimeError` that says
-  what to do. `clients(app)` is an async context manager, so the app's own lifespan runs inside it, Quart
-  enters it in `before_serving`, and aiohttp 3.14 takes it in `cleanup_ctx` as it is. No framework is
+  what to do. `clients(app)` is an async context manager, so the app's own lifespan runs inside it, a
+  `Quart` subclass enters it around `startup()` and `shutdown()`, and aiohttp 3.14 takes it in `cleanup_ctx`
+  as it is. No framework is
   imported and no extra is needed. `tests/test_asgi.py` runs `nuke_di.integration.testing.check()` on a
   Starlette app.
 
@@ -32,8 +33,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - A guide page, `docs/guide/asgi.md`, "Starlette, Quart and any ASGI app": Starlette, the app's own lifespan,
   testing, Quart, aiohttp and a plain ASGI app, each run with its real output, and the errors; in every
   language, linked from the README and from "Writing an integration". `docs/specs/asgi.md` records why
-  handlers take clients from `get()` rather than from `request.state`, and why Quart uses `before_serving` /
-  `after_serving` rather than `while_serving`.
+  handlers take clients from `get()` rather than from `request.state`, and why Quart connects around
+  `startup()` / `shutdown()` rather than in serving hooks.
 - The Agent Skill, the `AGENTS.md` block of `docs/guide/agents.md`, `context7.json`, the plugin manifests and
   `llms.txt` / `llms-full.txt` name the new module.
 

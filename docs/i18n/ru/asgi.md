@@ -197,13 +197,15 @@ $ pytest -q tests/test_starlette_api.py
 $ python -c "from starlette.testclient import TestClient; from app.starlette_api import app; TestClient(app).get('/users/1')"
 Traceback (most recent call last):
   ...
-RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)`
+RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` in Starlette or `async with app.test_app()` in Quart
 ```
 
 ## <a id="quart"></a>Quart
 
 У Quart нет аргумента `lifespan=`: при старте он выполняет хуки `before_serving`, а при остановке —
-хуки `after_serving`. Один `AsyncExitStack` держит клиенты подключёнными в промежутке между ними:
+хуки `after_serving`, каждый вид в порядке регистрации, и пропускает остальные, если один из них упал.
+Подкласс `Quart` подключает клиенты вокруг всех этих хуков, так что любой хук приложения может
+пользоваться клиентами, а упавший хук всё равно оставляет их отключёнными:
 
 ```python
 # app/quart_api.py
@@ -216,18 +218,41 @@ from nuke_di import DI
 from nuke_di.asgi import lifespan
 
 clients = lifespan(DI, UserService, Database)
-app = Quart(__name__)
 running = AsyncExitStack()
 
 
+class ClientsQuart(Quart):
+    """
+    Connects the clients before every before_serving hook and disconnects them after every after_serving
+    hook, also when one of the hooks fails.
+    """
+
+    async def startup(self) -> None:
+        await running.enter_async_context(clients(self))
+        try:
+            await super().startup()
+        except BaseException:
+            await running.aclose()
+            raise
+
+    async def shutdown(self) -> None:
+        try:
+            await super().shutdown()
+        finally:
+            await running.aclose()
+
+
+app = ClientsQuart(__name__)
+
+
 @app.before_serving
-async def connect() -> None:
-    await running.enter_async_context(clients(app))
+async def warm_up() -> None:
+    print("warm-up:", await clients.get(UserService).greet(0))
 
 
 @app.after_serving
-async def disconnect() -> None:
-    await running.aclose()
+async def goodbye() -> None:
+    print("goodbye:", await clients.get(UserService).greet(1))
 
 
 @app.get("/users/<int:user_id>")
@@ -242,19 +267,21 @@ async def me() -> str:
 
 ```console
 $ uvicorn app.quart_api:app
-INFO:     Started server process [44067]
+INFO:     Started server process [72984]
 INFO:     Waiting for application startup.
 database: connected
+warm-up: Hello, user-0!
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:49372 - "GET /users/42 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49374 - "GET /me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57604 - "GET /users/42 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57606 - "GET /me HTTP/1.1" 200 OK
 ^C
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
+goodbye: Hello, user-1!
 database: disconnected
 INFO:     Application shutdown complete.
-INFO:     Finished server process [44067]
+INFO:     Finished server process [72984]
 ```
 
 Тест запускает приложение через `test_app()`:
@@ -281,13 +308,18 @@ async def test_get_user() -> None:
 ```console
 $ pytest -q tests/test_quart_api.py
 .                                                                        [100%]
-1 passed in 0.15s
+1 passed in 0.13s
 ```
 
-Quart вызывает хуки одного вида в порядке их регистрации: `connect` выполняется раньше ваших собственных
-хуков `before_serving`, так что они уже видят клиенты, а `disconnect` — после ваших хуков `after_serving`.
-С `while_serving` из Quart код вышел бы короче, но Quart создаёт его генератор один раз, при регистрации,
-поэтому приложение смогло бы стартовать лишь раз за процесс, и второй тест, который его запускает, упал бы.
+Почему не два хука приложения, один подключает, другой отключает: каждый из них выполнялся бы в свою
+очередь среди собственных хуков приложения. `disconnect` в `after_serving` выполняется раньше хуков
+`after_serving`, зарегистрированных после него, и те застают клиенты уже отключёнными; хук
+`before_serving`, упавший после того, который подключил клиенты, оставляет контейнер подключённым, ведь
+тогда Quart не вызывает ни одного хука `after_serving`, и следующий старт падает с `the container is
+already connected`. `Quart.startup()` и `Quart.shutdown()` выполняют все хуки, поэтому подкласс
+подключает клиенты до первого и отключает после последнего, какой бы из них ни упал. С `while_serving` из
+Quart код вышел бы короче, но Quart создаёт его генератор один раз, при регистрации, поэтому приложение
+смогло бы стартовать лишь раз за процесс, и второй тест, который его запускает, упал бы.
 
 ## <a id="aiohttp"></a>aiohttp
 
@@ -401,7 +433,7 @@ INFO:     Finished server process [48646]
 
 | Когда | Что выбрасывается |
 |---|---|
-| Обработчик выполняется без lifespan приложения или после его остановки | ``RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` `` |
+| Обработчик выполняется без lifespan приложения или после его остановки | ``RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` in Starlette or `async with app.test_app()` in Quart `` |
 | `get()` клиента, которого нет в списке | ``RuntimeError: Database is not a client of this lifespan: list it in `lifespan(container, ...)` `` |
 | `connect()` клиента падает | `RuntimeError: nuke-di clients failed to start: Database.connect() raised OSError: connection refused`; сервер сообщает о неудачном старте и завершается, а контейнер остаётся очищенным, как после `flush()` |
 | Контейнер уже подключён, например другим приложением | `RuntimeError: nuke-di clients failed to start: the container is already connected` |

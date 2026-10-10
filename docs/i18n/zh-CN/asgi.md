@@ -191,13 +191,14 @@ $ pytest -q tests/test_starlette_api.py
 $ python -c "from starlette.testclient import TestClient; from app.starlette_api import app; TestClient(app).get('/users/1')"
 Traceback (most recent call last):
   ...
-RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)`
+RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` in Starlette or `async with app.test_app()` in Quart
 ```
 
 ## <a id="quart"></a>Quart
 
-Quart 没有 `lifespan=` 参数：它在启动时运行 `before_serving` 钩子，在关闭时运行 `after_serving` 钩子。
-一个 `AsyncExitStack` 让客户端在两者之间保持连接：
+Quart 没有 `lifespan=` 参数：它在启动时运行 `before_serving` 钩子，在关闭时运行 `after_serving` 钩子，
+每一类都按注册顺序运行，其中一个失败时会跳过其余的。`Quart` 的一个子类在所有这些钩子的外层连接客户端，
+因此应用的每个钩子都能使用客户端，某个钩子失败时客户端也照样会断开：
 
 ```python
 # app/quart_api.py
@@ -210,18 +211,41 @@ from nuke_di import DI
 from nuke_di.asgi import lifespan
 
 clients = lifespan(DI, UserService, Database)
-app = Quart(__name__)
 running = AsyncExitStack()
 
 
+class ClientsQuart(Quart):
+    """
+    Connects the clients before every before_serving hook and disconnects them after every after_serving
+    hook, also when one of the hooks fails.
+    """
+
+    async def startup(self) -> None:
+        await running.enter_async_context(clients(self))
+        try:
+            await super().startup()
+        except BaseException:
+            await running.aclose()
+            raise
+
+    async def shutdown(self) -> None:
+        try:
+            await super().shutdown()
+        finally:
+            await running.aclose()
+
+
+app = ClientsQuart(__name__)
+
+
 @app.before_serving
-async def connect() -> None:
-    await running.enter_async_context(clients(app))
+async def warm_up() -> None:
+    print("warm-up:", await clients.get(UserService).greet(0))
 
 
 @app.after_serving
-async def disconnect() -> None:
-    await running.aclose()
+async def goodbye() -> None:
+    print("goodbye:", await clients.get(UserService).greet(1))
 
 
 @app.get("/users/<int:user_id>")
@@ -236,19 +260,21 @@ async def me() -> str:
 
 ```console
 $ uvicorn app.quart_api:app
-INFO:     Started server process [44067]
+INFO:     Started server process [72984]
 INFO:     Waiting for application startup.
 database: connected
+warm-up: Hello, user-0!
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:49372 - "GET /users/42 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49374 - "GET /me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57604 - "GET /users/42 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57606 - "GET /me HTTP/1.1" 200 OK
 ^C
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
+goodbye: Hello, user-1!
 database: disconnected
 INFO:     Application shutdown complete.
-INFO:     Finished server process [44067]
+INFO:     Finished server process [72984]
 ```
 
 测试用 `test_app()` 启动应用：
@@ -275,11 +301,14 @@ async def test_get_user() -> None:
 ```console
 $ pytest -q tests/test_quart_api.py
 .                                                                        [100%]
-1 passed in 0.15s
+1 passed in 0.13s
 ```
 
-Quart 按注册顺序调用同一类钩子：`connect` 排在你自己的
-`before_serving` 钩子之前，因此它们能看到客户端；`disconnect` 则排在你自己的 `after_serving` 钩子之后。
+为什么不用应用的两个钩子，一个连接、一个断开：它们会和应用自己的钩子一起按顺序轮流运行。
+`after_serving` 中的 `disconnect` 会先于在它之后注册的 `after_serving` 钩子运行，那些钩子就会发现客户端已经断开；
+在负责连接的钩子之后失败的 `before_serving` 钩子会让容器保持连接，因为此时 Quart 不会调用任何
+`after_serving` 钩子，下一次启动就会以 `the container is already connected` 失败。`Quart.startup()` 和
+`Quart.shutdown()` 会运行所有钩子，所以子类在第一个钩子之前连接、在最后一个钩子之后断开，无论哪个钩子失败。
 用 Quart 的 `while_serving` 写起来会更短，但它在注册时就只创建一次生成器，于是应用
 在每个进程中只能启动一次，第二个启动它的测试就会失败。
 
@@ -395,7 +424,7 @@ INFO:     Finished server process [48646]
 
 | 情形 | 抛出的异常 |
 |---|---|
-| 处理函数在没有应用 lifespan 的情况下运行，或在其停止之后运行 | ``RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` `` |
+| 处理函数在没有应用 lifespan 的情况下运行，或在其停止之后运行 | ``RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` in Starlette or `async with app.test_app()` in Quart `` |
 | 对列表中没有的客户端调用 `get()` | ``RuntimeError: Database is not a client of this lifespan: list it in `lifespan(container, ...)` `` |
 | 某个客户端的 `connect()` 失败 | `RuntimeError: nuke-di clients failed to start: Database.connect() raised OSError: connection refused`；服务器报告启动失败并退出，容器处于已 `flush()` 的状态 |
 | 容器已经被连接，例如被另一个应用连接 | `RuntimeError: nuke-di clients failed to start: the container is already connected` |

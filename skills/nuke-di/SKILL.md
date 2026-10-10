@@ -120,8 +120,8 @@ per handler.
 A framework without dependency injection (Starlette, Quart, aiohttp, a plain ASGI app) lists the
 clients its handlers take: `from nuke_di.asgi import lifespan`; `clients = lifespan(DI, UserService)`;
 `Starlette(routes, lifespan=clients)`, and a handler calls `clients.get(UserService)`. Quart enters
-`clients(app)` in `before_serving` and leaves it in `after_serving`; aiohttp 3.14 takes
-`app.cleanup_ctx.append(clients)`.
+`clients(self)` in `startup()` of a `Quart` subclass, around every serving hook (see the guide page
+asgi.md); aiohttp 3.14 takes `app.cleanup_ctx.append(clients)`.
 
 **Per-request state** (a transaction, a unit of work, a request id) is not a client: open it in
 the handler through a method of a long-lived client, e.g. `async with db.transaction() as tx:`.
