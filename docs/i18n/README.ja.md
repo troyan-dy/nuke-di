@@ -126,6 +126,28 @@ dependency-injector が 2 割ほど先行します。キャッシュ済みのル
 クライアント 1 件あたり 13–18 µs を加えます。[docs/benchmarks.md](../benchmarks.md) は各シナリオを説明し、Python 3.11–3.14 の
 ベースラインを記録し、比較の全体をその方法と共に載せています。
 
+実際の接続ではコストは待ち時間であり、起動時間を決めるのは各 `connect()` がいつ始まるかです。
+dishka と wireup は 1 回の `get()` の中でクライアントを 1 つずつ接続するため、アプリケーションが手作業で
+ブランチを並行に取得しない限り、起動時間はすべての `connect()` の合計になります。
+dependency-injector は、すべてのクライアントを手書きの `Resource` にすれば `nuke-di` と同じく並行に起動しますが、
+停止は層ごとに行われます。injector には非同期のライフサイクルがありません:
+
+```console
+$ uv run python benchmarks/compare.py --only connect --summary
+nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 8d0700b · N = 10, 100, 1000 · 20 repeats
+nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+| Lower is better                                     | nuke-di     | dishka         | wireup         | dependency-injector | injector |
+|-----------------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
+| Startup: 8 clients, connect() of 1–60 ms            | **70.8 ms** | 156 ms (2.2×)  | 156 ms (2.2×)  | 71.1 ms (1.0×)      | —        |
+| Shutdown: the same 8 clients                        | **18.7 ms** | 30.1 ms (1.6×) | 29.8 ms (1.6×) | 26.0 ms (1.4×)      | —        |
+| Startup: 10 independent clients, connect() of 50 ms | **52.3 ms** | 520 ms (10.0×) | 522 ms (10.0×) | 52.5 ms (1.0×)      | —        |
+```
+
+3 つのライブラリはいずれも、コンテナーの作成時には何も接続しません。アプリケーションが起動時にルートを取得しなければ、
+最初のリクエストが接続を待ち、接続が失敗すればそのリクエストも失敗します。`nuke-di` は `async with DI` で
+すべてのクライアントを接続し、接続できないクライアントがあれば起動を止めます。
+
 ## <a id="a-job-with-command-line-arguments"></a>コマンドライン引数を持つジョブ
 
 デコレーターをひとつ付けるだけで、async 関数がプロセスのメインプログラムになります。クライアントは注入され、それ以外の型注釈付きの引数はすべて、型付きで検証されるコマンドラインオプションになります。

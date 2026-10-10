@@ -6,6 +6,25 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.14.2] - 2026-10-10
+
+### Added
+
+- `benchmarks/compare.py --only connect`: the comparison with other DI libraries with slow connections. Clients
+  whose `connect()` takes 1–60 ms are started and stopped through the async lifecycle of each library. For the 8
+  clients of the application tree, `nuke-di` starts in 70.8 ms (68 ms along the longest chain), dishka and wireup
+  in 156 ms, since they connect one client at a time within a `get()`, and dependency-injector in 71.1 ms with a
+  `Resource` per client, which stops in layers: 26.0 ms against 18.7 ms. Ten independent clients of 50 ms start
+  in 52 ms in `nuke-di` and dependency-injector and in 520–522 ms in dishka and wireup. wireup connects
+  concurrently what the application gathers by hand (86.9 ms), dishka does not. None of the three connects
+  anything when the container is created, so without a `get()` at startup the first request pays the
+  connections; `tests/test_benchmarks.py` checks it.
+
+### Documentation
+
+- A section of `docs/benchmarks.md` on slow connections and a paragraph of the README Performance section, in
+  every language.
+
 ## [1.14.1] - 2026-10-09
 
 ### Documentation
@@ -588,7 +607,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.14.1...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.14.2...HEAD
+[1.14.2]: https://github.com/troyan-dy/nuke-di/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/troyan-dy/nuke-di/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/troyan-dy/nuke-di/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/troyan-dy/nuke-di/compare/v1.12.1...v1.13.0

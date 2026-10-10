@@ -199,6 +199,7 @@ gets the same classes, with the dependencies in the type hints of `__init__`, an
 | `cold: container, registration, root` | Create a container, register the `N` classes and get the root, which constructs every client of the tree: what an application pays once at startup. The classes are made for every sample, outside the timing, as in the cold row of `benchmarks/run.py`, so nothing a library keeps per class serves the samples after the first: the same classes every sample would measure `nuke-di`'s second container, not a startup. For dishka and wireup it includes the validation of the graph their container does on creation; for dependency-injector, creating one `Singleton` provider per class on a `DynamicContainer`; for injector, an `Injector` with a binding per class. The `strings` trees go through the same code: every library reads the string annotations of a class in a registered module, dishka, wireup and injector through `get_type_hints()` as `nuke-di` does, dependency-injector not at all, its providers are wired by the names of the `__init__` arguments, so strings cost it nothing |
 | `warm: the root again` | Get the root again from that container: the singleton, independent of `N` |
 | `one request, a client in the handler` | One FastAPI request to a handler that takes one client through the library's integration: `nuke_di.fastapi`, `DishkaRoute` with `FromDishka[...]`, `wireup.integration.fastapi` with `Injected[...]`, `@inject` with `Depends(Provide[...])` for dependency-injector, each as its documentation shows. injector has no integration of its own |
+| `startup` and `shutdown` (`--only connect`) | Start and stop clients whose `connect()` and `disconnect()` sleep for the time a real connection takes, through each library's async lifecycle: `async with` / `connect()` of `nuke-di`; for dishka and wireup an async generator per client that awaits `connect()`, yields the client and awaits `disconnect()`, the root got from the async container and `close()`; for dependency-injector the same generator as a `Resource` per client, `init_resources()` and `shutdown_resources()`. For dishka and wireup also with the root's arguments got by `asyncio.gather()` before the root. The trees are fixed: the application of `benchmarks/run.py` and 10 independent clients of 50 ms. injector has no async lifecycle |
 
 What is done outside the timing, as a user does it at import: wireup's `@injectable` and
 injector's `@inject` on the classes, once per tree, or once per sample in the cold scenario, whose classes are
@@ -250,6 +251,83 @@ on `nuke-di` 1.11.1, dishka 1.10.1, wireup 2.12.1, dependency-injector 4.49.1 an
   dependency-injector on 3.11 (not on 3.14); `nuke-di` resolves it without recursion since
   [#35](https://github.com/troyan-dy/nuke-di/issues/35). The runner raises the limit, which is enough for every
   library but injector.
+
+### Slow connections
+
+The figures above are what a library costs; with real connections the cost is the waiting, and what decides
+the startup is when a library starts each `connect()`. `compare.py --only connect` starts and stops the
+application tree of the [Findings](#findings), 8 clients whose `connect()` takes 1–60 ms, which needs 68 ms
+along its longest chain to start and 16 ms to stop, and a root with 10 independent clients of 50 ms each:
+
+```console
+$ uv run python benchmarks/compare.py --only connect --summary
+nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 8d0700b · N = 10, 100, 1000 · 20 repeats
+nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+| Lower is better                                     | nuke-di     | dishka         | wireup         | dependency-injector | injector |
+|-----------------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
+| Startup: 8 clients, connect() of 1–60 ms            | **70.8 ms** | 156 ms (2.2×)  | 156 ms (2.2×)  | 71.1 ms (1.0×)      | —        |
+| Shutdown: the same 8 clients                        | **18.7 ms** | 30.1 ms (1.6×) | 29.8 ms (1.6×) | 26.0 ms (1.4×)      | —        |
+| Startup: 10 independent clients, connect() of 50 ms | **52.3 ms** | 520 ms (10.0×) | 522 ms (10.0×) | 52.5 ms (1.0×)      | —        |
+```
+
+- **dishka and wireup connect one client at a time within a `get()`**, in the order they walk the graph: an
+  async factory awaits the factories of its arguments one after the other, so `Kafka` (60 ms) starts only after
+  `Postgres`, `Repository`, `Redis` and `Users` are connected. The startup is the sum of every `connect()`,
+  143 ms for the application and 500 ms for the 10 clients, and `close()` disconnects in reverse, the sum
+  again: 25 ms and 50 ms. Ten clients of 50 ms take ten times as long as in `nuke-di`.
+- **wireup connects concurrently what the application gets concurrently.** With the root's arguments got by
+  `asyncio.gather()` by hand before the root (the `startup, the root's arguments gathered by hand` rows below),
+  the 10 clients start in 54.8 ms and the application in 86.9 ms: its two branches run side by side, but the
+  chain under `Users` still connects one client after another, 76 ms where its longest chain is 56 ms. The
+  gather is written for a tree the application knows, and a dependency added to a client does not join it.
+  dishka serializes its `get()` calls with a lock and takes as long gathered as not: 156 and 521 ms.
+- **dependency-injector starts as concurrently as `nuke-di`** once every client is a `Resource`:
+  `init_resources()` gathers all of them, and a resource awaits only its own arguments, so the startup is
+  the longest chain, 71.1 ms against 70.8 ms. Its shutdown goes in layers, first the resources that no
+  initialized resource depends on, and every layer waits for its slowest, 21 ms for the application:
+  26.0 ms against 18.7 ms, where the longest chain is 16 ms. The `Resource` is a generator written for every
+  client, and its arguments are named by hand; a `Singleton` of the class does not await `connect()` at all.
+- **None of the three connects anything when its container is created.** dishka and wireup call a
+  factory on the first `get()` of the client or of a client that needs it, and dependency-injector on the
+  first call of a `Resource` that `init_resources()` did not initialize; `tests/test_benchmarks.py` checks it on
+  every run. An application that does not get the root at startup, as the startup figures above do, connects
+  inside its first request, which waits for every `connect()` on its path and fails if one of them fails; the
+  process is up and ready by then. dishka and wireup do check the graph when the container is created, so a
+  missing dependency fails the startup, but a connection that fails does not. `nuke-di` connects every
+  resolved client in `async with DI` (or `Dependencies.connect()`), and a client that cannot connect stops
+  the startup.
+- **injector has no async lifecycle**: it builds objects synchronously, and awaiting a `connect()` is left
+  to the application.
+
+The same run with every sample, on Python 3.11.7 and the machine of the baseline, at commit `8d0700b`:
+
+| Library             | Scenario                                       | Shape                                        | N |             Median |     p95 | Per client |
+|---------------------|------------------------------------------------|----------------------------------------------|--:|-------------------:|--------:|-----------:|
+| nuke-di             | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms |   |            70.8 ms | 71.5 ms |            |
+| nuke-di             | shutdown: disconnect() of every client         | application: 8 clients, connect() of 1–60 ms |   |            18.7 ms | 18.7 ms |            |
+| dishka              | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms |   |             156 ms |  157 ms |            |
+| dishka              | shutdown: disconnect() of every client         | application: 8 clients, connect() of 1–60 ms |   |            30.1 ms | 31.0 ms |            |
+| dishka              | startup, the root's arguments gathered by hand | application: 8 clients, connect() of 1–60 ms |   |             156 ms |  157 ms |            |
+| wireup              | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms |   |             156 ms |  157 ms |            |
+| wireup              | shutdown: disconnect() of every client         | application: 8 clients, connect() of 1–60 ms |   |            29.8 ms | 31.0 ms |            |
+| wireup              | startup, the root's arguments gathered by hand | application: 8 clients, connect() of 1–60 ms |   |            86.9 ms | 88.3 ms |            |
+| dependency-injector | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms |   |            71.1 ms | 71.9 ms |            |
+| dependency-injector | shutdown: disconnect() of every client         | application: 8 clients, connect() of 1–60 ms |   |            26.0 ms | 26.2 ms |            |
+| injector            | startup: connect() of every client             | application: 8 clients, connect() of 1–60 ms |   | no async lifecycle |         |            |
+| injector            | shutdown: disconnect() of every client         | application: 8 clients, connect() of 1–60 ms |   | no async lifecycle |         |            |
+| nuke-di             | startup: connect() of every client             | wide: 10 clients, connect() of 50 ms         |   |            52.3 ms | 52.3 ms |            |
+| nuke-di             | shutdown: disconnect() of every client         | wide: 10 clients, connect() of 50 ms         |   |            6.44 ms | 6.47 ms |            |
+| dishka              | startup: connect() of every client             | wide: 10 clients, connect() of 50 ms         |   |             520 ms |  522 ms |            |
+| dishka              | shutdown: disconnect() of every client         | wide: 10 clients, connect() of 50 ms         |   |            62.4 ms | 62.9 ms |            |
+| dishka              | startup, the root's arguments gathered by hand | wide: 10 clients, connect() of 50 ms         |   |             521 ms |  524 ms |            |
+| wireup              | startup: connect() of every client             | wide: 10 clients, connect() of 50 ms         |   |             522 ms |  523 ms |            |
+| wireup              | shutdown: disconnect() of every client         | wide: 10 clients, connect() of 50 ms         |   |            61.9 ms | 62.7 ms |            |
+| wireup              | startup, the root's arguments gathered by hand | wide: 10 clients, connect() of 50 ms         |   |            54.8 ms | 55.2 ms |            |
+| dependency-injector | startup: connect() of every client             | wide: 10 clients, connect() of 50 ms         |   |            52.5 ms | 52.6 ms |            |
+| dependency-injector | shutdown: disconnect() of every client         | wide: 10 clients, connect() of 50 ms         |   |            6.72 ms | 6.90 ms |            |
+| injector            | startup: connect() of every client             | wide: 10 clients, connect() of 50 ms         |   | no async lifecycle |         |            |
+| injector            | shutdown: disconnect() of every client         | wide: 10 clients, connect() of 50 ms         |   | no async lifecycle |         |            |
 
 ### Python 3.11.7, nuke-di 1.11.1 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 
