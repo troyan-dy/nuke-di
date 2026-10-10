@@ -150,6 +150,27 @@ menos de 5,5 ms, y `connect()` añade 13–18 µs por cliente. [docs/benchmarks.
 explica cada escenario, registra la línea base en Python 3.11–3.14 y contiene la comparación completa con
 su método.
 
+Con conexiones reales el coste es la espera, y lo que decide un arranque es cuándo empieza cada `connect()`.
+dishka y wireup conectan un cliente tras otro, así que su arranque es la suma de todos los `connect()`;
+dependency-injector arranca tan en concurrencia como `nuke-di` cuando cada cliente es un `Resource` escrito a
+mano, y se detiene por capas; injector no tiene ciclo de vida asíncrono:
+
+```console
+$ uv run python benchmarks/compare.py --only connect --summary
+nuke-di 1.14.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 4aae0d2 · N = 10, 100, 1000 · 20 repeats
+nuke-di 1.14.1 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+| Lower is better                                     | nuke-di     | dishka         | wireup         | dependency-injector | injector |
+|-----------------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
+| Startup: 8 clients, connect() of 1–60 ms            | **69.6 ms** | 150 ms (2.2×)  | 152 ms (2.2×)  | 70.0 ms (1.0×)      | —        |
+| Shutdown: the same 8 clients                        | **17.6 ms** | 28.0 ms (1.6×) | 28.1 ms (1.6×) | 23.9 ms (1.4×)      | —        |
+| Startup: 10 independent clients, connect() of 50 ms | **51.3 ms** | 512 ms (10.0×) | 513 ms (10.0×) | 51.6 ms (1.0×)      | —        |
+```
+
+Ninguna de las tres conecta nada al crear su contenedor: si la aplicación no obtiene la raíz al arrancar,
+su primera petición espera a las conexiones y falla con ellas. `nuke-di` conecta cada cliente en
+`async with DI`, y un cliente que no puede conectarse detiene el arranque.
+
 ## <a id="a-job-with-command-line-arguments"></a>Un job con argumentos de línea de comandos
 
 Un solo decorador convierte una función asíncrona en el programa principal de un proceso. Los clientes

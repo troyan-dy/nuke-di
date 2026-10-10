@@ -117,6 +117,29 @@ def test_compares_libraries(tmp_path: Path) -> None:
     }
 
 
+def test_compares_slow_connections(tmp_path: Path) -> None:
+    pytest.importorskip("dishka")
+    out = tmp_path / "connect.json"
+
+    process = run("--repeat", "1", "--only", "connect", "--summary", "--json", str(out), script=COMPARE)
+
+    assert process.returncode == 0, process.stderr
+    lines = process.stdout.splitlines()
+    assert any(line.startswith("| Startup: 8 clients, connect() of 1–60 ms ") for line in lines)  # noqa: RUF001
+    assert any(line.startswith("| Shutdown: the same 8 clients ") for line in lines)
+
+    data = json.loads(out.read_text())
+    figures = {(row["library"], row["scenario"], row["shape"]): row for row in data["results"]}
+    wide = "wide: 10 clients, connect() of 50 ms"
+    startup = "startup: connect() of every client"
+    # Ten clients of 50 ms: concurrently in about 50 ms, one after another in about 500 ms
+    assert figures["nuke-di", startup, wide]["median"] < 0.2
+    assert figures["dependency-injector", startup, wide]["median"] < 0.2
+    assert figures["dishka", startup, wide]["median"] > 0.45
+    assert figures["wireup", startup, wide]["median"] > 0.45
+    assert figures["injector", startup, wide]["error"] == "no async lifecycle"
+
+
 def test_rejects_an_unknown_scenario() -> None:
     process = run("--only", "nothing")
 

@@ -7,21 +7,23 @@ Every library gets the same classes, whose `__init__` takes the dependencies by 
 same work: `cold` builds a container, registers the classes and gets the root of the tree, which
 constructs every client, on classes made for every sample, as the cold row of benchmarks/run.py; `warm`
 gets the root again from that container, the singleton; `request` is one FastAPI request to a handler
-that takes a client through the library's integration. The figures of the baseline are in
-docs/benchmarks.md.
+that takes a client through the library's integration; `connect` starts and stops clients whose
+`connect()` and `disconnect()` take the time a real connection does, through the async lifecycle of each
+library. The figures of the baseline are in docs/benchmarks.md.
 
 The libraries are the `compare` dependency group: `uv sync --group compare`.
 """
 
 import argparse
 import asyncio
+import inspect
 import sys
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass, fields
 from functools import partial
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any
+from typing import Any, get_type_hints
 
 import wireup
 from dependency_injector import containers, providers
@@ -32,11 +34,15 @@ from fastapi import Depends, FastAPI
 from injector import Binder, Injector, singleton
 from injector import inject as injector_inject
 from run import (
+    APPLICATION,
     REPEAT,
     SHAPES,
     SIZES,
+    Api,
     Result,
+    Sleeper,
     Tree,
+    client,
     collect,
     environment,
     fmt,
@@ -45,6 +51,7 @@ from run import (
     shape_label,
     summary,
     table,
+    timed,
     to_json,
 )
 from wireup import Injected
@@ -314,10 +321,167 @@ def request_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
         yield Result("one request, a client in the handler", "FastAPI", None, samples, library=name)
 
 
+# Slow connections: clients whose connect() and disconnect() sleep, started and stopped through the async
+# lifecycle of every library, so the figure is how the library schedules them, not what it costs. The
+# application tree of benchmarks/run.py needs 68 ms to start and 16 ms to stop along its longest chain
+
+
+STARTUP = "startup: connect() of every client"
+SHUTDOWN = "shutdown: disconnect() of every client"
+WIDE_SLOW = "wide: 10 clients, connect() of 50 ms"
+
+
+class Slow(Sleeper):
+    connect_seconds = 0.050
+    disconnect_seconds = 0.005
+
+
+def wide_slow() -> type[Client]:
+    """
+    A root that declares 10 slow clients with no dependencies of their own.
+    """
+    return client("SlowRoot", [client(f"Slow{number}", base=Slow) for number in range(10)], base=Sleeper)
+
+
+def dependencies(cls: type[Client]) -> dict[str, type[Client]]:
+    """
+    The arguments of `cls.__init__` and the client each one takes.
+    """
+    return {name: hint for name, hint in get_type_hints(cls.__init__).items() if name != "return"}
+
+
+def tree_of(root: type[Client]) -> list[type[Client]]:
+    """
+    Every client under `root`, dependencies before their consumers.
+    """
+    found: dict[type[Client], None] = {}
+
+    def visit(cls: type[Client]) -> None:
+        if cls not in found:
+            for dependency in dependencies(cls).values():
+                visit(dependency)
+            found[cls] = None
+
+    visit(root)
+    return list(found)
+
+
+def lifecycle(cls: type[Client]) -> Callable[..., AsyncIterator[Client]]:
+    """
+    The async generator that dishka, wireup and dependency-injector take for a resource with a lifecycle: it
+    builds the client, awaits `connect()`, yields it and awaits `disconnect()` at close. A user writes one per
+    client; here its signature is the one of `cls.__init__`, so the libraries that read it find the same
+    dependencies by type hint.
+    """
+
+    async def factory(**kwargs: Any) -> AsyncIterator[Client]:
+        instance = cls(**kwargs)
+        await instance.connect()
+        yield instance
+        await instance.disconnect()
+
+    hints = dependencies(cls)
+    factory.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+        [inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY, annotation=hint) for name, hint in hints.items()],
+        return_annotation=AsyncIterator[cls],  # type: ignore[valid-type]
+    )
+    factory.__annotations__ = {**hints, "return": AsyncIterator[cls]}  # type: ignore[valid-type]
+    factory.__name__ = factory.__qualname__ = f"make_{cls.__name__}"
+    return factory
+
+
+# One startup and one shutdown: `start(root)` connects every client of the tree and returns the shutdown
+
+
+Stop = Callable[[], Awaitable[None]]
+
+
+async def nuke_di_start(root: type[Client]) -> Stop:
+    deps = Dependencies()
+    deps.resolve(root)
+    await deps.connect()
+    return deps.disconnect
+
+
+async def dishka_start(root: type[Client]) -> Stop:
+    provider = Provider(scope=Scope.APP)
+    for cls in tree_of(root):
+        provider.provide(lifecycle(cls))
+    container = make_async_container(provider)
+    # The container connects nothing until a client is asked for: an application gets the root at startup,
+    # or its first request pays every connect()
+    await container.get(root)
+    return container.close
+
+
+async def wireup_start(root: type[Client]) -> Stop:
+    container = wireup.create_async_container(injectables=[wireup.injectable(lifecycle(cls)) for cls in tree_of(root)])
+    # Lazy as dishka: nothing connects until the root is asked for
+    await container.get(root)
+    return container.close
+
+
+async def dependency_injector_start(root: type[Client]) -> Stop:
+    container = containers.DynamicContainer()
+    made: dict[type[Client], Any] = {}
+    for cls in tree_of(root):
+        # A `Resource` per client, its arguments named by hand as every provider of the library
+        resource = providers.Resource(lifecycle(cls), **{name: made[hint] for name, hint in dependencies(cls).items()})
+        setattr(container, cls.__name__, resource)
+        made[cls] = resource
+    await container.init_resources()  # type: ignore[misc]
+
+    async def stop() -> None:
+        await container.shutdown_resources()  # type: ignore[misc]
+
+    return stop
+
+
+STARTS: dict[str, Callable[[type[Client]], Awaitable[Stop]]] = {
+    "nuke-di": nuke_di_start,
+    "dishka": dishka_start,
+    "wireup": wireup_start,
+    "dependency-injector": dependency_injector_start,
+}
+
+
+async def start_and_stop(start: Callable[[type[Client]], Awaitable[Stop]], root: type[Client]) -> tuple[float, float]:
+    """
+    The wall time of the startup and of the shutdown.
+    """
+    stops: list[Stop] = []
+
+    async def up() -> None:
+        stops.append(await start(root))
+
+    startup = await timed(up)
+    shutdown = await timed(stops[0])
+    return startup, shutdown
+
+
+def connect_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
+    # The sleeps are the figure, so the trees are fixed and nothing is per client
+    for shape, root in ((APPLICATION, Api), (WIDE_SLOW, wide_slow())):
+        for library in LIBRARIES:
+            start = STARTS.get(library.name)
+            if start is None:
+                # injector builds objects synchronously and has nothing that awaits a connect()
+                for scenario in (STARTUP, SHUTDOWN):
+                    yield Result(
+                        scenario, shape, None, [], per_client=False, library=library.name, error="no async lifecycle"
+                    )
+                continue
+            # One untimed warm-up, as `collect()` does
+            samples = [asyncio.run(start_and_stop(start, root)) for _ in range(repeat + 1)][1:]
+            yield Result(STARTUP, shape, None, [up for up, _ in samples], per_client=False, library=library.name)
+            yield Result(SHUTDOWN, shape, None, [down for _, down in samples], per_client=False, library=library.name)
+
+
 SCENARIOS: dict[str, Callable[[list[int], int], Iterator[Result]]] = {
     "cold": cold_scenario,
     "warm": warm_scenario,
     "request": request_scenario,
+    "connect": connect_scenario,
 }
 
 
@@ -340,6 +504,9 @@ FIGURES = [
     Figure("Cold start: the same N clients with string annotations", COLD_START, "mixed, strings", "N", chart=False),
     Figure("A cached root", "warm: the root again", "mixed", "N"),
     Figure("A FastAPI request with a client", "one request, a client in the handler", "FastAPI", None),
+    Figure("Startup: 8 clients, connect() of 1–60 ms", STARTUP, APPLICATION, None, chart=False),  # noqa: RUF001
+    Figure("Shutdown: the same 8 clients", SHUTDOWN, APPLICATION, None, chart=False),
+    Figure("Startup: 10 independent clients, connect() of 50 ms", STARTUP, WIDE_SLOW, None, chart=False),
 ]
 
 
