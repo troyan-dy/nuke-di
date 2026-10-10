@@ -188,6 +188,23 @@ async def test_the_other_containers_connect_on_the_first_get(monkeypatch: pytest
     await deps.disconnect()
 
 
+def test_draws_the_product_page(tmp_path: Path) -> None:
+    pytest.importorskip("dishka")
+    out = tmp_path / "product-page.svg"
+
+    process = run(
+        str(ROOT / "docs" / "benchmarks" / "connect-py3.11.json"),
+        str(out),
+        script=ROOT / "benchmarks" / "product_page.py",
+    )
+
+    assert process.returncode == 0, process.stderr
+    svg = out.read_text()
+    assert svg.startswith("<svg ") and "ProductPageApi" in svg and "prefers-color-scheme: dark" in svg
+    # The picture of the README is the one the committed figures give
+    assert svg == (ROOT / "docs" / "product-page.svg").read_text()
+
+
 def test_rejects_an_unknown_scenario() -> None:
     process = run("--only", "nothing")
 
