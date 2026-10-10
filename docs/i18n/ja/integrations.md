@@ -4,7 +4,7 @@
 
 ← [ドキュメント](../README.ja.md#documentation)
 
-フレームワークとのインテグレーションが行うことは 2 つです。フレームワークのハンドラーが、そのフレームワーク自身の依存性注入を通じて型ヒントでクライアントを受け取ること、そしてアプリの起動時にコンテナが接続し、停止時に切断することです。[FastAPI](fastapi.md)、[Litestar](litestar.md)、[FastStream](faststream.md) のインテグレーションは `nuke_di.integration` の上に作られており、ほかのフレームワークとのインテグレーションが nuke-di から必要とするのは、これと公開 API だけです。
+フレームワークとのインテグレーションが行うことは 2 つです。フレームワークのハンドラーが、そのフレームワーク自身の依存性注入を通じて型ヒントでクライアントを受け取ること、そしてアプリの起動時にコンテナが接続し、停止時に切断することです。[FastAPI](fastapi.md)、[Litestar](litestar.md)、[FastStream](faststream.md) のインテグレーションは `nuke_di.integration` の上に作られており、ほかのフレームワークとのインテグレーションが nuke-di から必要とするのは、これと公開 API だけです。grpc.aio、aiohttp、websockets、APScheduler、Textual、Temporal のワーカーのように独自の依存性注入を持たないサーバーには、インテグレーションはまったく要りません。`@worker` の中で動かせばよく、詳しくは[ワーカーの中で動くサーバー](servers-in-workers.md)を参照してください。
 
 | 名前 | 役割 |
 |---|---|
