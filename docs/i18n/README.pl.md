@@ -391,7 +391,7 @@ Routery, websockety i własny lifespan aplikacji opisuje rozdział [FastAPI](pl/
 - [Workery i joby](pl/workers-and-jobs.md): `@job` i `@worker`, parametry wiersza poleceń,
   `Shutdown`, okres karencji, zadania w tle, kody wyjścia, hooki, Kubernetes
 - Frameworki: [FastAPI](pl/fastapi.md), [Litestar](pl/litestar.md),
-  [FastStream](pl/faststream.md) oraz
+  [FastStream](pl/faststream.md), [Starlette, Quart i dowolna aplikacja ASGI](pl/asgi.md) oraz
   [pisanie integracji](pl/integrations.md) z innym frameworkiem przez `nuke_di.integration`
 - [Testowanie](pl/testing.md): `mock()`, `override()`, fixture'y pytest, sprawdzanie okablowania
 - [Konfiguracja](pl/configuration.md): timeouty, współbieżność i okres karencji

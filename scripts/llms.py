@@ -23,6 +23,7 @@ GUIDE = [
     "fastapi",
     "litestar",
     "faststream",
+    "asgi",
     "integrations",
     "testing",
     "configuration",

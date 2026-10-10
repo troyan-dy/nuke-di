@@ -9,6 +9,9 @@ własny mechanizm wstrzykiwania zależności frameworka, a kontener łączy się
 gdy się zatrzymuje. Integracje z [FastAPI](fastapi.md), [Litestar](litestar.md) i [FastStream](faststream.md)
 są zbudowane na `nuke_di.integration`, a integracja z innym frameworkiem nie potrzebuje od nuke-di niczego
 poza nim i publicznym API.
+Framework bez własnego wstrzykiwania zależności, taki jak Starlette czy Quart, nie potrzebuje integracji:
+[`nuke_di.asgi.lifespan()`](asgi.md), zbudowany na tym samym zestawie, łączy klientów, a handlery
+pobierają ich od niego.
 
 | Nazwa | Co robi |
 |---|---|
