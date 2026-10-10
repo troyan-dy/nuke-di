@@ -162,27 +162,40 @@ taskiq-nats 0.7）要等到下一条消息或下一次 NATS ping 才会注意到
 - **在哪里填充客户端。** 在 broker 的任务的参数中，以及它们用到的每个 `TaskiqDepends(...)`
   函数的参数中，不论嵌套多深，也包括生成器依赖。其余参数都交给 taskiq 处理：`.kiq()` 的参数、
   `Context`、`TaskiqState`。依赖类 `Annotated[Auth, TaskiqDepends()]` 由 taskiq 根据它自己的
-  `__init__` 构建，而 nuke-di 不会重写这个 `__init__`：需要客户端的类本身就应当是一个客户端，
-  或者通过依赖函数获取客户端。
+  `__init__` 构建，而 nuke-di 不会重写这个 `__init__`，因此 `__init__` 接收客户端的依赖类会在注册其任务时被拒绝：
+  `TypeError: Auth takes clients in __init__ and is a taskiq dependency`。客户端请直接按类型提示接收，
+  不要加 `TaskiqDepends()`；需要客户端的类则通过依赖函数获取客户端。
 - **哪些客户端会启动。** `broker.get_all_tasks()` 中每个任务的客户端：既包括 broker 自己的任务，
-  也包括共享任务（`@shared_task`）。任务可以在 `setup(broker)` 之前或之后声明，共享任务则只能在它之前声明：
-  共享任务注册在 taskiq 的共享 broker 上，而 `setup()` 不会挂钩那个 broker。
+  也包括共享任务（`@shared_task`）。broker 的任务可以在 `setup(broker)` 之前或之后声明。共享任务注册在
+  taskiq 的共享 broker 上，而 `setup()` 不会挂钩那个 broker：`setup()` 重写当时已有的共享任务，
+  worker 启动时再重写其余的。`taskiq worker` 在启动之前就读取其任务的签名，因此在那里要在 `setup()`
+  之前导入共享任务；`InMemoryBroker` 在任务第一次运行时才读取签名，因此在那里两种顺序都可以。
 - **由哪个进程连接。** 由 broker 触发 `WORKER_STARTUP` 的那个进程：`taskiq worker` 进程，以及任何启动
   `InMemoryBroker` 的进程——它自己就是自己的 worker。只投递任务的进程以 `CLIENT_STARTUP` 启动 broker，
   不连接任何客户端。因此同一个包含 broker 的模块可以同时服务两边：worker 通过 taskiq 连接，
   Web 应用通过它自己的集成连接。
 - **lifespan。** 客户端在其他 `WORKER_STARTUP` 处理函数（包括在 `setup()` 之前注册的处理函数）之前连接，
-  并在 `broker.shutdown()` 运行完 `WORKER_SHUTDOWN` 处理函数、中间件和结果后端之后断开。
-  `connect()` 失败会让 `broker.startup()` 失败，worker 也随之失败。`Shutdown` 和 `BackgroundTasks`
-  的行为与 [FastAPI](fastapi.md) 中相同。
+  并在 `broker.shutdown()` 运行完 `WORKER_SHUTDOWN` 处理函数、中间件和结果后端之后断开；在
+  `InMemoryBroker` 上，还要等仍在运行的任务结束之后。`Shutdown` 和 `BackgroundTasks` 的行为与
+  [FastAPI](fastapi.md) 中相同。`taskiq worker` 给 `broker.shutdown()` 的时间是 `--shutdown-timeout`
+  秒，默认 5 秒，而每个 `disconnect()` 最多可用 `DISCONNECT_TIMEOUT_SECONDS`，默认 10 秒：请把
+  `--shutdown-timeout` 设得比最长的断开链更长，否则较慢的断开会在中途被切断。
+- **启动失败。** `connect()` 失败会让 `broker.startup()` 以 `RuntimeError` 失败，worker 进程随之退出。
+  taskiq 的进程管理器默认会无限次重启它（`--max-fails -1`），所以编排器永远看不到崩溃，而不可用的依赖每秒都会被
+  再次尝试。请用 `--max-fails 1` 运行 worker：这样它会以退出码 255 结束，由编排器按自己的退避策略重启——
+  nuke-di 中的 `connect()` 本来就是快速失败的。
 - **实例。** 与 `inject()` 一样，`Client` 在每个容器中只有一个实例，而 `NotSingletonClient`
   是每个声明它的参数一个实例，而不是每个任务一个。
 - **函数仍然是函数。** taskiq 看到的签名是 `Annotated[UserService, TaskiqDepends(...)]`，
   与 [FastAPI](fastapi.md) 中相同；`await send_report(1, users)` 会用手动传入的客户端调用它。
+  接收客户端的函数只能服务于 taskiq 或 FastAPI 之一：已经绑定到 FastAPI 的函数会在其任务注册之前以
+  `TypeError` 被拒绝。
 - **一个容器只连接一次。** 在容器已经连接的进程中启动的 `InMemoryBroker`，例如在使用同一个 `DI`
   的 FastAPI 应用内部启动，会以 `RuntimeError: nuke-di clients failed to start: the container is
   already connected` 失败。请给这样的 broker 一个独立的容器：`setup(broker, container=Dependencies())`。
-  任务函数一次只服务一个 broker，与 FastStream 的订阅者一样。
+  出于同样的原因，对于在同一容器上用 `nuke_di.fastapi` 设置的应用，使用 `taskiq_fastapi.init(broker, app)`
+  的 worker 会启动失败：它会在 `WORKER_STARTUP` 时进入应用的 lifespan。有了 `nuke_di.taskiq`，
+  任务不需要它也能拿到客户端。任务函数一次只服务一个 broker，与 FastStream 的订阅者一样。
 
 **测试。** 在 `InMemoryBroker` 上运行任务，并在 override 内部启动它：
 
@@ -203,9 +216,11 @@ class FakeDatabase(Database):
 async def test_send_report(capsys: pytest.CaptureFixture[str]) -> None:
     with DI.override(Database, FakeDatabase()):
         await broker.startup()
-        task = await send_report.kiq(1)
-        await task.wait_result()
-        await broker.shutdown()
+        try:
+            task = await send_report.kiq(1)
+            await task.wait_result()
+        finally:
+            await broker.shutdown()
 
     assert "Hello, alice!" in capsys.readouterr().out
 ```
@@ -213,7 +228,7 @@ async def test_send_report(capsys: pytest.CaptureFixture[str]) -> None:
 ```console
 $ pytest -q tests/test_tasks.py
 .                                                                        [100%]
-1 passed in 0.38s
+1 passed in 0.44s
 ```
 
 没有经过 worker 启动就运行的任务，例如投递到一个从未启动的 `InMemoryBroker` 的任务，

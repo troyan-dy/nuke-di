@@ -30,7 +30,7 @@ async def send_report(user_id: int, users: UserService) -> None:
 ## Non-goals
 
 - **Per-task clients**: a `Client` is one per container and a `NotSingletonClient` one per argument (ADR-0006). taskiq's own generator dependencies stay available for what lives as long as one task.
-- **Clients of a dependency class**: taskiq builds a class dependency from its own `__init__`, which `bind()` does not rewrite; such a class is a client, or takes clients through a dependency function.
+- **Clients of a dependency class**: taskiq builds a class dependency from its own `__init__`, which `bind()` does not rewrite; one whose `__init__` takes clients is refused with a `TypeError` when its task is registered. Such a class is a client, taken by type hint, or takes clients through a dependency function.
 - **The scheduler process** (`taskiq scheduler`): it fires no worker events and runs no tasks.
 - **A container shared with another integration in one process**: one container connects once. An `InMemoryBroker` started inside a FastAPI app on the same container fails to start with "the container is already connected".
 
@@ -42,19 +42,20 @@ Module `nuke_di.taskiq`, installed with the `taskiq` extra (`pip install nuke-di
 
 `broker` is any `AsyncBroker`.
 
-1. Rewrites the signature of every task the broker has (`broker.get_all_tasks()`, shared tasks included) as in FastAPI (ADR-0003), with `TaskiqDepends`, and of the `TaskiqDepends` functions they use, at any depth.
-2. Replaces `broker.task` with a wrapper that rewrites every task declared later; `broker.register_task()` goes through `broker.task`.
-3. Inserts a `WORKER_STARTUP` handler first in `broker.event_handlers`: it collects the bindings of `broker.get_all_tasks()` and enters `running()`, which resolves the clients and connects the container. A failed connect is flushed and raised as a `RuntimeError` out of `broker.startup()`, which fails the worker.
-4. Replaces `broker.shutdown` with a wrapper that runs the broker's own shutdown (the `WORKER_SHUTDOWN` handlers, the middlewares, the result backend) and then leaves `running()`: `Shutdown`, `BackgroundTasks`, `disconnect()`, even when the broker's shutdown raised.
-5. Raises `TypeError` when called twice for the same broker.
+1. Rewrites the signature of every task the broker has (`broker.get_all_tasks()`, shared tasks included) as in FastAPI (ADR-0003), with `TaskiqDepends`, and of the `TaskiqDepends` functions they use, at any depth. On a broker with a `receiver` (an `InMemoryBroker`, which builds it in its own `__init__`), it drops these tasks from `receiver.known_tasks`, so the receiver reads their rewritten signatures on their first run.
+2. Replaces `broker.task` with a wrapper that rewrites every task declared later, before taskiq registers it, so a function it refuses is never registered; `broker.register_task()` goes through `broker.task`.
+3. Refuses, with `TypeError`, a task with a dependency class, at any depth, whose `__init__` takes clients: taskiq would build the class from that `__init__` and fail on every run. It checks before `bind()`, which would otherwise mark the class and connect its clients for nothing.
+4. Inserts a `WORKER_STARTUP` handler first in `broker.event_handlers`: it collects the bindings of `broker.get_all_tasks()` and enters `running()`, which resolves the clients and connects the container. A failed connect is flushed and raised as a `RuntimeError` out of `broker.startup()`, which fails the worker.
+5. Replaces `broker.shutdown` with a wrapper that awaits the broker's tasks in flight when it has `wait_all()` (an `InMemoryBroker`), runs the broker's own shutdown (the `WORKER_SHUTDOWN` handlers, the middlewares, the result backend) and then leaves `running()`: `Shutdown`, `BackgroundTasks`, `disconnect()`, even when the broker's shutdown raised.
+6. Marks the broker with `__nuke_di__` and raises `TypeError` when called twice for the same broker.
 
 Which process connects is taskiq's decision: `broker.startup()` fires `WORKER_STARTUP` in a worker process (`is_worker_process`, set by `taskiq worker`) and `CLIENT_STARTUP` elsewhere; an `InMemoryBroker` fires both, since it runs the tasks it is kicked. A task run without the worker's startup, e.g. on an `InMemoryBroker` that was never started, fails with "is not connected"; a task declared after the worker started, with "was not started with the worker".
 
-A function is rewritten once, whatever the container (`per_container=False`): a worker reads a task's signature when it builds its `Receiver`, and an `InMemoryBroker` on the task's first run, which may come after another broker has started.
+A function is rewritten once, whatever the container (`per_container=False`): `taskiq worker` reads the signatures of its tasks once, when it builds its `Receiver` before it starts; an `InMemoryBroker` reads a task's on its first run (the shared tasks it read when it was made are forgotten by `setup()`), which may come while another broker runs the same function. A worker serves the shared tasks that were rewritten before it built its `Receiver`; an `InMemoryBroker` also those declared after `setup()`, which its startup rewrites before their first run.
 
 ### Internals read
 
-`broker.get_all_tasks()`, `task.original_func`, `broker.task`, `broker.event_handlers`, `TaskiqEvents` and `broker.shutdown` are public. The integration relies on how taskiq reads a task: `Receiver.__init__` (and `run_task()` for a task it has not seen) calls `inspect.signature()` and builds `taskiq_dependencies.DependencyGraph(handler)`, which takes a `Dependency` out of `Annotated[...]` metadata and honours `__signature__`. `taskiq worker` imports the broker, sets `is_worker_process`, imports the task modules and builds the `Receiver` before `receiver.listen()` awaits `broker.startup()`, so the rewrite must happen when a task is registered, not on startup. An `InMemoryBroker` builds its `Receiver` in its own `__init__`, which reads the shared tasks there are at that moment. CI runs the taskiq tests on taskiq 0.11.0 with taskiq-dependencies 1.5.0, and on the latest releases.
+`broker.get_all_tasks()`, `task.original_func`, `broker.task`, `broker.event_handlers`, `TaskiqEvents`, `broker.shutdown` and `InMemoryBroker.wait_all()` are public. `broker.receiver.known_tasks` of an `InMemoryBroker` is not: the set of task names its `Receiver` has prepared, present in taskiq 0.11 and 0.13. The integration relies on how taskiq reads a task: `Receiver.__init__` (and `run_task()` for a task it has not seen) calls `inspect.signature()` and builds `taskiq_dependencies.DependencyGraph(handler)`, which takes a `Dependency` out of `Annotated[...]` metadata and honours `__signature__`. `taskiq worker` imports the broker, sets `is_worker_process`, imports the task modules and builds the `Receiver` before `receiver.listen()` awaits `broker.startup()`, so the rewrite must happen when a task is registered, not on startup. An `InMemoryBroker` builds its `Receiver` in its own `__init__`, which reads the shared tasks there are at that moment. CI runs the taskiq tests on taskiq 0.11.0 with taskiq-dependencies 1.5.0, and on the latest releases.
 
 ## Typing
 
@@ -65,9 +66,11 @@ taskiq types `task.kiq()` with the task's own signature, so a type checker asks 
 ```python
 with DI.override(Database, replacement):
     await broker.startup()
-    task = await send_report.kiq(1)
-    await task.wait_result()
-    await broker.shutdown()
+    try:
+        task = await send_report.kiq(1)
+        await task.wait_result()
+    finally:
+        await broker.shutdown()
 ```
 
 The test broker is an `InMemoryBroker`, in place of the real one. The task stays a plain function, callable directly with its clients.
@@ -83,4 +86,6 @@ The test broker is an `InMemoryBroker`, in place of the real one. The task stays
 | 5 | Which tasks | `broker.get_all_tasks()`: the broker's own tasks and the shared ones, which a worker of any broker serves. A task of another broker starts nothing. |
 | 6 | The client process | Connects nothing: `CLIENT_STARTUP` is not hooked. The web app that kicks tasks connects its own clients through its own integration, on the same container or another. |
 | 7 | `.kiq()` and type checkers | Documented, not worked around: a default `= TaskiqDepends()` on the client argument. A mypy plugin hook could drop client arguments from `kiq`, but pyright has no plugins. |
-| 8 | Minimum taskiq | 0.11.0, with taskiq-dependencies 1.5.0: on 1.4 a task's own `Annotated[..., TaskiqDepends(f)]` written under `from __future__ import annotations` is not found, rewritten or not. `async with broker` came after 0.12, so the tests start the broker with `startup()` / `shutdown()`. |
+| 8 | Minimum taskiq | 0.11.0, with taskiq-dependencies 1.5.0: on 1.4 a task's own `Annotated[..., TaskiqDepends(f)]` written under `from __future__ import annotations` is not found, rewritten or not. `async with broker` came after 0.12, so the tests start the broker with `startup()` / `shutdown()`. The `InMemoryBroker` of 0.11.0 has no `wait_all()` and does not shut down its middlewares and result backend, so the two tests of those are skipped there. |
+| 9 | `setup()` twice on one broker | Refused, where FastStream switches its decorator to the latest container: there an app per test is set up on one module-level broker, here the broker is the app, with one set of event handlers and one `shutdown`, and a second `setup()` would connect twice. |
+| 10 | Deployment flags | Documented: `taskiq worker` restarts a worker whose startup failed for ever by default, so the guide says `--max-fails 1` (connect is fail-fast, ADR-0009), and gives `broker.shutdown()` 5 s by default against 10 s per `disconnect()`, so the guide says to raise `--shutdown-timeout`. |

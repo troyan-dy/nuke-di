@@ -23,12 +23,18 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   fails `broker.startup()` with a `RuntimeError`. `nuke_di.integration.testing.check()` passes on an
   `InMemoryBroker`; CI runs the tests on taskiq 0.11.0 with taskiq-dependencies 1.5.0 as well (`make
   test-taskiq-min`).
+- A dependency class whose `__init__` takes clients, `Annotated[Auth, TaskiqDepends()]`, is refused with a
+  `TypeError` when its task is registered, since taskiq builds it from that `__init__`; so is a function that
+  takes clients in FastAPI handlers, before taskiq registers the task. On an `InMemoryBroker` the shared tasks
+  declared before the broker get their clients too, and its shutdown waits for the tasks in flight before the
+  clients disconnect.
 
 ### Documentation
 
 - A guide page, `docs/guide/taskiq.md`, in every language: an `InMemoryBroker` run, a real `taskiq worker` on
-  NATS, the rules, the default `= TaskiqDepends()` that lets type checkers accept `.kiq()` without the client, and
-  testing. A spec, `docs/specs/taskiq.md`, and an example, `examples/taskiq_app`.
+  NATS, the rules, the default `= TaskiqDepends()` that lets type checkers accept `.kiq()` without the client, the
+  worker flags `--max-fails 1` and `--shutdown-timeout`, and testing. ADR-0003 names taskiq among the integrations
+  that share the rewrite. A spec, `docs/specs/taskiq.md`, and an example, `examples/taskiq_app`.
 
 ## [1.14.3] - 2026-10-10
 

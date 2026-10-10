@@ -8,14 +8,33 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 import pytest
-from taskiq import AsyncBroker, BrokerMessage, InMemoryBroker, TaskiqDepends, TaskiqEvents, TaskiqState
+from fastapi import Depends as FastAPIDepends
+from fastapi import FastAPI
+from taskiq import (
+    AsyncBroker,
+    BrokerMessage,
+    InMemoryBroker,
+    TaskiqDepends,
+    TaskiqEvents,
+    TaskiqMiddleware,
+    TaskiqState,
+    async_shared_broker,
+)
+from taskiq.brokers.inmemory_broker import InmemoryResultBackend
 from taskiq.receiver import Receiver
 
-from nuke_di import DI, Client, Dependencies
+from nuke_di import DI, BackgroundTasks, Client, Dependencies, NotSingletonClient, Shutdown
+from nuke_di.fastapi import setup as fastapi_setup
 from nuke_di.integration.testing import check
 from nuke_di.taskiq import _TASKIQ, setup
 
 events: list[str] = []
+
+# taskiq 0.11.0, the lowest supported, has an InMemoryBroker that neither waits for its tasks on shutdown nor shuts
+# down its middlewares and result backend
+old_in_memory = pytest.mark.skipif(
+    not hasattr(InMemoryBroker, "wait_all"), reason="the InMemoryBroker of this taskiq has no wait_all()"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -247,19 +266,117 @@ async def test_dependency_function_takes_client() -> None:
 
 class Auth:
     def __init__(self, db: Database) -> None:
-        self.db = db
+        self.db = db  # pragma: no cover
 
 
-async def test_dependency_class_is_built_by_taskiq() -> None:
-    # taskiq reads a dependency class from its own __init__, which nuke-di does not rewrite
+async def audit_auth(auth: Annotated[Auth, TaskiqDepends()]) -> None: ...  # pragma: no cover
+
+
+async def audit_users(users: Annotated[UserService, TaskiqDepends()]) -> None: ...  # pragma: no cover
+
+
+async def audit_nested(user: Annotated[str, TaskiqDepends(current_user)], auth: Auth = TaskiqDepends()) -> None:  # noqa: B008
+    ...  # pragma: no cover
+
+
+@pytest.mark.parametrize(("task", "cls"), [(audit_auth, "Auth"), (audit_users, "UserService"), (audit_nested, "Auth")])
+def test_dependency_class_with_clients_is_refused(task: Callable[..., Any], cls: str) -> None:
+    # taskiq builds a dependency class from its own __init__, which nuke-di does not rewrite: the task would fail
     broker = make_broker(Dependencies())
 
-    async def audit(auth: Annotated[Auth, TaskiqDepends()]) -> None: ...  # pragma: no cover
+    with pytest.raises(TypeError, match=rf"{cls} takes clients in __init__ and is a taskiq dependency"):
+        broker.task("audit")(task)
+
+    assert broker.find_task("audit") is None
+    assert "__nuke_di_owner__" not in vars(Auth)
+    assert "__nuke_di_owner__" not in vars(task)
+
+
+def test_dependency_class_with_clients_is_refused_on_setup() -> None:
+    broker = InMemoryBroker()
+    broker.task("audit")(audit_auth)
+
+    with pytest.raises(TypeError, match="Auth takes clients in __init__"):
+        setup(broker, Dependencies())
+
+
+class Audit:
+    def __init__(self, user: Annotated[str, TaskiqDepends(current_user, kwargs={"user_id": 4})]) -> None:
+        self.user = user
+
+
+async def test_dependency_class_takes_clients_through_a_function() -> None:
+    broker = make_broker(Dependencies())
+
+    async def audit(entry: Annotated[Audit, TaskiqDepends()]) -> str:
+        return entry.user
 
     task = broker.task(audit)
     async with started(broker):
-        with pytest.raises(TypeError, match="missing 1 required positional argument: 'db'"):
-            await result(task)
+        events.append(await result(task))
+
+    assert events[1] == "user-4"
+
+
+async def unreadable(value: Undefined) -> None: ...  # type: ignore[name-defined]  # noqa: F821  # pragma: no cover
+
+
+class Constant:
+    def __call__(self) -> str:
+        return "constant"  # pragma: no cover
+
+
+async def mixed(
+    first: Annotated[str, TaskiqDepends(current_user)],
+    again: Annotated[str, TaskiqDepends(current_user)],
+    odd: Annotated[str, TaskiqDepends(unreadable)],
+    constant: Annotated[str, TaskiqDepends(Constant())],
+) -> None: ...  # pragma: no cover
+
+
+def test_dependencies_nuke_di_cannot_read_are_left_to_taskiq() -> None:
+    # A dependency used twice, one with a hint that does not evaluate, a callable object: registered as they are
+    broker = make_broker(Dependencies())
+
+    broker.task("mixed")(mixed)
+
+    assert broker.find_task("mixed") is not None
+
+
+async def shared_dependency(db: Database) -> str:
+    return await db.fetch_user(1)  # pragma: no cover
+
+
+def test_function_bound_to_fastapi_is_not_registered() -> None:
+    app = FastAPI()
+    fastapi_setup(app, Dependencies())
+
+    @app.get("/me")
+    async def me(user: Annotated[str, FastAPIDepends(shared_dependency)]) -> None: ...  # pragma: no cover
+
+    async def task(user: Annotated[str, TaskiqDepends(shared_dependency)]) -> None: ...  # pragma: no cover
+
+    broker = make_broker(Dependencies())
+    with pytest.raises(TypeError, match="takes clients in both FastAPI and taskiq handlers"):
+        broker.task("fastapi-shared")(task)
+
+    assert broker.find_task("fastapi-shared") is None
+
+
+class Session(NotSingletonClient):
+    pass
+
+
+async def two_sessions(first: Session, second: Session) -> bool:
+    return first is not second
+
+
+async def test_not_singleton_client_per_argument() -> None:
+    broker = make_broker(Dependencies())
+    task = broker.task(two_sessions)
+
+    async with started(broker):
+        assert await result(task) is True
 
 
 # --- lifecycle -------------------------------------------------------------------------------------------
@@ -344,6 +461,101 @@ async def test_failed_shutdown_still_disconnects() -> None:
     assert events == ["database: connected", "database: disconnected"]
 
 
+class Recorder(TaskiqMiddleware):
+    async def shutdown(self) -> None:
+        events.append("middleware: shut down")
+
+
+class RecordingBackend(InmemoryResultBackend[Any]):
+    async def shutdown(self) -> None:
+        events.append("result backend: shut down")
+
+
+@old_in_memory
+async def test_disconnect_after_middlewares_and_result_backend() -> None:
+    broker = make_broker(Dependencies())
+    broker.add_middlewares(Recorder())
+    broker.result_backend = RecordingBackend()
+    broker.task(send_report)
+
+    async with started(broker):
+        pass
+
+    assert events == [
+        "database: connected",
+        "middleware: shut down",
+        "result backend: shut down",
+        "database: disconnected",
+    ]
+
+
+seen: list[Shutdown] = []
+
+
+async def watch(shutdown: Shutdown, tasks: BackgroundTasks) -> None:
+    async def forever() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            events.append("background: cancelled")
+            raise
+
+    tasks.spawn(forever())
+    seen.append(shutdown)
+    events.append(f"shutdown set: {shutdown.is_set()}")
+
+
+async def test_shutdown_is_set_and_background_tasks_stop() -> None:
+    seen.clear()
+    broker = make_broker(Dependencies())
+    task = broker.task(watch)
+
+    async with started(broker):
+        await result(task)
+
+    assert events == ["shutdown set: False", "background: cancelled"]
+    assert seen[0].is_set()
+
+
+class Slow(Client):
+    async def disconnect(self) -> None:
+        events.append("slow: disconnected")
+
+    async def work(self) -> None:
+        await asyncio.sleep(0.05)
+        events.append("slow: worked")
+
+
+async def slow_task(slow: Slow) -> None:
+    await slow.work()
+
+
+@old_in_memory
+async def test_shutdown_waits_for_tasks_in_flight() -> None:
+    # An InMemoryBroker runs a kicked task in the background; its shutdown alone would not wait for it
+    broker = make_broker(Dependencies())
+    task: Any = broker.task(slow_task)
+
+    await broker.startup()
+    await task.kiq()
+    await broker.shutdown()
+
+    assert events == ["slow: worked", "slow: disconnected"]
+
+
+async def report_twice(users: UserService) -> None: ...  # pragma: no cover
+
+
+async def test_task_function_on_two_brokers_runs_one_at_a_time() -> None:
+    first, second = make_broker(Dependencies()), make_broker(Dependencies())
+    first.task("first")(report_twice)
+    second.task("second")(report_twice)
+
+    async with started(first):
+        with pytest.raises(RuntimeError, match="is filled for another app that is running"):
+            await second.startup()
+
+
 async def test_startup_twice() -> None:
     broker = make_broker(Dependencies())
     broker.task(send_report)
@@ -411,14 +623,19 @@ async def shared_report(user_id: int, users: UserService) -> None:
     events.append(await users.greet(user_id))
 
 
-async def test_shared_task_declared_before_setup() -> None:
-    from taskiq import async_shared_broker
-
-    # After the broker: an InMemoryBroker reads the signatures of the shared tasks there are when it is made
+@pytest.mark.parametrize("order", ["before the broker", "before setup", "after setup"])
+async def test_shared_task_on_an_in_memory_broker(order: str) -> None:
+    # An InMemoryBroker reads the shared tasks there are when it is made, and the others on their first run
+    shared: Any = None
+    if order == "before the broker":
+        shared = async_shared_broker.task(shared_report)
     broker = InMemoryBroker()
-    shared: Any = async_shared_broker.task(shared_report)
+    if order == "before setup":
+        shared = async_shared_broker.task(shared_report)
+    setup(broker, Dependencies())
+    if order == "after setup":
+        shared = async_shared_broker.task(shared_report)
     try:
-        setup(broker, Dependencies())
         async_shared_broker.default_broker(broker)
         async with started(broker):
             await (await shared.kiq(6)).wait_result(check_interval=0.01, timeout=5)
@@ -427,6 +644,27 @@ async def test_shared_task_declared_before_setup() -> None:
         async_shared_broker.default_broker(None)  # type: ignore[arg-type]
 
     assert events == ["database: connected", "Hello, user-6!", "database: disconnected"]
+
+
+async def test_shared_task_in_a_worker_process() -> None:
+    # `taskiq worker` imports the task modules, then builds the receiver: a shared task declared before setup()
+    deps = Dependencies()
+    shared: Any = async_shared_broker.task(shared_report)
+    try:
+        broker = QueueBroker()
+        setup(broker, deps)
+        async_shared_broker.default_broker(broker)
+        await shared.kiq(8)
+        broker.is_worker_process = True
+        receiver = Receiver(broker, max_async_tasks=10)
+        finish = [asyncio.Event()] if "finish_event" in inspect.signature(receiver.listen).parameters else []
+        await receiver.listen(*finish)
+        await broker.shutdown()
+    finally:
+        AsyncBroker.global_task_registry.pop(shared.task_name)
+        async_shared_broker.default_broker(None)  # type: ignore[arg-type]
+
+    assert events == ["database: connected", "Hello, user-8!", "database: disconnected"]
 
 
 def test_setup_twice() -> None:

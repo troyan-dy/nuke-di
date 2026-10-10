@@ -164,28 +164,46 @@ taskiq-nats 0.7) замечает сигнал при следующем соо�
 - **Где заполняются клиенты.** В аргументах задач брокера и всех функций `TaskiqDepends(...)`, которые они
   используют, на любой глубине, включая зависимости-генераторы. Все остальные аргументы достаются taskiq:
   аргументы `.kiq()`, `Context`, `TaskiqState`. Класс-зависимость, `Annotated[Auth, TaskiqDepends()]`,
-  taskiq создаёт по его собственному `__init__`, который nuke-di не переписывает: класс, которому нужны
-  клиенты, сам становится клиентом или получает их через функцию-зависимость.
+  taskiq создаёт по его собственному `__init__`, который nuke-di не переписывает, поэтому класс, чей
+  `__init__` принимает клиенты, отклоняется при регистрации задачи: `TypeError: Auth takes clients in
+  __init__ and is a taskiq dependency`. Клиент берите по аннотации типа, без `TaskiqDepends()`, а классу,
+  которому нужны клиенты, передавайте их через функцию-зависимость.
 - **Какие клиенты стартуют.** Клиенты всех задач из `broker.get_all_tasks()`: собственных задач брокера и
-  общих (`@shared_task`). Задачи можно объявлять до или после `setup(broker)`, общие — только до него: они
-  регистрируются в общем брокере taskiq, к которому `setup()` не подключается.
+  общих (`@shared_task`). Задачи брокера можно объявлять до или после `setup(broker)`. Общая задача
+  регистрируется в общем брокере taskiq, к которому `setup()` не подключается: `setup()` переписывает общие
+  задачи, которые уже есть, а старт воркера — остальные. `taskiq worker` читает сигнатуры своих задач до
+  старта, поэтому там общую задачу импортируют до `setup()`; `InMemoryBroker` читает её при первом запуске,
+  поэтому там подходит любой порядок.
 - **Какой процесс подключает.** Тот, в котором брокер запускает `WORKER_STARTUP`: процесс `taskiq worker`
   и любой процесс, который стартует `InMemoryBroker`, сам себе воркер. Процесс, который только отправляет
   задачи, стартует брокер с `CLIENT_STARTUP` и не подключает ни одного клиента. Так один модуль с брокером
   служит обоим: воркер подключается через taskiq, веб-приложение — через свою интеграцию.
 - **Lifespan.** Клиенты подключаются раньше остальных обработчиков `WORKER_STARTUP`, в том числе
   зарегистрированных до `setup()`, и отключаются после того, как `broker.shutdown()` выполнил обработчики
-  `WORKER_SHUTDOWN`, middleware и бэкенд результатов. Упавший `connect()` проваливает `broker.startup()`, а
-  с ним и воркер. `Shutdown` и `BackgroundTasks` ведут себя так же, как в [FastAPI](fastapi.md).
+  `WORKER_SHUTDOWN`, middleware и бэкенд результатов; на `InMemoryBroker` — ещё и после того, как
+  закончатся задачи, которые всё ещё выполняются. `Shutdown` и `BackgroundTasks` ведут себя так же, как в
+  [FastAPI](fastapi.md). `taskiq worker` даёт `broker.shutdown()` `--shutdown-timeout` секунд, по умолчанию
+  5, а каждый `disconnect()` может занять `DISCONNECT_TIMEOUT_SECONDS`, по умолчанию 10: ставьте
+  `--shutdown-timeout` больше самой длинной цепочки отключений, иначе медленное отключение оборвётся на
+  середине.
+- **Неудачный старт.** Упавший `connect()` проваливает `broker.startup()` с `RuntimeError`, и процесс
+  воркера умирает. Менеджер процессов taskiq по умолчанию перезапускает его бесконечно (`--max-fails -1`),
+  так что оркестратор никогда не видит падения, а недоступную зависимость дёргают каждую секунду. Запускайте
+  воркер с `--max-fails 1`: тогда он завершается с кодом 255, и оркестратор перезапускает его со своим
+  backoff, ведь `connect()` в nuke-di fail-fast.
 - **Экземпляры.** Как и с `inject()`, `Client` — это один экземпляр на контейнер, а `NotSingletonClient` —
   один экземпляр на каждый объявляющий его аргумент, а не на каждую задачу.
 - **Функция остаётся функцией.** Её сигнатура показывает taskiq `Annotated[UserService, TaskiqDepends(...)]`,
   как в [FastAPI](fastapi.md); `await send_report(1, users)` вызывает её с клиентами, переданными вручную.
+  Функция, которая принимает клиенты, обслуживает либо taskiq, либо FastAPI: уже связанная с FastAPI
+  отклоняется с `TypeError` до регистрации задачи.
 - **Контейнер подключается один раз.** `InMemoryBroker`, запущенный в процессе, где контейнер уже подключён,
   например внутри приложения FastAPI на том же `DI`, падает с `RuntimeError: nuke-di clients failed to
   start: the container is already connected`. Дайте такому брокеру собственный контейнер:
-  `setup(broker, container=Dependencies())`. Функция-задача обслуживает один брокер за раз, как и подписчик
-  FastStream.
+  `setup(broker, container=Dependencies())`. По той же причине воркер не стартует с
+  `taskiq_fastapi.init(broker, app)` для приложения, настроенного через `nuke_di.fastapi` на том же
+  контейнере: он входит в lifespan приложения на `WORKER_STARTUP`. С `nuke_di.taskiq` задачи получают клиенты
+  и без него. Функция-задача обслуживает один брокер за раз, как и подписчик FastStream.
 
 **Тестирование.** Выполняйте задачи на `InMemoryBroker` и запускайте его внутри override:
 
@@ -206,9 +224,11 @@ class FakeDatabase(Database):
 async def test_send_report(capsys: pytest.CaptureFixture[str]) -> None:
     with DI.override(Database, FakeDatabase()):
         await broker.startup()
-        task = await send_report.kiq(1)
-        await task.wait_result()
-        await broker.shutdown()
+        try:
+            task = await send_report.kiq(1)
+            await task.wait_result()
+        finally:
+            await broker.shutdown()
 
     assert "Hello, alice!" in capsys.readouterr().out
 ```
@@ -216,7 +236,7 @@ async def test_send_report(capsys: pytest.CaptureFixture[str]) -> None:
 ```console
 $ pytest -q tests/test_tasks.py
 .                                                                        [100%]
-1 passed in 0.38s
+1 passed in 0.44s
 ```
 
 Задача, выполненная без старта воркера, например отправленная в `InMemoryBroker`, который так и не

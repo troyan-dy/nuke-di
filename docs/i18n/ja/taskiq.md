@@ -154,13 +154,14 @@ kicked send_report(42)
 
 ルール：
 
-- **クライアントが埋められる場所。** ブローカーのタスクと、それらが使うすべての `TaskiqDepends(...)` 関数の引数です。深さは問わず、ジェネレーターの依存関係も含みます。それ以外の引数（`.kiq()` の引数、`Context`、`TaskiqState`）はすべて taskiq が扱います。依存関係のクラス `Annotated[Auth, TaskiqDepends()]` は、taskiq がそのクラス自身の `__init__` から組み立てます。nuke-di はこの `__init__` を書き換えないので、クライアントを受け取るクラスはそれ自体をクライアントにするか、依存関係の関数を通してクライアントを受け取ります。
-- **起動するクライアント。** `broker.get_all_tasks()` に含まれるすべてのタスク、つまりブローカー自身のタスクと共有タスク（`@shared_task`）のクライアントです。タスクは `setup(broker)` の前に宣言しても後に宣言してもかまいませんが、共有タスクは前に宣言する必要があります。共有タスクは taskiq の共有ブローカーに登録され、`setup()` はそこにはフックしないからです。
+- **クライアントが埋められる場所。** ブローカーのタスクと、それらが使うすべての `TaskiqDepends(...)` 関数の引数です。深さは問わず、ジェネレーターの依存関係も含みます。それ以外の引数（`.kiq()` の引数、`Context`、`TaskiqState`）はすべて taskiq が扱います。依存関係のクラス `Annotated[Auth, TaskiqDepends()]` は、taskiq がそのクラス自身の `__init__` から組み立て、nuke-di はこの `__init__` を書き換えません。そのため `__init__` でクライアントを受け取るクラスは、タスクの登録時に `TypeError: Auth takes clients in __init__ and is a taskiq dependency` で拒否されます。クライアントは `TaskiqDepends()` を付けずに型ヒントで受け取り、クライアントが必要なクラスには依存関係の関数を通して渡してください。
+- **起動するクライアント。** `broker.get_all_tasks()` に含まれるすべてのタスク、つまりブローカー自身のタスクと共有タスク（`@shared_task`）のクライアントです。ブローカーのタスクは `setup(broker)` の前に宣言しても後に宣言してもかまいません。共有タスクは taskiq の共有ブローカーに登録され、`setup()` はそこにはフックしません。`setup()` はその時点の共有タスクを書き換え、残りはワーカーの起動時に書き換えます。`taskiq worker` は起動前にタスクのシグネチャを読むので、そこでは共有タスクを `setup()` より前にインポートします。`InMemoryBroker` は最初の実行時に読むので、そこではどちらの順序でもかまいません。
 - **接続するプロセス。** ブローカーが `WORKER_STARTUP` を発火するプロセスです。つまり `taskiq worker` のプロセスと、自分自身がワーカーである `InMemoryBroker` を起動するすべてのプロセスです。タスクをキックするだけのプロセスは `CLIENT_STARTUP` でブローカーを起動し、クライアントは 1 つも接続しません。そのため、ブローカーを置いた 1 つのモジュールを両方で使えます。ワーカーは taskiq を通して、Web アプリは自分のインテグレーションを通して接続します。
-- **lifespan。** クライアントは、ほかの `WORKER_STARTUP` ハンドラー（`setup()` より前に登録されたものも含む）より先に接続し、`broker.shutdown()` が `WORKER_SHUTDOWN` ハンドラー、ミドルウェア、結果バックエンドを実行し終えた後に切断します。`connect()` が失敗すると `broker.startup()` が失敗し、ワーカーも失敗します。`Shutdown` と `BackgroundTasks` は [FastAPI](fastapi.md) と同じように動作します。
+- **lifespan。** クライアントは、ほかの `WORKER_STARTUP` ハンドラー（`setup()` より前に登録されたものも含む）より先に接続し、`broker.shutdown()` が `WORKER_SHUTDOWN` ハンドラー、ミドルウェア、結果バックエンドを実行し終えた後に切断します。`InMemoryBroker` では、まだ実行中のタスクが終わるのも待ちます。`Shutdown` と `BackgroundTasks` は [FastAPI](fastapi.md) と同じように動作します。`taskiq worker` が `broker.shutdown()` に与える時間は `--shutdown-timeout` 秒（デフォルト 5）で、各 `disconnect()` は `DISCONNECT_TIMEOUT_SECONDS`（デフォルト 10）までかかり得ます。`--shutdown-timeout` は最も長い切断の連鎖より大きくしてください。そうしないと、遅い切断が途中で打ち切られます。
+- **起動の失敗。** `connect()` が失敗すると `broker.startup()` が `RuntimeError` で失敗し、ワーカープロセスは終了します。taskiq のプロセスマネージャーはデフォルトでそれを無限に再起動する（`--max-fails -1`）ため、オーケストレーターはクラッシュに気づかず、落ちている依存先に毎秒アクセスし続けます。ワーカーは `--max-fails 1` で実行してください。そうすると終了コード 255 で終了し、オーケストレーターが自身のバックオフで再起動します。nuke-di の `connect()` はフェイルファストだからです。
 - **インスタンス。** `inject()` と同様に、`Client` はコンテナごとに 1 インスタンス、`NotSingletonClient` はそれを宣言する引数ごとに 1 インスタンスです。タスクごとではありません。
-- **関数は関数のまま。** [FastAPI](fastapi.md) と同じように、taskiq から見たシグネチャは `Annotated[UserService, TaskiqDepends(...)]` になります。`await send_report(1, users)` と書けば、手で渡したクライアントで呼び出せます。
-- **コンテナの接続は一度だけ。** コンテナがすでに接続されているプロセス（たとえば同じ `DI` で動く FastAPI アプリの中）で起動した `InMemoryBroker` は、`RuntimeError: nuke-di clients failed to start: the container is already connected` で失敗します。そのブローカーには専用のコンテナを渡してください：`setup(broker, container=Dependencies())`。FastStream のサブスクライバーと同じく、タスク関数が一度に扱えるブローカーは 1 つです。
+- **関数は関数のまま。** [FastAPI](fastapi.md) と同じように、taskiq から見たシグネチャは `Annotated[UserService, TaskiqDepends(...)]` になります。`await send_report(1, users)` と書けば、手で渡したクライアントで呼び出せます。クライアントを受け取る関数が扱えるのは taskiq か FastAPI のどちらか一方です。すでに FastAPI にバインドされた関数は、タスクが登録される前に `TypeError` で拒否されます。
+- **コンテナの接続は一度だけ。** コンテナがすでに接続されているプロセス（たとえば同じ `DI` で動く FastAPI アプリの中）で起動した `InMemoryBroker` は、`RuntimeError: nuke-di clients failed to start: the container is already connected` で失敗します。そのブローカーには専用のコンテナを渡してください：`setup(broker, container=Dependencies())`。同じ理由で、同じコンテナ上で `nuke_di.fastapi` を設定したアプリに対して `taskiq_fastapi.init(broker, app)` を使うと、ワーカーの起動が失敗します。これは `WORKER_STARTUP` でアプリの lifespan に入るためです。`nuke_di.taskiq` があれば、それがなくてもタスクはクライアントを受け取れます。FastStream のサブスクライバーと同じく、タスク関数が一度に扱えるブローカーは 1 つです。
 
 **テスト。** タスクを `InMemoryBroker` で実行し、override の内側でブローカーを起動します。
 
@@ -181,9 +182,11 @@ class FakeDatabase(Database):
 async def test_send_report(capsys: pytest.CaptureFixture[str]) -> None:
     with DI.override(Database, FakeDatabase()):
         await broker.startup()
-        task = await send_report.kiq(1)
-        await task.wait_result()
-        await broker.shutdown()
+        try:
+            task = await send_report.kiq(1)
+            await task.wait_result()
+        finally:
+            await broker.shutdown()
 
     assert "Hello, alice!" in capsys.readouterr().out
 ```
@@ -191,7 +194,7 @@ async def test_send_report(capsys: pytest.CaptureFixture[str]) -> None:
 ```console
 $ pytest -q tests/test_tasks.py
 .                                                                        [100%]
-1 passed in 0.38s
+1 passed in 0.44s
 ```
 
 ワーカーの起動を経ずに実行されたタスク（一度も起動していない `InMemoryBroker` にキックしたタスクなど）は、結果に ``RuntimeError: UserService is not connected: the clients connect when the worker starts; run tasks with `taskiq worker`, or start an InMemoryBroker with `await broker.startup()` before kicking them`` が入って失敗します。ワーカーの起動後に宣言されたタスクは `RuntimeError: UserService was not started with the worker` で失敗します。

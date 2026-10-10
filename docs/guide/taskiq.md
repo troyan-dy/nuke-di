@@ -163,28 +163,45 @@ The rules:
 - **Where clients are filled.** In the arguments of the broker's tasks and of every `TaskiqDepends(...)`
   function they use, at any depth, generator dependencies included. Every other argument is taskiq's: the
   arguments of `.kiq()`, `Context`, `TaskiqState`. A dependency class, `Annotated[Auth, TaskiqDepends()]`, is
-  built by taskiq from its own `__init__`, which nuke-di does not rewrite: a class that takes clients is a
-  client itself, or takes them through a dependency function.
+  built by taskiq from its own `__init__`, which nuke-di does not rewrite, so one whose `__init__` takes
+  clients is refused when its task is registered: `TypeError: Auth takes clients in __init__ and is a taskiq
+  dependency`. Take a client by its type hint, without `TaskiqDepends()`, and a class that needs clients
+  through a dependency function.
 - **Which clients start.** Those of every task in `broker.get_all_tasks()`: the broker's own and the shared
-  ones (`@shared_task`). Tasks may be declared before or after `setup(broker)`, shared tasks only before it:
-  they are registered on taskiq's shared broker, which `setup()` does not hook.
+  ones (`@shared_task`). Tasks of the broker may be declared before or after `setup(broker)`. A shared task is
+  registered on taskiq's shared broker, which `setup()` does not hook: `setup()` rewrites the shared tasks
+  there are, and the worker's startup the rest. `taskiq worker` reads the signatures of its tasks before it
+  starts, so there a shared task is imported before `setup()`; an `InMemoryBroker` reads one on its first run,
+  so there either order works.
 - **Which process connects.** The one where the broker fires `WORKER_STARTUP`: a `taskiq worker` process, and
   any process that starts an `InMemoryBroker`, which is its own worker. A process that only kicks tasks
   starts the broker with `CLIENT_STARTUP` and connects no client. So one module with the broker serves both:
   the worker connects through taskiq, the web app through its own integration.
 - **Lifespan.** The clients connect before the other `WORKER_STARTUP` handlers, including those registered
   before `setup()`, and disconnect after `broker.shutdown()` has run the `WORKER_SHUTDOWN` handlers, the
-  middlewares and the result backend. A failed `connect()` fails `broker.startup()`, and with it the worker.
-  `Shutdown` and `BackgroundTasks` behave as in [FastAPI](fastapi.md).
+  middlewares and the result backend; on an `InMemoryBroker`, after the tasks still running have finished.
+  `Shutdown` and `BackgroundTasks` behave as in [FastAPI](fastapi.md). `taskiq worker` gives
+  `broker.shutdown()` `--shutdown-timeout` seconds, 5 by default, and each `disconnect()` may take
+  `DISCONNECT_TIMEOUT_SECONDS`, 10 by default: set `--shutdown-timeout` above the longest chain of
+  disconnects, or a slow one is cut off midway.
+- **A failed start.** A failed `connect()` fails `broker.startup()` with a `RuntimeError`, and the worker
+  process dies. taskiq's process manager restarts it for ever by default (`--max-fails -1`), so the
+  orchestrator never sees a crash and the dead dependency is tried again every second. Run the worker with
+  `--max-fails 1`: it then exits with code 255, and the orchestrator restarts it with its own backoff, as
+  `connect()` is fail-fast in nuke-di.
 - **Instances.** As with `inject()`, a `Client` is one instance per container, and a `NotSingletonClient` is
   one instance per argument that declares it, not one per task.
 - **The function stays a function.** Its signature shows `Annotated[UserService, TaskiqDepends(...)]` to
   taskiq, as in [FastAPI](fastapi.md); `await send_report(1, users)` calls it with clients passed by hand.
+  A function that takes clients serves either taskiq or FastAPI: one bound to FastAPI is refused with a
+  `TypeError` before its task is registered.
 - **One container connects once.** An `InMemoryBroker` started in a process whose container is already
   connected, e.g. inside a FastAPI app that runs on the same `DI`, fails with `RuntimeError: nuke-di clients
   failed to start: the container is already connected`. Give that broker a container of its own:
-  `setup(broker, container=Dependencies())`. A task function serves one broker at a time, as a FastStream
-  subscriber does.
+  `setup(broker, container=Dependencies())`. For the same reason a worker fails to start with
+  `taskiq_fastapi.init(broker, app)` for an app set up with `nuke_di.fastapi` on the same container: it enters
+  the app's lifespan on `WORKER_STARTUP`. With `nuke_di.taskiq` the tasks get their clients without it. A task
+  function serves one broker at a time, as a FastStream subscriber does.
 
 **Testing.** Run the tasks on an `InMemoryBroker` and start it inside the override:
 
@@ -205,9 +222,11 @@ class FakeDatabase(Database):
 async def test_send_report(capsys: pytest.CaptureFixture[str]) -> None:
     with DI.override(Database, FakeDatabase()):
         await broker.startup()
-        task = await send_report.kiq(1)
-        await task.wait_result()
-        await broker.shutdown()
+        try:
+            task = await send_report.kiq(1)
+            await task.wait_result()
+        finally:
+            await broker.shutdown()
 
     assert "Hello, alice!" in capsys.readouterr().out
 ```
@@ -215,7 +234,7 @@ async def test_send_report(capsys: pytest.CaptureFixture[str]) -> None:
 ```console
 $ pytest -q tests/test_tasks.py
 .                                                                        [100%]
-1 passed in 0.38s
+1 passed in 0.44s
 ```
 
 A task run without the worker's startup, e.g. kicked on an `InMemoryBroker` that was never started, fails
