@@ -201,6 +201,3 @@ FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 (Tracebacks shortened.) A framework that reports the error of a handler instead of raising it needs a `send()`
 that raises it: an HTTP framework's test client returns a 500, so `send()` checks the status. Litestar puts
 the error into the response only with `debug=True`.
-
-`nuke_di._integration`, the private module this kit lived in before 1.14.0, still imports with a
-`DeprecationWarning` and is removed in 1.15.0.

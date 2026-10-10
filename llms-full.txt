@@ -2491,9 +2491,6 @@ FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 that raises it: an HTTP framework's test client returns a 500, so `send()` checks the status. Litestar puts
 the error into the response only with `debug=True`.
 
-`nuke_di._integration`, the private module this kit lived in before 1.14.0, still imports with a
-`DeprecationWarning` and is removed in 1.15.0.
-
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md -->
 
 # Testing

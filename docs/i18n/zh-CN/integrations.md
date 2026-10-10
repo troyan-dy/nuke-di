@@ -194,6 +194,3 @@ FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 （traceback 已缩短。）如果框架报告处理函数的错误而不是抛出它，就需要一个会抛出该错误的 `send()`：
 HTTP 框架的测试客户端返回 500，因此 `send()` 要检查状态码。Litestar 只有在 `debug=True` 时才会把错误
 放进响应中。
-
-`nuke_di._integration` 是 1.14.0 之前这套工具包所在的私有模块，现在仍可导入，但会发出
-`DeprecationWarning`，并将在 1.15.0 中移除。
