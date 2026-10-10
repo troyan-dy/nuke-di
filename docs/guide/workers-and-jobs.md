@@ -359,6 +359,9 @@ Outside a worker or a job nothing sets it, so a loop that depends on `Shutdown` 
 unchanged inside a web application. A worker that returns or raises on its own ends the
 process too: restarting it is the orchestrator's job.
 
+A server without dependency injection of its own, such as a gRPC server, an aiohttp app or a
+Temporal worker, runs inside a worker the same way: see [Servers inside a worker](servers-in-workers.md).
+
 On Windows only SIGINT (Ctrl+C) is handled; SIGTERM keeps its default behavior.
 
 ## Grace period

@@ -24,7 +24,16 @@ keywords = [
   "cli",
   "fastapi",
   "litestar",
+  "aiogram",
+  "telegram-bot",
   "faststream",
+  "mcp",
+  "fastmcp",
+  "model-context-protocol",
+  "taskiq",
+  "starlette",
+  "quart",
+  "asgi",
   "pytest",
   "microservices",
   "kubernetes",
@@ -57,6 +66,9 @@ Changelog = "https://github.com/troyan-dy/nuke-di/blob/master/CHANGELOG.md"
 nuke_di = "nuke_di.pytest_plugin"
 
 [project.optional-dependencies]
+aiogram = [
+    "aiogram>=3.2",
+]
 fastapi = [
     "fastapi>=0.105",
 ]
@@ -65,6 +77,16 @@ faststream = [
 ]
 litestar = [
     "litestar>=2.15",
+]
+mcp = [
+    "mcp>=2.0",
+]
+fastmcp = [
+    "fastmcp>=4.0",
+]
+taskiq = [
+    "taskiq>=0.11",
+    "taskiq-dependencies>=1.5",
 ]
 
 [dependency-groups]
@@ -76,15 +98,19 @@ compare = [
     "wireup>=2.12.1",
 ]
 dev = [
+  "aiogram>=3.31",
   "fastapi>=0.142.4",
+  "fastmcp>=4.1.0",
   "faststream[nats]>=0.7.7",
   "httpx2>=2.13.1",
   "litestar>=2.24",
+  "mcp>=2.3.0",
   "mypy>=1.13",
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
   "pytest-cov>=6.0",
   "ruff>=0.8",
+  "taskiq>=0.13.0",
 ]
 
 [tool.uv]
@@ -108,6 +134,10 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "N", "B", "A", "UP", "ASYNC", "S", "RUF"]
 ignore = ["S101"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastMCP reads its markers from the defaults of a function's parameters only
+extend-immutable-calls = ["fastmcp.dependencies.Depends"]
 
 [tool.mypy]
 files = ["src", "tests", "scripts", "benchmarks", "examples"]

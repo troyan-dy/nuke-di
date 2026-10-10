@@ -4,7 +4,9 @@
 
 ← [ドキュメント](../README.ja.md#documentation)
 
-フレームワークとのインテグレーションが行うことは 2 つです。フレームワークのハンドラーが、そのフレームワーク自身の依存性注入を通じて型ヒントでクライアントを受け取ること、そしてアプリの起動時にコンテナが接続し、停止時に切断することです。[FastAPI](fastapi.md)、[Litestar](litestar.md)、[FastStream](faststream.md) のインテグレーションは `nuke_di.integration` の上に作られており、ほかのフレームワークとのインテグレーションが nuke-di から必要とするのは、これと公開 API だけです。
+フレームワークとのインテグレーションが行うことは 2 つです。フレームワークのハンドラーが、そのフレームワーク自身の依存性注入を通じて型ヒントでクライアントを受け取ること、そしてアプリの起動時にコンテナが接続し、停止時に切断することです。[FastAPI](fastapi.md)、[Litestar](litestar.md)、[FastStream](faststream.md)、[MCP](mcp.md)、[aiogram](aiogram.md)、[taskiq](taskiq.md) のインテグレーションは `nuke_di.integration` の上に作られており、ほかのフレームワークとのインテグレーションが nuke-di から必要とするのは、これと公開 API だけです。
+Starlette や Quart のように独自の依存性注入を持たないフレームワークには、インテグレーションは不要です。同じキットの上に作られた [`nuke_di.asgi.lifespan()`](asgi.md) がクライアントを接続し、ハンドラーはそこからクライアントを取得します。
+grpc.aio、aiohttp、websockets、APScheduler、Textual、Temporal のワーカーのように独自の依存性注入を持たないサーバーには、インテグレーションはまったく要りません。`@worker` の中で動かせばよく、詳しくは[ワーカーの中で動くサーバー](servers-in-workers.md)を参照してください。
 
 | 名前 | 役割 |
 |---|---|
@@ -88,11 +90,11 @@ def _bindings(app: FastStream, container: Dependencies) -> list[Binding]:
 
 `bind()` は関数をその場で書き換え、バインドしたコンテナを記憶します。`per_container=True`（デフォルト）では、あるコンテナにバインドされた関数が別のコンテナ向けに再び宣言されると、もう一度バインドされるので、各アプリは取得したバインディングを保持し続けます。これが成り立つのは、ハンドラーのシグネチャをハンドラーの宣言時に一度だけ読み、二度と読まないフレームワークだけです。そうでなければ、2 つ目のコンテナ向けに書き換えたシグネチャが、フレームワークが次に読んだときに最初のアプリにまで届いてしまいます。nuke-di に同梱のインテグレーションで、これを使うものはもうありません。FastAPI は 0.136 まで、このようにシグネチャを読んでいました。
 
-`per_container=False`（FastStream、FastAPI）では、関数はコンテナに関係なく一度だけバインドされ、起動するどのアプリも同じ `Binding` を解決します。FastStream は起動のたびにサブスクライバーを作り、テストブローカーの下ではアプリの lifespan が動く前にも作ります。FastAPI 0.137 以降は、インクルードされたルーターのルートをアプリへの最初のリクエストで作ります。どちらの場合も、シグネチャがアプリごとに変わってはいけません。その代償として、ハンドラー関数を共有する 2 つのアプリは 1 つずつ順番に実行することになり、2 つ目は `RuntimeError: ... is filled for another app that is running` を送出します。最初のアプリが起動した後でフレームワークがシグネチャを読み直す可能性があるなら、`False` を選んでください。`nuke_di.fastapi` はこの代償を避けています。FastAPI の依存関係はリクエストを受け取れるので、各アプリはすべての `Binding` について自分用のコピーを自分のコンテナで解決し、リクエストは自分のアプリのコピーを選びます。これで、2 つのコンテナ上の 2 つのアプリが同じ関数を同時に提供できます。
+`per_container=False`（FastStream、taskiq、FastAPI）では、関数はコンテナに関係なく一度だけバインドされ、起動するどのアプリも同じ `Binding` を解決します。FastStream は起動のたびにサブスクライバーを作り、テストブローカーの下ではアプリの lifespan が動く前にも作ります。FastAPI 0.137 以降は、インクルードされたルーターのルートをアプリへの最初のリクエストで作ります。どちらの場合も、シグネチャがアプリごとに変わってはいけません。その代償として、ハンドラー関数を共有する 2 つのアプリは 1 つずつ順番に実行することになり、2 つ目は `RuntimeError: ... is filled for another app that is running` を送出します。最初のアプリが起動した後でフレームワークがシグネチャを読み直す可能性があるなら、`False` を選んでください。`nuke_di.fastapi` はこの代償を避けています。FastAPI の依存関係はリクエストを受け取れるので、各アプリはすべての `Binding` について自分用のコピーを自分のコンテナで解決し、リクエストは自分のアプリのコピーを選びます。これで、2 つのコンテナ上の 2 つのアプリが同じ関数を同時に提供できます。
 
 ## <a id="a-framework-without-depends"></a>`Depends` のないフレームワーク
 
-Litestar は依存関係を名前で提供し、aiogram はミドルウェアから名前で渡します。この場合 `bind()` は使えません。メッセージには `Framework`、ハンドラーのクライアント引数を見つけるには `client_of()`、クライアントごとに 1 つの `Binding`（その `get` はフレームワークが独自の方法で呼び出します）、そしてアプリの lifespan の中で `running()` を使います。実例は `nuke_di.litestar` です。引数の名前で `Provide(binding.get)` を登録しています。
+Litestar は依存関係を名前で提供し、aiogram はミドルウェアから名前で渡します。この場合 `bind()` は使えません。メッセージには `Framework`、ハンドラーのクライアント引数を見つけるには `client_of()`、クライアントごとに 1 つの `Binding`（その `get` はフレームワークが独自の方法で呼び出します）、そしてアプリの lifespan の中で `running()` を使います。実例は `nuke_di.litestar` です。引数の名前で `Provide(binding.get)` を登録しています。`nuke_di.aiogram` も実例の 1 つです。ディスパッチャーの inner ミドルウェアが、アップデートにマッチしたハンドラーのクライアント引数ごとに、その名前で `binding.instance` をアップデートのデータに入れ、`running()` がディスパッチャーの起動と停止を包みます。
 
 ## <a id="checking-an-integration"></a>インテグレーションを検証する
 
@@ -168,5 +170,3 @@ FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 ```
 
 （トレースバックは省略しています。）ハンドラーのエラーを送出せずに報告するフレームワークでは、それを送出する `send()` が必要です。HTTP フレームワークのテストクライアントは 500 を返すので、`send()` がステータスを確認します。Litestar がエラーをレスポンスに含めるのは `debug=True` のときだけです。
-
-1.14.0 より前にこのキットが置かれていたプライベートモジュール `nuke_di._integration` は、`DeprecationWarning` 付きで引き続きインポートできますが、1.15.0 で削除されます。

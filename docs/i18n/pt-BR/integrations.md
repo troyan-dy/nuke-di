@@ -6,9 +6,15 @@
 
 Uma integração com um framework faz duas coisas: os handlers do framework recebem clientes pelo type hint, por meio
 da injeção de dependências do próprio framework, e o container se conecta quando a aplicação inicia e se desconecta
-quando ela para. As integrações de [FastAPI](fastapi.md), [Litestar](litestar.md) e [FastStream](faststream.md) são
-construídas sobre `nuke_di.integration`, e uma integração com outro framework não precisa de nada do nuke-di
-além dele e da API pública.
+quando ela para. As integrações de [FastAPI](fastapi.md), [Litestar](litestar.md), [FastStream](faststream.md),
+[MCP](mcp.md), [aiogram](aiogram.md) e [taskiq](taskiq.md) são construídas sobre `nuke_di.integration`, e uma
+integração com outro framework não precisa de nada do nuke-di além dele e da API pública.
+Um framework sem injeção de dependências própria, como Starlette ou Quart, não precisa de integração:
+[`nuke_di.asgi.lifespan()`](asgi.md), construído sobre o mesmo kit, conecta os clientes, e os handlers
+os pedem a ele.
+Um servidor sem injeção de dependências própria, como grpc.aio, aiohttp, websockets, APScheduler, Textual ou um
+worker do Temporal, não precisa de integração nenhuma: ele roda dentro de um `@worker`, veja
+[Servidores dentro de um worker](servers-in-workers.md).
 
 | Nome | O que faz |
 |---|---|
@@ -107,7 +113,7 @@ quando o handler é declarado, e nunca mais: uma assinatura reescrita para o seg
 aplicação na próxima vez que o framework a lesse. Nenhuma integração distribuída com o nuke-di o usa mais: o
 FastAPI lia as assinaturas assim até a 0.136.
 
-Com `per_container=False` (FastStream, FastAPI), uma função é ligada uma única vez, qualquer que seja o container, e
+Com `per_container=False` (FastStream, taskiq, FastAPI), uma função é ligada uma única vez, qualquer que seja o container, e
 toda aplicação que inicia resolve os mesmos `Binding`s. O FastStream constrói um subscriber a cada início, e, sob um
 broker de teste, até antes de o lifespan da aplicação rodar; o FastAPI 0.137 e posteriores constroem as rotas de um
 router incluído na primeira requisição à aplicação. Em ambos os casos, a assinatura não pode mudar de uma aplicação
@@ -124,7 +130,9 @@ O Litestar fornece dependências pelo nome, e o aiogram as passa pelo nome a par
 não se aplica: use `Framework` para as mensagens, `client_of()` para encontrar os argumentos de cliente de um
 handler, um `Binding` por cliente cujo `get` o framework chama pelos próprios meios, e `running()` dentro do
 lifespan da aplicação. O `nuke_di.litestar` é o exemplo completo: ele registra `Provide(binding.get)` sob o nome
-do argumento.
+do argumento. O `nuke_di.aiogram` é outro: um inner middleware do dispatcher coloca `binding.instance` nos
+dados de um update, sob o nome de cada argumento de cliente do handler que casou com ele, e `running()` envolve a
+inicialização e o desligamento do dispatcher.
 
 ## <a id="checking-an-integration"></a>Verificando uma integração
 
@@ -209,6 +217,3 @@ FAILED tests/test_contract.py::test_contract - ExceptionGroup: the FastStream...
 (Tracebacks encurtados.) Um framework que reporta o erro de um handler em vez de lançá-lo precisa de um `send()`
 que o lance: o test client de um framework HTTP retorna um 500, então o `send()` verifica o status. O Litestar
 coloca o erro na resposta apenas com `debug=True`.
-
-`nuke_di._integration`, o módulo privado em que este kit ficava antes da 1.14.0, ainda pode ser importado, com um
-`DeprecationWarning`, e é removido na 1.15.0.

@@ -359,6 +359,9 @@ Poza workerem i jobem nikt go nie ustawia, więc pętla zależna od `Shutdown` d
 także w aplikacji webowej. Worker, który sam zwróci wynik albo zgłosi wyjątek, również kończy
 proces: ponowne uruchomienie to zadanie orkiestratora.
 
+Serwer bez własnego wstrzykiwania zależności, taki jak serwer gRPC, aplikacja aiohttp czy worker
+Temporal, działa wewnątrz workera tak samo: zobacz [Serwery wewnątrz workera](servers-in-workers.md).
+
 Na Windowsie obsługiwany jest tylko SIGINT (Ctrl+C); SIGTERM zachowuje się domyślnie.
 
 ## <a id="grace-period"></a>Okres karencji
