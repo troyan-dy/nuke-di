@@ -275,7 +275,7 @@ async def test_getter_replaces_what_a_marker_calls() -> None:
         make_depends=ToyDepends,
         not_started=TOY.not_started,
         not_connected=TOY.not_connected,
-        getter=lambda binding: get,
+        _getter=lambda binding: get,
     )
 
     async def handler(greeter: Greeter) -> object:

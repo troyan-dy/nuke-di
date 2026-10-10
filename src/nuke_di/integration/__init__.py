@@ -6,6 +6,8 @@ are built on it, and an integration with another framework needs nothing private
 See docs/guide/integrations.md and docs/adr/0003-fastapi-signature-rewrite.md.
 """
 
+import importlib
+import importlib.util
 import inspect
 import types
 import weakref
@@ -20,6 +22,14 @@ from nuke_di.types import NotSingletonClient
 from nuke_di.utils import sname
 
 __all__ = ("Binding", "DependsFramework", "Framework", "bind", "client_of", "running", "unique", "wrap_lifespan")
+
+# Python 3.14+ evaluates annotations when they are read: this format keeps a name it cannot evaluate as a
+# ForwardRef instead of raising NameError
+_FORWARDREF: dict[str, Any] = (
+    {"annotation_format": importlib.import_module("annotationlib").Format.FORWARDREF}
+    if importlib.util.find_spec("annotationlib")
+    else {}
+)
 
 
 @dataclass(frozen=True, eq=False)
@@ -47,10 +57,10 @@ class DependsFramework(Framework):
     # when the handler is declared, so each app keeps the bindings it captured. Otherwise a function is
     # bound once, and every app that starts resolves the same bindings
     per_container: bool = True
-    # What the marker of a client argument calls, `binding.get` when not given: e.g. a function that takes
-    # the request and finds the client of the app it came to, for a framework that reads signatures lazily
-    # and serves one function from several apps at once
-    getter: Callable[["Binding"], Callable[..., Any]] | None = None
+    # Internal, for nuke_di.fastapi: what the marker of a client argument calls, `binding.get` when not given.
+    # FastAPI's is a function that takes the request and finds the client of the app it came to, since
+    # FastAPI reads signatures lazily and serves one function from several apps at once
+    _getter: Callable[["Binding"], Callable[..., Any]] | None = None
 
 
 class Binding:
@@ -194,15 +204,14 @@ def bind(call: Callable[..., Any] | None, container: Dependencies, framework: De
             f"its signature for one framework, so give each framework its own function"
         )
     if owner is not None and (owner[0]() is container or not framework.per_container):
-        # Bound already, e.g. a route of an included router copied by an older FastAPI. A function bound to
-        # another container is bound again for FastAPI: the routes declared before keep their dependencies
+        # Bound already, e.g. a route of an included router copied by an older FastAPI. With
+        # `per_container=True` a function bound to another container is bound again: the handlers declared
+        # before keep the dependencies they captured
         return cast(list[Binding], marks["__nuke_di_bindings__"])
 
-    try:
-        # The signature as written, not the one a binding to another container replaced it with
-        signature: inspect.Signature = marks.get("__nuke_di_signature__") or inspect.signature(call)
-    except NameError:
-        # Annotations evaluated when read (Python 3.14) name what does not exist: the framework reports it
+    # The signature as written, not the one a binding to another container replaced it with
+    signature = marks.get("__nuke_di_signature__") or _signature(call)
+    if signature is None:
         return []
     hints = _hints(init, signature)
 
@@ -222,7 +231,7 @@ def bind(call: Callable[..., Any] | None, container: Dependencies, framework: De
 
         binding = Binding(client, container, framework)
         own.append(binding)
-        getter = binding.get if framework.getter is None else framework.getter(binding)
+        getter = binding.get if framework._getter is None else framework._getter(binding)
         parameters.append(param.replace(annotation=Annotated[client, framework.make_depends(getter)]))
 
     reachable += own
@@ -242,6 +251,22 @@ def bind(call: Callable[..., Any] | None, container: Dependencies, framework: De
     call.__nuke_di_signature__ = signature  # type: ignore[union-attr]
     call.__nuke_di_bindings__ = reachable  # type: ignore[union-attr]
     return reachable
+
+
+def _signature(call: Callable[..., Any]) -> inspect.Signature | None:
+    """
+    The signature of `call`. One whose annotations name what cannot be evaluated keeps those names as
+    ForwardRefs on Python 3.14, where reading a signature evaluates them; `None` if it cannot be read even so.
+    """
+    try:
+        return inspect.signature(call)
+    except NameError:
+        pass
+    try:
+        return inspect.signature(call, **_FORWARDREF)
+    except NameError:
+        # Before Python 3.14, or not even as ForwardRefs: the framework reports it
+        return None
 
 
 def _hints(init: Callable[..., Any], signature: inspect.Signature) -> dict[str, Any]:
@@ -271,7 +296,10 @@ def _hints(init: Callable[..., Any], signature: inspect.Signature) -> dict[str, 
     return hints
 
 
-def _probe() -> None: ...  # pragma: no cover
+def _probe() -> None:  # pragma: no cover
+    """
+    The code of the function `_hints()` evaluates each type hint on: it is never called.
+    """
 
 
 def _hint_class(hint: Any) -> Any:

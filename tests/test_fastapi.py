@@ -5,6 +5,7 @@ import asyncio
 import copy
 import gc
 import inspect
+import sys
 import weakref
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
@@ -28,6 +29,8 @@ events: list[str] = []
 
 # FastAPI 0.14x applies included routers lazily instead of copying their routes
 LAZY_INCLUDES = hasattr(fastapi.routing, "_IncludedRouter")
+# FastAPI 0.11x and later run the lifespan of a router included into another app
+MERGES_LIFESPANS = hasattr(fastapi.routing, "_merge_lifespan_context")
 
 
 @pytest.fixture(autouse=True)
@@ -670,6 +673,99 @@ def test_included_routes_on_two_containers_at_once() -> None:
     assert audits == ["audit: Database"] * 4 + ["audit: FakeDatabase"] * 4 + ["audit: Database"] * 4
 
 
+def make_api(deps: Dependencies) -> FastAPI:
+    api = make_app(deps)
+    api.get("/users/{user_id}")(greet)
+    router = ClientRouter(container=deps)
+    router.get("/me")(by_header)
+    api.include_router(router)
+    return api
+
+
+def served_by_api(client: TestClient) -> list[str]:
+    return [client.get("/users/1").json(), client.get("/me", headers={"X-User-Id": "2"}).json()]
+
+
+@pytest.mark.skipif(not MERGES_LIFESPANS, reason="FastAPI runs the lifespan of an included router")
+def test_router_of_an_app_included_into_another_app() -> None:
+    # Served by `root`, started by the lifespan of `api` that FastAPI merges into it
+    root = FastAPI()
+    root.include_router(make_api(Dependencies()).router)
+
+    with TestClient(root) as client:
+        assert served_by_api(client) == ["Hello, user-1!", "user-2"]
+
+
+def test_routes_of_an_app_served_by_another_app() -> None:
+    api = make_api(Dependencies())
+    root = FastAPI(lifespan=api.router.lifespan_context)
+    root.router.routes.extend(api.routes)
+
+    with TestClient(root) as client:
+        assert served_by_api(client) == ["Hello, user-1!", "user-2"]
+
+
+@pytest.mark.parametrize("set_up", [True, False], ids=["set up", "plain"])
+def test_mounted_app_sharing_functions_with_its_parent(set_up: bool) -> None:
+    # Starlette runs the lifespan of the parent only: the mounted app gets the clients the parent started
+    deps = Dependencies()
+    parent = make_api(deps)
+    child = make_app(deps) if set_up else FastAPI()
+    child.get("/users/{user_id}")(greet)
+    child.get("/me")(by_header)
+    parent.mount("/child", child)
+
+    with TestClient(parent) as client:
+        assert client.get("/child/users/1").json() == "Hello, user-1!"
+        assert client.get("/child/me", headers={"X-User-Id": "2"}).json() == "user-2"
+
+
+def test_app_without_setup_on_a_running_container() -> None:
+    deps = Dependencies()
+    router = ClientRouter(container=deps)
+    router.get("/users/{user_id}")(greet)
+    api = make_app(deps)
+    api.include_router(router)
+    plain = FastAPI()
+    plain.include_router(router)
+
+    with TestClient(api), TestClient(plain) as client:
+        assert client.get("/users/1").json() == "Hello, user-1!"
+
+
+def test_app_without_setup_while_two_containers_run_explains() -> None:
+    # Two apps fill the function, each from its container: an app without setup() cannot tell which is its own
+    first, second = Dependencies(), Dependencies()
+    plain = FastAPI()
+    plain.get("/users/{user_id}")(greet)
+
+    with TestClient(make_api(first)), TestClient(make_api(second)), TestClient(plain) as client:
+        with pytest.raises(RuntimeError, match=r"UserService is not connected: start the app with its lifespan"):
+            client.get("/users/1")
+
+
+async def overriding_user(db: Database) -> str:
+    return type(db).__name__
+
+
+async def own_user(user: Annotated[str, Depends(overriding_user)]) -> str:
+    return user
+
+
+def test_dependency_overrides_on_two_containers_at_once() -> None:
+    # FastAPI reads the signature of an override on every request, after the second container bound it too
+    first, second = Dependencies(), Dependencies()
+    first_app, second_app = make_api(first), make_api(second)
+    for app in (first_app, second_app):
+        app.get("/own")(own_user)
+    first_app.dependency_overrides[header_user] = overriding_user
+
+    with second.override(Database, FakeDatabase()), TestClient(first_app) as a, TestClient(second_app) as b:
+        assert a.get("/me").json() == "Database"
+        assert b.get("/own").json() == "FakeDatabase"
+        assert b.get("/me", headers={"X-User-Id": "2"}).json() == "alice"
+
+
 def test_setup_refuses_foreign_route_class() -> None:
     app = FastAPI()
     app.router.route_class = CustomRoute
@@ -741,6 +837,36 @@ def test_dependency_with_an_unevaluable_hint_still_reaches_its_dependencies() ->
 
     with TestClient(app) as client:
         assert client.get("/context").json() == "/context: Hello, user-5!"
+
+
+# Without `from __future__ import annotations`, which this module has: Python 3.14 evaluates the annotations
+# when they are read, and `Decimal` exists only for type checkers
+DEFERRED = """
+from typing import TYPE_CHECKING, Annotated
+
+if TYPE_CHECKING:
+    from decimal import Decimal
+
+
+async def deferred_context(request: Request, greeting: str = Depends(greeting_of)) -> Decimal:
+    return f"{request.url.path}: {greeting}"
+
+
+async def with_deferred(context: Annotated[str, Depends(deferred_context)]) -> str:
+    return context
+"""
+
+
+@pytest.mark.skipif(sys.version_info < (3, 14), reason="annotations evaluated when read, Python 3.14")
+def test_dependency_with_a_deferred_unevaluable_hint_still_reaches_its_dependencies() -> None:
+    namespace: dict[str, Any] = {"Request": fastapi.Request, "Depends": Depends, "greeting_of": greeting_of}
+    exec(compile(DEFERRED, "<deferred>", "exec", dont_inherit=True), namespace)  # noqa: S102
+
+    app = make_app(Dependencies())
+    app.get("/deferred")(namespace["with_deferred"])
+
+    with TestClient(app) as client:
+        assert client.get("/deferred").json() == "/deferred: Hello, user-5!"
 
 
 # --- pydantic --------------------------------------------------------------------------------------------
