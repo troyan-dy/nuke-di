@@ -119,6 +119,35 @@ dependencies.
 
 ## Performance
 
+With real connections the cost of a startup is the waiting, and the structure of the tree decides it. The
+backend of a product page: an API, four features, and every feature four connections of 100–300 ms, 21 clients:
+
+![A product page of 21 clients: connections, features and the API. nuke-di and dependency-injector start them in 0.34 s, dishka and wireup in 3.41 s](https://raw.githubusercontent.com/troyan-dy/nuke-di/3efd8360d874302ef376637456e3108de544377c/docs/product-page.svg)
+
+`nuke-di` connects every client as soon as its own dependencies have, so the startup takes the longest chain,
+0.34 s. dishka and wireup connect one client after another within a `get()`: 3.41 s, ten times as long, and the
+wider the tree, the larger the gap. wireup comes down to 0.95 s when the application gathers the four features
+by hand; dishka does not. dependency-injector starts as fast once every client is a `Resource` written by hand,
+and stops layer by layer, every layer waiting for its slowest client: 0.66 s against 0.37 s, since `Checkout`
+and `EventsProducer`, which take 300 ms each to stop, are in different layers. injector has no async lifecycle.
+
+```console
+$ uv run python benchmarks/compare.py --only connect --summary
+nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit ea5b28c · N = 10, 100, 1000 · 20 repeats
+nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+| Lower is better                          | nuke-di       | dishka         | wireup         | dependency-injector | injector |
+|------------------------------------------|--------------:|---------------:|---------------:|--------------------:|---------:|
+| Startup: 8 clients, connect() of 1–60 ms | **70.9 ms**   | 156 ms (2.2×)  | 157 ms (2.2×)  | 71.4 ms (1.0×)      | —        |
+| Shutdown: the same 8 clients             | **18.7 ms**   | 29.8 ms (1.6×) | 30.5 ms (1.6×) | 26.1 ms (1.4×)      | —        |
+| Startup: the product page, 21 clients    | 336 ms (1.0×) | 3.41 s (10.2×) | 3.41 s (10.2×) | **336 ms**          | —        |
+| Shutdown: the product page               | **366 ms**    | 849 ms (2.3×)  | 849 ms (2.3×)  | 657 ms (1.8×)       | —        |
+```
+
+None of the three connects anything when its container is created: unless the application gets the root
+at startup, its first request waits for the connections and fails with them. `nuke-di` connects every client
+in `async with DI`, and a client that cannot connect stops the startup.
+
 `benchmarks/compare.py` runs the same trees of clients through dishka, wireup, dependency-injector and
 injector, each registering the same classes its own way: a cold container with the root resolved, on
 classes new to the process, the root again, and one FastAPI request through each library's integration:
@@ -148,28 +177,6 @@ On a cached root `nuke-di` is level with wireup, and the Cython `get()` of depen
 On its own, `resolve()` costs 3.5–6.3 µs per client, so a tree of 1000 clients is built in under 5.5 ms,
 and `connect()` adds 13–18 µs per client. [docs/benchmarks.md](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md) explains every
 scenario, records the baseline on Python 3.11–3.14 and has the whole comparison with its method.
-
-With real connections the waiting is the cost, and what decides a startup is when each `connect()` begins.
-dishka and wireup connect one client after another within a `get()`, so their startup is the sum of every
-`connect()` unless the application gathers its branches by hand;
-dependency-injector starts as concurrently as `nuke-di` once every client is a `Resource` written by hand, and
-stops in layers; injector has no async lifecycle:
-
-```console
-$ uv run python benchmarks/compare.py --only connect --summary
-nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 8d0700b · N = 10, 100, 1000 · 20 repeats
-nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
-
-| Lower is better                                     | nuke-di     | dishka         | wireup         | dependency-injector | injector |
-|-----------------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
-| Startup: 8 clients, connect() of 1–60 ms            | **70.8 ms** | 156 ms (2.2×)  | 156 ms (2.2×)  | 71.1 ms (1.0×)      | —        |
-| Shutdown: the same 8 clients                        | **18.7 ms** | 30.1 ms (1.6×) | 29.8 ms (1.6×) | 26.0 ms (1.4×)      | —        |
-| Startup: 10 independent clients, connect() of 50 ms | **52.3 ms** | 520 ms (10.0×) | 522 ms (10.0×) | 52.5 ms (1.0×)      | —        |
-```
-
-None of the three connects anything when its container is created: unless the application gets the root
-at startup, its first request waits for the connections and fails with them. `nuke-di` connects every client
-in `async with DI`, and a client that cannot connect stops the startup.
 
 ## A job with command-line arguments
 

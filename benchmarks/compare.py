@@ -616,9 +616,14 @@ def summary_figures(
     return figures
 
 
+# Figures this close to the best are as good as the best
+TIE = 1.01
+
+
 def pivot(results: list[Result], sizes: list[int]) -> str:
     """
-    One row per figure, one column per library: the best in bold, the others with their ratio to it.
+    One row per figure, one column per library: the best in bold, and every figure within 1% of it, a difference
+    inside the noise of a run; the others with their ratio to the best.
     """
     libraries = [library.name for library in LIBRARIES]
     rows = [["Lower is better", *libraries]]
@@ -630,7 +635,7 @@ def pivot(results: list[Result], sizes: list[int]) -> str:
             median = medians.get(library)
             if median is None:
                 cells.append("—")
-            elif median == best:
+            elif best is not None and median <= best * TIE:
                 cells.append(f"**{fmt(median, unit)}**")
             else:
                 assert best is not None
