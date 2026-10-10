@@ -118,8 +118,8 @@ per handler.
 - FastStream: `from nuke_di.faststream import setup`; `setup(app)` after `app = FastStream(broker)`.
 - A server with no DI of its own (grpc.aio, aiohttp, websockets, APScheduler, Textual, a Temporal worker): no
   integration. A `@worker` builds and starts it, `await shutdown.wait()`, stops it within its own timeout
-  below `SHUTDOWN_GRACE_SECONDS`; the class whose methods are the handlers (servicer, views, jobs,
-  activities) is a `Client`. Workflows never take clients. See
+  below `SHUTDOWN_GRACE_SECONDS`; the class whose methods are the handlers (servicer, views, APScheduler
+  jobs, activities) is a `Client`. Workflows never take clients. See
   [Servers inside a worker](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/servers-in-workers.md).
 
 **Per-request state** (a transaction, a unit of work, a request id) is not a client: open it in
