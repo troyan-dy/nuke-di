@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "1.14.3"
+version = "1.18.0"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
@@ -25,6 +25,9 @@ keywords = [
   "fastapi",
   "litestar",
   "faststream",
+  "starlette",
+  "quart",
+  "asgi",
   "pytest",
   "microservices",
   "kubernetes",
