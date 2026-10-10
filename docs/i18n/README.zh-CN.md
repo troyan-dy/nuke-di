@@ -372,7 +372,8 @@ $ pytest -q tests/test_api.py
 - [worker 与 job](zh-CN/workers-and-jobs.md)：`@job` 与 `@worker`、命令行参数、
   `Shutdown`、宽限期、后台任务、退出码、钩子、Kubernetes
 - 框架：[FastAPI](zh-CN/fastapi.md)、[Litestar](zh-CN/litestar.md)、
-  [FastStream](zh-CN/faststream.md)，以及用 `nuke_di.integration`
+  [FastStream](zh-CN/faststream.md)，用于 grpc.aio、aiohttp、websockets、APScheduler、
+  Textual 和 Temporal 的 [worker 中的服务器](zh-CN/servers-in-workers.md)，以及用 `nuke_di.integration`
   为其他框架[编写集成](zh-CN/integrations.md)
 - [测试](zh-CN/testing.md)：`mock()`、`override()`、pytest fixture、检查装配
 - [配置](zh-CN/configuration.md)：超时、并发和宽限期

@@ -9,6 +9,9 @@ da injeção de dependências do próprio framework, e o container se conecta qu
 quando ela para. As integrações de [FastAPI](fastapi.md), [Litestar](litestar.md) e [FastStream](faststream.md) são
 construídas sobre `nuke_di.integration`, e uma integração com outro framework não precisa de nada do nuke-di
 além dele e da API pública.
+Um servidor sem injeção de dependências própria, como grpc.aio, aiohttp, websockets, APScheduler, Textual ou um
+worker do Temporal, não precisa de integração nenhuma: ele roda dentro de um `@worker`, veja
+[Servidores dentro de um worker](servers-in-workers.md).
 
 | Nome | O que faz |
 |---|---|

@@ -7,6 +7,8 @@
 与框架的集成要做两件事：框架的处理函数通过框架自身的依赖注入，按类型提示接收客户端；容器在应用启动时连接，
 在应用停止时断开。[FastAPI](fastapi.md)、[Litestar](litestar.md) 和 [FastStream](faststream.md) 的集成
 都基于 `nuke_di.integration` 构建；与其他框架的集成，除了它和公开 API 之外，不需要 nuke-di 的任何其他东西。
+没有自己的依赖注入的服务器，例如 grpc.aio、aiohttp、websockets、APScheduler、Textual 或 Temporal worker，
+根本不需要集成：它在 `@worker` 中运行，参见 [worker 中的服务器](servers-in-workers.md)。
 
 | 名称 | 作用 |
 |---|---|

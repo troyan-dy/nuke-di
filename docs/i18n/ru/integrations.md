@@ -9,6 +9,9 @@
 при его остановке. Интеграции с [FastAPI](fastapi.md), [Litestar](litestar.md) и [FastStream](faststream.md)
 построены на `nuke_di.integration`, и интеграции с другим фреймворком не нужно от nuke-di ничего, кроме него
 и публичного API.
+Серверу без собственного внедрения зависимостей, например grpc.aio, aiohttp, websockets, APScheduler, Textual или
+воркеру Temporal, интеграция вообще не нужна: он работает внутри `@worker`, см.
+[Серверы внутри воркера](servers-in-workers.md).
 
 | Имя | Что делает |
 |---|---|

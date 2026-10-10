@@ -395,8 +395,9 @@ Los routers, los websockets y el lifespan propio de la app se describen en [Fast
 - [Workers y jobs](es/workers-and-jobs.md): `@job` y `@worker`, parámetros de línea de comandos,
   `Shutdown`, el periodo de gracia, tareas en segundo plano, códigos de salida, hooks, Kubernetes
 - Frameworks: [FastAPI](es/fastapi.md), [Litestar](es/litestar.md),
-  [FastStream](es/faststream.md), y
-  [escribir una integración](es/integrations.md) para otro framework con `nuke_di.integration`
+  [FastStream](es/faststream.md),
+  [servidores dentro de un worker](es/servers-in-workers.md) para grpc.aio, aiohttp, websockets, APScheduler,
+  Textual y Temporal, y [escribir una integración](es/integrations.md) para otro framework con `nuke_di.integration`
 - [Pruebas](es/testing.md): `mock()`, `override()`, los fixtures de pytest, la comprobación del cableado
 - [Configuración](es/configuration.md): timeouts, concurrencia y el periodo de gracia
 - [Errores](es/errors.md): cada excepción y cuándo se lanza

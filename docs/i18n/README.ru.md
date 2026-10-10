@@ -397,8 +397,9 @@ $ pytest -q tests/test_api.py
 - [Воркеры и джобы](ru/workers-and-jobs.md): `@job` и `@worker`, параметры командной строки,
   `Shutdown`, grace period, фоновые задачи, коды завершения, хуки, Kubernetes
 - Фреймворки: [FastAPI](ru/fastapi.md), [Litestar](ru/litestar.md),
-  [FastStream](ru/faststream.md), а также
-  [своя интеграция](ru/integrations.md) для другого фреймворка на `nuke_di.integration`
+  [FastStream](ru/faststream.md),
+  [серверы внутри воркера](ru/servers-in-workers.md) для grpc.aio, aiohttp, websockets, APScheduler,
+  Textual и Temporal, а также [своя интеграция](ru/integrations.md) для другого фреймворка на `nuke_di.integration`
 - [Тестирование](ru/testing.md): `mock()`, `override()`, фикстуры pytest, проверка связывания
 - [Настройка](ru/configuration.md): таймауты, конкурентность и grace period
 - [Ошибки](ru/errors.md): все исключения и когда они выбрасываются

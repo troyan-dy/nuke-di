@@ -359,6 +359,9 @@ Fuera de un worker o de un job nadie lo activa, así que un bucle que depende de
 funciona sin cambios dentro de una aplicación web. Un worker que retorna o lanza una excepción por sí
 solo también termina el proceso: reiniciarlo es tarea del orquestador.
 
+Un servidor sin inyección de dependencias propia, como un servidor gRPC, una app de aiohttp o un worker de
+Temporal, se ejecuta dentro de un worker de la misma manera: consulta [Servidores dentro de un worker](servers-in-workers.md).
+
 En Windows solo se maneja SIGINT (Ctrl+C); SIGTERM conserva su comportamiento por defecto.
 
 ## <a id="grace-period"></a>Periodo de gracia
