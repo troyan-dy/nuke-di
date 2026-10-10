@@ -24,9 +24,10 @@ a klasa, której metody są jego handlerami, jest `Client`.
   zadaniach serwera, więc anulowanie workera ich nie zatrzymuje: pracują dalej z klientami, którzy się
   rozłączają. Przepisy gRPC i APScheduler przerywają je w `finally`; dla aiohttp, websockets i Temporal jedyną
   ochroną jest limit.
-- **Całe zatrzymanie ma budżet.** Proces zatrzymuje się w czasie do `SHUTDOWN_GRACE_SECONDS +
-  DISCONNECT_TIMEOUT_SECONDS × najdłuższy łańcuch zależności` ([okres karencji](workers-and-jobs.md#grace-period));
-  daj podowi `terminationGracePeriodSeconds` większe od tej wartości ([Kubernetes](workers-and-jobs.md#running-in-kubernetes)).
+- **Całe zatrzymanie ma budżet.** Proces zatrzymuje się w czasie do
+  `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × najdłuższy łańcuch zależności`
+  ([okres karencji](workers-and-jobs.md#grace-period)); daj podowi `terminationGracePeriodSeconds` większe od tej
+  wartości ([Kubernetes](workers-and-jobs.md#running-in-kubernetes)).
 
 | Serwer | Klient | Zatrzymuje go | Jak długo czeka, domyślnie |
 |---|---|---|---|

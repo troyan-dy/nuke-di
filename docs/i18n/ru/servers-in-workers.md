@@ -11,24 +11,31 @@
 ## <a id="the-pattern"></a>Схема
 
 - **Обработчики — методы клиента.** Сервисер gRPC, класс представлений aiohttp, обработчик WebSocket, класс
-  заданий по расписанию, активности Temporal: каждый принимает свои клиенты в `__init__`, а воркер получает его
+  заданий APScheduler, активности Temporal: каждый принимает свои клиенты в `__init__`, а воркер получает его
   по аннотации типа. Он разрешается, и его клиенты подключаются до старта сервера; обработчик обращается к ним
   через `self`.
 - **Сервером владеет воркер.** Он создаёт и запускает сервер, ждёт
   [`Shutdown`](workers-and-jobs.md#your-first-worker), останавливает сервер и возвращает управление; после этого
   клиенты отключаются. Код завершения, логи и хуки — те же, что у [любого воркера](workers-and-jobs.md#exit-codes).
-- **Сервер останавливается в пределах grace period.** При остановке незавершённым вызовам дают доработать, и у
-  каждого сервера для этого свой таймаут. Держите его меньше `SHUTDOWN_GRACE_SECONDS`: воркер, который всё ещё
-  останавливается по истечении [grace period](workers-and-jobs.md#grace-period), отменяется, а вместе с ним и
-  незавершённые вызовы.
+- **Сервер останавливается с запасом в пределах grace period.** При остановке незавершённым вызовам дают
+  доработать, и у каждого сервера для этого своя граница. Держите её меньше `SHUTDOWN_GRACE_SECONDS`, с которым
+  работает процесс: он берётся из окружения, а рецепты прописывают свои границы в коде. Воркер, который всё ещё
+  останавливается по истечении [grace period](workers-and-jobs.md#grace-period), отменяется, но обработчики
+  работают в собственных задачах сервера, поэтому отмена воркера их не останавливает: они продолжают работать с
+  клиентами, которые уже отключаются. Рецепты для gRPC и APScheduler обрывают их в `finally`; для aiohttp,
+  websockets и Temporal граница — единственная защита.
+- **У всей остановки есть бюджет.** Процесс останавливается не дольше чем за
+  `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × самая длинная цепочка зависимостей`
+  ([grace period](workers-and-jobs.md#grace-period)); дайте поду `terminationGracePeriodSeconds` больше этого
+  значения ([Kubernetes](workers-and-jobs.md#running-in-kubernetes)).
 
-| Сервер | Клиент | Чем останавливается | Его таймаут по умолчанию |
+| Сервер | Клиент | Чем останавливается | Сколько ждёт по умолчанию |
 |---|---|---|---|
 | [grpc.aio](#grpcaio) | Сервисер | `await server.stop(grace)` | `grace`, обязателен; `None` обрывает незавершённые вызовы |
-| [aiohttp](#aiohttp) | Класс представлений | `await runner.cleanup()` | `shutdown_timeout`, 60 с |
-| [websockets](#websockets) | Класс с обработчиком соединения | Выход из `async with serve(...)` | `close_timeout`, 10 с |
-| [APScheduler](#apscheduler) | Класс заданий | `scheduler.shutdown()` | Таймаута нет: выполняющееся задание отменяется |
-| [Textual](#textual) | Нет: `App` получает клиенты от воркера | `app.exit()` | Таймаута нет |
+| [aiohttp](#aiohttp) | Класс представлений | `await runner.cleanup()` | До 2 × `shutdown_timeout`, по 60 с |
+| [websockets](#websockets) | Класс с обработчиком соединения | Выход из `async with serve(...)` | `close_timeout`, 10 с, только на закрывающее рукопожатие; у обработчиков границы нет |
+| [APScheduler](#apscheduler) | Класс заданий APScheduler | `scheduler.shutdown()` | Не ждёт: выполняющееся задание APScheduler отменяется |
+| [Textual](#textual) | Нет: `App` получает клиенты от воркера | `app.exit()` | Не ждёт |
 | [Temporal](#temporal) | Класс активностей | Выход из `async with Worker(...)` | `graceful_shutdown_timeout`, 0 |
 
 Все рецепты используют общий модуль клиентов: базу данных, запрос к которой длится секунду, чтобы в момент
@@ -56,7 +63,10 @@ class Database(Client):
         return sum(1 for book_genre in self.genres.values() if book_genre == genre)
 ```
 
-Каждый рецепт посылает SIGTERM посреди вызова — так Kubernetes останавливает под.
+Каждый рецепт посылает SIGTERM посреди вызова — так Kubernetes останавливает под. Программы, которые вызывают
+серверы, например `app/grpc_ask.py`, открывают соединение прямо в коде: это одноразовые вызывающие стороны для
+демонстрации, а не часть приложения. Соединение, которое держит само приложение, — это клиент, как у Temporal
+[ниже](#temporal).
 
 ## <a id="grpcaio"></a>grpc.aio
 
@@ -101,7 +111,9 @@ class BooksService(books_pb2_grpc.BooksServicer, Client):
         self.db = db
 
     async def CountBooks(
-        self, request: books_pb2.CountRequest, context: grpc.aio.ServicerContext
+        self,
+        request: books_pb2.CountRequest,
+        context: grpc.aio.ServicerContext[books_pb2.CountRequest, books_pb2.CountReply],
     ) -> books_pb2.CountReply:
         print(f"grpc: CountBooks({request.genre!r})")
         count = await self.db.count_books(request.genre)
@@ -116,10 +128,14 @@ async def serve(books: BooksService, shutdown: Shutdown) -> None:
     server.add_insecure_port("localhost:50051")
     await server.start()
     print("grpc: serving on localhost:50051")
-    await shutdown.wait()
-    print("grpc: stopping")
-    # New calls are refused at once, the calls in flight get 5 seconds: less than SHUTDOWN_GRACE_SECONDS
-    await server.stop(grace=5)
+    try:
+        await shutdown.wait()
+        print("grpc: stopping")
+        # New calls are refused at once, the calls in flight get 5 seconds: less than SHUTDOWN_GRACE_SECONDS
+        await server.stop(grace=5)
+    finally:
+        # Cancelled past the grace period: abort the calls in flight before the clients disconnect
+        await server.stop(None)
     print("grpc: stopped")
 ```
 
@@ -164,9 +180,38 @@ SIGTERM пришёл посреди второго вызова: вызов за
 отключилась база данных.
 
 - `server.stop(grace)` сразу отклоняет новые вызовы, даёт незавершённым `grace` секунд, а затем обрывает их.
-  Держите `grace` меньше `SHUTDOWN_GRACE_SECONDS`, иначе nuke-di отменит воркер раньше.
+  Держите `grace` меньше `SHUTDOWN_GRACE_SECONDS`.
 - Запускайте `protoc` из корня проекта с `-I.`: тогда сгенерированный `books_pb2_grpc.py` импортирует
-  `from app import books_pb2`, а `--pyi_out` даёт тайпчекеру классы сообщений.
+  `from app import books_pb2`. `--pyi_out` типизирует сообщения; mypy нужен ещё `pip install types-grpcio`, а
+  под `--strict` — стабы для `books_pb2_grpc.py` из mypy-protobuf: `--mypy_grpc_out=.`.
+
+`finally` нужен для воркера, который всё ещё останавливается, когда истекает grace period: nuke-di отменяет его,
+и `server.stop(None)` обрывает незавершённые вызовы до того, как клиенты отключатся. С grace period короче
+вызова:
+
+```console
+$ SHUTDOWN_GRACE_SECONDS=0.2 python -m app.grpc_server &
+database: connected
+grpc: serving on localhost:50051
+$ python -m app.grpc_ask --genre classic & sleep 0.6; kill -TERM %1
+grpc: CountBooks('classic')
+grpc: stopping
+Run app.grpc_server.serve did not stop within 0.2s after Shutdown, cancelling it
+database: disconnected
+Run app.grpc_ask.ask failed
+Traceback (most recent call last):
+  ...
+grpc.aio._call.AioRpcError: <AioRpcError of RPC that terminated with:
+	status = StatusCode.UNAVAILABLE
+	details = "Cancelling all calls"
+	debug_error_string = "UNAVAILABLE:Cancelling all calls"
+>
+$ wait %1; echo $?
+143
+```
+
+Вызов был оборван, и вызывающая сторона получила `UNAVAILABLE`, вместо того чтобы вызов продолжал работать с
+отключённой базой данных.
 
 ## <a id="aiohttp"></a>aiohttp
 
@@ -196,8 +241,8 @@ class BookViews(Client):
 async def serve(views: BookViews, shutdown: Shutdown) -> None:
     app = web.Application()
     app.router.add_get("/books/{genre}/count", views.count)
-    # The requests in flight get 5 seconds: aiohttp's default of 60 is longer than SHUTDOWN_GRACE_SECONDS
-    runner = web.AppRunner(app, shutdown_timeout=5)
+    # cleanup() waits up to 2 × shutdown_timeout for the requests in flight: keep it below SHUTDOWN_GRACE_SECONDS
+    runner = web.AppRunner(app, shutdown_timeout=4)
     await runner.setup()
     await web.TCPSite(runner, "localhost", 8080).start()
     print("aiohttp: serving on http://localhost:8080")
@@ -234,10 +279,14 @@ $ curl -s -w '\n' localhost:8080/books/classic/count & sleep 0.5; pkill -TERM -f
 - `web.run_app()` нельзя запустить внутри воркера: он запускает собственный цикл событий и сам обрабатывает
   SIGINT и SIGTERM. `AppRunner` и `TCPSite` запускают то же приложение в цикле событий воркера и оставляют
   сигналы nuke-di.
-- `shutdown_timeout` — сколько `cleanup()` ждёт незавершённые запросы — по умолчанию равен 60 секундам: задайте
-  его меньше `SHUTDOWN_GRACE_SECONDS`.
-- Собственные `on_startup`, `on_cleanup` и `cleanup_ctx` приложения по-прежнему выполняются — в `setup()` и
-  `cleanup()`, — пока клиенты подключены.
+- `cleanup()` ждёт незавершённый запрос до `shutdown_timeout`, затем отменяет его и снова ждёт до
+  `shutdown_timeout`: всего до двух таймаутов, а таймаут по умолчанию равен 60 секундам. Держите удвоенный
+  таймаут меньше `SHUTDOWN_GRACE_SECONDS`, как 4 секунды здесь при 10 по умолчанию. `finally` тут не поможет:
+  отмена от nuke-di приходится на середину `cleanup()`, и незавершённые обработчики продолжают работать с
+  отключающимися клиентами.
+- Колбэки `on_shutdown` выполняются в начале `cleanup()`, до того как он начнёт ждать незавершённые запросы:
+  именно там закрываются долгоживущие соединения WebSocket и server-sent events. `on_startup`, `on_cleanup` и
+  `cleanup_ctx` выполняются в `setup()` и `cleanup()`, пока клиенты подключены.
 
 ## <a id="websockets"></a>websockets
 
@@ -292,9 +341,9 @@ from nuke_di import job
 @job
 async def ask(genre: list[str]) -> None:
     async with connect("ws://localhost:8765") as websocket:
-        for one in genre:
-            await websocket.send(one)
-            print(f"ask: {await websocket.recv(decode=True)} {one} books")
+        for name in genre:
+            await websocket.send(name)
+            print(f"ask: {await websocket.recv(decode=True)} {name} books")
 ```
 
 В одном терминале:
@@ -332,18 +381,23 @@ websockets.exceptions.ConnectionClosedOK: received 1001 (going away); then sent 
 
 - Выход из `serve()` сразу закрывает все открытые соединения с кодом 1001 (going away). В отличие от gRPC и
   aiohttp, сообщение, которое ещё обрабатывалось, остаётся без ответа: `classic -> 1` было посчитано, но так и
-  не отправлено. Клиент WebSocket при 1001 всё равно переподключается, поэтому сделайте повторную отправку
-  сообщения безопасной.
-- `close_timeout` — сколько клиент может отвечать на закрывающее рукопожатие — по умолчанию равен 10 секундам,
-  то есть всему grace period по умолчанию: уменьшите его.
+  не отправлено. Вызывающая программа выше падает на 1001; настоящий клиент должен переподключаться при нём,
+  например через `async for websocket in connect(...)`, и отправлять сообщения, которые безопасно отправить
+  повторно.
+- `close_timeout`, по умолчанию 10 секунд, ограничивает только закрывающее рукопожатие с каждым клиентом, и всё
+  равно уменьшите его: значение по умолчанию равно всему grace period по умолчанию. Обработчики ничем не
+  ограничены: выход из `serve()` ждёт, пока вернётся каждый из них, поэтому зависший обработчик держит воркер дольше
+  grace period, а после отмены воркера продолжает работать с отключающимися клиентами.
 
 ## <a id="apscheduler"></a>APScheduler
 
-Проверено на APScheduler 3.11.3, текущем релизе. Задания — методы клиента:
+Проверено на APScheduler 3.11.3, текущем релизе. Задания APScheduler — методы клиента:
 
 ```python
 # app/scheduler.py
 import asyncio
+import contextlib
+from collections.abc import AsyncIterator
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -355,12 +409,18 @@ from app.clients import Database
 class Reports(Client):
     def __init__(self, db: Database) -> None:
         self.db = db
-        self.running = asyncio.Lock()
+        self._run = asyncio.Lock()
 
     async def count_sci_fi(self) -> None:
-        async with self.running:
+        async with self._run:
             print("reports: counting")
             print(f"reports: {await self.db.count_books('sci-fi')} sci-fi books")
+
+    @contextlib.asynccontextmanager
+    async def between_runs(self) -> AsyncIterator[None]:
+        # Wait for the run in flight, if any, and keep the next one from starting
+        async with self._run:
+            yield
 
 
 @worker
@@ -369,11 +429,16 @@ async def schedule(reports: Reports, shutdown: Shutdown) -> None:
     scheduler.add_job(reports.count_sci_fi, "interval", seconds=2)
     scheduler.start()
     print("scheduler: started")
-    await shutdown.wait()
-    scheduler.pause()  # no new runs
-    async with reports.running:  # the run in flight finishes
-        # APScheduler 3 cancels the coroutine jobs still running here, whatever `wait` says
+    try:
+        await shutdown.wait()
+        scheduler.pause()  # no new runs
+        async with reports.between_runs():  # the run in flight finishes
+            pass
+    finally:
+        # Also when the worker is cancelled past the grace period. shutdown() only schedules the stop,
+        # and the stop cancels the coroutine jobs still running, whatever `wait` says
         scheduler.shutdown()
+        await asyncio.sleep(0)  # the stop runs here, before the clients disconnect
     print("scheduler: stopped")
 ```
 
@@ -394,19 +459,26 @@ $ echo $?
 130
 ```
 
-- `AsyncIOScheduler.shutdown()` не умеет ждать задание-корутину: он отменяет задания, которые ещё выполняются,
-  что бы ни говорил `wait=`. Блокировка даёт текущему запуску доработать: воркер ставит планировщик на паузу,
-  захватывает блокировку, как только запуск её отпустит, и только потом останавливает планировщик. Без блокировки
-  тот же Ctrl+C обрывает запуск с `asyncio.exceptions.CancelledError` в `count_books`.
-- `start()` берёт работающий цикл событий, поэтому планировщик создаётся и запускается внутри воркера, а не при
-  импорте. Задание — метод клиента, а не функция, связанная через `DI.inject()`: внутри воркера контейнер уже
-  подключён, а `inject()` работает только до подключения.
+- `AsyncIOScheduler.shutdown()` не умеет ждать задание-корутину: он лишь планирует остановку в цикле событий, а
+  остановка отменяет задания, которые ещё выполняются, что бы ни говорил `wait=`. Воркер ставит планировщик на
+  паузу, чтобы не начался новый запуск, и ждёт текущий запуск в `reports.between_runs()`; только потом он
+  останавливает планировщик. Без этого ожидания тот же Ctrl+C обрывает запуск с
+  `asyncio.exceptions.CancelledError` в `count_books`.
+- `finally` останавливает планировщик и тогда, когда воркер отменяется, например из-за запуска дольше grace
+  period: запуск отменяется до отключения базы данных, а не продолжает с ней работать.
+  `await asyncio.sleep(0)` даёт запланированной остановке произойти до того, как воркер вернёт управление.
+- Планировщик живёт в воркере, а не в собственном клиенте: клиент-планировщик запускался бы в каждом контейнере,
+  который его разрешает, включая контейнер веб-приложения, а воркер управляет порядком остановки: сначала
+  текущий запуск, потом планировщик. Задания APScheduler — методы клиента, поэтому они обращаются к базе данных
+  через `self` и делят блокировку `between_runs()`. Функция уровня модуля, связанная через `DI.inject()` и
+  переданная в `add_job()`, тоже работает, если `inject()` вызван до старта воркера: внутри воркера контейнер
+  подключён, и `inject()` завершается ошибкой.
 
 ### <a id="apscheduler-4"></a>APScheduler 4
 
-APScheduler 4 пока в пре-релизе, проверено на 4.0.0a6, и API у него новый: `AsyncScheduler` — асинхронный
-контекстный менеджер, а расписание добавляется через `await add_schedule()`. `Reports` остаётся как есть;
-импорты и воркер становятся такими:
+APScheduler 4 — альфа-версия, проверено на 4.0.0a6, и его API ещё может измениться до 4.0. `AsyncScheduler` —
+асинхронный контекстный менеджер, а расписание добавляется через `await add_schedule()`. `Reports` остаётся как
+есть; импорты и воркер становятся такими:
 
 ```python
 # app/scheduler.py, on APScheduler 4
@@ -416,12 +488,13 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 @worker
 async def schedule(reports: Reports, shutdown: Shutdown) -> None:
+    # Leaving the block stops the scheduler, also when the worker is cancelled past the grace period
     async with AsyncScheduler() as scheduler:
         await scheduler.add_schedule(reports.count_sci_fi, IntervalTrigger(seconds=2), id="count-sci-fi")
         await scheduler.start_in_background()
         print("scheduler: started")
         await shutdown.wait()
-        async with reports.running:  # the run in flight finishes
+        async with reports.between_runs():  # the run in flight finishes
             await scheduler.stop()
     print("scheduler: stopped")
 ```
@@ -439,15 +512,17 @@ reports: counting
 reports: 2 sci-fi books
 scheduler: stopped
 database: disconnected
+$ echo $?
+130
 ```
 
 APScheduler 4 запускает интервальное расписание сразу, а затем каждые 2 секунды. Его `stop()` тоже отменяет
-выполняющееся задание, причём молча, без следа в выводе, поэтому блокировка остаётся.
+выполняющееся задание APScheduler, причём молча, без следа в выводе, поэтому ожидание текущего запуска остаётся.
 
 ## <a id="textual"></a>Textual
 
 Проверено на Textual 8.2.8. Приложение Textual — не клиент: воркер создаёт его и передаёт ему полученные
-клиенты, как тест передаёт подделки.
+клиенты, как тест передаёт моки.
 
 ```python
 # app/tui.py
@@ -504,8 +579,7 @@ async def tui(db: Database, tasks: BackgroundTasks, shutdown: Shutdown) -> None:
  r Refresh  q Quit                              ▏^p palette
 ```
 
-`q` закрывает его, и процесс завершается с кодом `0`; SIGTERM закрывает его через `exit_on_shutdown`, с кодом
-`143`:
+`q` закрывает его, и процесс завершается с кодом `0`:
 
 ```console
 $ python -m app.tui
@@ -516,8 +590,20 @@ $ echo $?
 0
 ```
 
+SIGTERM, например `pkill -TERM -f app.tui` из другого терминала, закрывает его через `exit_on_shutdown`:
+
+```console
+$ python -m app.tui
+database: connected
+tui: closed
+database: disconnected
+$ echo $?
+143
+```
+
 - `App.run()` запускает собственный цикл событий; внутри воркера `await app.run_async()` запускает приложение в
-  цикле событий воркера. `BackgroundTasks` отменяет `exit_on_shutdown`, когда приложение закрылось само.
+  цикле событий воркера. Когда приложение закрывается само, `exit_on_shutdown` всё ещё ждёт: `BackgroundTasks`
+  отменяет его при своём отключении, после того как воркер вернёт управление.
 - Textual отключает сигнальные клавиши терминала: Ctrl+C — это клавиша, которая спрашивает «Do you want to quit?
   Press ctrl+q to quit the app», а не SIGINT. С `TEXTUAL_ALLOW_SIGNALS=1` Ctrl+C посылает SIGINT: приложение
   закрывается, и процесс завершается с кодом `130`. SIGTERM доходит до nuke-di в любом случае.
@@ -526,7 +612,7 @@ $ echo $?
   ничего общего с `@worker`.
 
 Приложение получает клиенты в `__init__`, поэтому тест передаёт ему мок и запускает его через `run_test()` из
-Textual:
+Textual, под pytest-asyncio с `asyncio_mode = auto`, как в разделе [Тестирование](testing.md):
 
 ```python
 # tests/test_tui.py
@@ -558,7 +644,7 @@ $ pytest -q tests/test_tui.py
 
 Проверено на temporalio 1.34.0 и dev-сервере из Temporal CLI 1.9.1. Ввод-вывод выполняют активности, и
 способ, которым Temporal даёт им базу данных, — класс, методы которого и есть активности, создаваемый один раз
-на воркер. Этот класс — клиент:
+на воркер Temporal. Этот класс — клиент:
 
 ```python
 # app/books/activities.py
@@ -725,14 +811,17 @@ temporal: disconnected
 ```
 
 Незавершённая активность доработала в пределах `graceful_shutdown_timeout`, и Temporal сохранил её результат.
-Воркер остановился раньше, чем воркфлоу забрал этот результат, поэтому `start` ждал; следующий воркер довёл
-воркфлоу до конца, не запуская активность повторно.
+Воркер остановился раньше, чем воркфлоу забрал этот результат, поэтому `start` ждал; следующий процесс воркера
+довёл воркфлоу до конца, не запуская активность повторно.
 
 - `graceful_shutdown_timeout` по умолчанию равен 0: незавершённые активности отменяются в тот же момент, когда
-  воркер начинает остановку. Задайте его меньше `SHUTDOWN_GRACE_SECONDS`.
+  воркер начинает остановку. Задайте его с запасом меньше `SHUTDOWN_GRACE_SECONDS`: если nuke-di отменит воркер,
+  пока выход из `async with Worker(...)` ещё не завершил остановку, активности продолжат работать с
+  отключающимися клиентами.
 - `Client` из temporalio называется так же, как клиент nuke-di: импортируйте его как `TemporalClient`.
-- Воркер получает активности как связанные методы разрешённого экземпляра, `activities=[activities.count_books]`;
-  воркфлоу ссылается на них через метод класса, `BookActivities.count_books`.
+- `Worker` из Temporal получает активности как связанные методы разрешённого экземпляра,
+  `activities=[activities.count_books]`; воркфлоу ссылается на них через метод класса,
+  `BookActivities.count_books`.
 
 ### <a id="workflows-never-take-clients"></a>Воркфлоу никогда не принимает клиенты
 
@@ -744,7 +833,7 @@ temporal: disconnected
 поэтому песочница использует уже импортированный модуль, а не импортирует его заново.
 
 Тест запускает воркфлоу на тестовом сервере Temporal с пропуском времени (time-skipping), а активности
-создаются вручную вокруг мока:
+создаются вручную вокруг мока, под pytest-asyncio с `asyncio_mode = auto`, как в разделе [Тестирование](testing.md):
 
 ```python
 # tests/test_books.py

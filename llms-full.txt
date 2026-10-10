@@ -2317,9 +2317,10 @@ and the class whose methods are its handlers is a `Client`.
   tasks, so cancelling the worker does not stop them: they go on against clients that are disconnecting. The
   gRPC and APScheduler recipes abort them in a `finally`; for aiohttp, websockets and Temporal the bound is the
   only guard.
-- **The whole stop has a budget.** A process stops in up to `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS
-  × the longest chain of dependencies` ([grace period](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md#grace-period)); give the pod a
-  `terminationGracePeriodSeconds` above it ([Kubernetes](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md#running-in-kubernetes)).
+- **The whole stop has a budget.** A process stops in up to
+  `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies`
+  ([grace period](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md#grace-period)); give the pod a `terminationGracePeriodSeconds` above it
+  ([Kubernetes](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md#running-in-kubernetes)).
 
 | Server | The client | Stopped by | How long it waits, by default |
 |---|---|---|---|

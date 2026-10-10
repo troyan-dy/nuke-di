@@ -11,24 +11,31 @@ e a classe cujos métodos são os handlers dele é um `Client`.
 ## <a id="the-pattern"></a>O padrão
 
 - **Os handlers são métodos de um cliente.** Um servicer gRPC, uma classe de views do aiohttp, um handler de
-  WebSocket, uma classe de jobs agendados, as activities do Temporal: cada um recebe seus clientes no `__init__`, e o
-  worker o recebe pelo type hint. Ele é resolvido, e seus clientes são conectados, antes de o servidor iniciar; um
-  handler chega até eles por meio de `self`.
+  WebSocket, uma classe de jobs do APScheduler, as activities do Temporal: cada um recebe seus clientes no
+  `__init__`, e o worker o recebe pelo type hint. Ele é resolvido, e seus clientes são conectados, antes de o
+  servidor iniciar; um handler chega até eles por meio de `self`.
 - **O worker é dono do servidor.** Ele constrói e inicia o servidor, espera o
   [`Shutdown`](workers-and-jobs.md#your-first-worker), para o servidor e retorna; então os clientes se desconectam.
   O código de saída, os logs e os hooks são os de [qualquer worker](workers-and-jobs.md#exit-codes).
-- **O servidor para dentro do período de tolerância.** Ao parar, ele deixa terminar as chamadas em andamento, e cada
-  servidor tem seu próprio timeout para isso. Mantenha-o abaixo de `SHUTDOWN_GRACE_SECONDS`: um worker que ainda está
-  parando depois do [período de tolerância](workers-and-jobs.md#grace-period) é cancelado, e as chamadas em andamento
-  junto com ele.
+- **O servidor para com folga dentro do período de tolerância.** Ao parar, ele deixa terminar as chamadas em
+  andamento, e cada servidor tem seu próprio limite para isso. Mantenha-o abaixo do `SHUTDOWN_GRACE_SECONDS` com
+  que o processo roda: esse vem do ambiente, enquanto as receitas escrevem seus limites no código. Um worker que
+  ainda está parando depois do [período de tolerância](workers-and-jobs.md#grace-period) é cancelado, mas os
+  handlers rodam nas tasks do próprio servidor, então cancelar o worker não os para: eles continuam rodando contra
+  clientes que estão se desconectando. As receitas de gRPC e APScheduler os abortam em um `finally`; para aiohttp,
+  websockets e Temporal o limite é a única proteção.
+- **A parada inteira tem um orçamento.** Um processo para em até
+  `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × a cadeia de dependências mais longa`
+  ([período de tolerância](workers-and-jobs.md#grace-period)); dê ao pod um `terminationGracePeriodSeconds`
+  acima disso ([Kubernetes](workers-and-jobs.md#running-in-kubernetes)).
 
-| Servidor | O cliente | Parado por | Seu timeout, por padrão |
+| Servidor | O cliente | Parado por | Quanto espera, por padrão |
 |---|---|---|---|
 | [grpc.aio](#grpcaio) | O servicer | `await server.stop(grace)` | `grace`, obrigatório; `None` aborta as chamadas em andamento |
-| [aiohttp](#aiohttp) | Uma classe de views | `await runner.cleanup()` | `shutdown_timeout`, 60 s |
-| [websockets](#websockets) | Uma classe com o handler da conexão | Sair do `async with serve(...)` | `close_timeout`, 10 s |
-| [APScheduler](#apscheduler) | Uma classe de jobs | `scheduler.shutdown()` | Sem timeout: um job em execução é cancelado |
-| [Textual](#textual) | Nenhum: o `App` recebe seus clientes do worker | `app.exit()` | Sem timeout |
+| [aiohttp](#aiohttp) | Uma classe de views | `await runner.cleanup()` | Até 2 × `shutdown_timeout`, 60 s cada |
+| [websockets](#websockets) | Uma classe com o handler da conexão | Sair do `async with serve(...)` | `close_timeout`, 10 s, só para o handshake de fechamento; os handlers não têm limite |
+| [APScheduler](#apscheduler) | Uma classe de jobs do APScheduler | `scheduler.shutdown()` | Não espera: um job do APScheduler em execução é cancelado |
+| [Textual](#textual) | Nenhum: o `App` recebe seus clientes do worker | `app.exit()` | Não espera |
 | [Temporal](#temporal) | Uma classe de activities | Sair do `async with Worker(...)` | `graceful_shutdown_timeout`, 0 |
 
 As receitas compartilham um mesmo módulo de clientes: um banco de dados cuja consulta leva um segundo, para que
@@ -56,7 +63,10 @@ class Database(Client):
         return sum(1 for book_genre in self.genres.values() if book_genre == genre)
 ```
 
-Cada receita envia SIGTERM no meio de uma chamada, do jeito que o Kubernetes para um pod.
+Cada receita envia SIGTERM no meio de uma chamada, do jeito que o Kubernetes para um pod. Os programas que chamam
+os servidores, como `app/grpc_ask.py`, abrem a conexão ali mesmo: são chamadores descartáveis para a demonstração,
+não parte da aplicação. Uma conexão que a própria aplicação mantém é um cliente, como a do Temporal
+[mais abaixo](#temporal).
 
 ## <a id="grpcaio"></a>grpc.aio
 
@@ -101,7 +111,9 @@ class BooksService(books_pb2_grpc.BooksServicer, Client):
         self.db = db
 
     async def CountBooks(
-        self, request: books_pb2.CountRequest, context: grpc.aio.ServicerContext
+        self,
+        request: books_pb2.CountRequest,
+        context: grpc.aio.ServicerContext[books_pb2.CountRequest, books_pb2.CountReply],
     ) -> books_pb2.CountReply:
         print(f"grpc: CountBooks({request.genre!r})")
         count = await self.db.count_books(request.genre)
@@ -116,10 +128,14 @@ async def serve(books: BooksService, shutdown: Shutdown) -> None:
     server.add_insecure_port("localhost:50051")
     await server.start()
     print("grpc: serving on localhost:50051")
-    await shutdown.wait()
-    print("grpc: stopping")
-    # New calls are refused at once, the calls in flight get 5 seconds: less than SHUTDOWN_GRACE_SECONDS
-    await server.stop(grace=5)
+    try:
+        await shutdown.wait()
+        print("grpc: stopping")
+        # New calls are refused at once, the calls in flight get 5 seconds: less than SHUTDOWN_GRACE_SECONDS
+        await server.stop(grace=5)
+    finally:
+        # Cancelled past the grace period: abort the calls in flight before the clients disconnect
+        await server.stop(None)
     print("grpc: stopped")
 ```
 
@@ -164,9 +180,39 @@ O SIGTERM chegou no meio da segunda chamada: a chamada terminou e recebeu sua re
 e depois o banco de dados se desconectou.
 
 - `server.stop(grace)` recusa novas chamadas imediatamente, dá `grace` segundos às chamadas em andamento e depois
-  as aborta. Mantenha `grace` abaixo de `SHUTDOWN_GRACE_SECONDS`, senão o nuke-di cancela o worker antes.
+  as aborta. Mantenha `grace` abaixo de `SHUTDOWN_GRACE_SECONDS`.
 - Rode o `protoc` a partir da raiz do projeto com `-I.`: assim o `books_pb2_grpc.py` gerado importa
-  `from app import books_pb2`, e o `--pyi_out` fornece as classes de mensagem a um type checker.
+  `from app import books_pb2`. O `--pyi_out` tipa as mensagens; o mypy também precisa de
+  `pip install types-grpcio` e, com `--strict`, dos stubs de `books_pb2_grpc.py` do mypy-protobuf:
+  `--mypy_grpc_out=.`.
+
+O `finally` cobre um worker que ainda está parando quando o período de tolerância acaba: o nuke-di o cancela, e
+`server.stop(None)` aborta as chamadas em andamento antes de os clientes se desconectarem. Com um período de
+tolerância mais curto que a chamada:
+
+```console
+$ SHUTDOWN_GRACE_SECONDS=0.2 python -m app.grpc_server &
+database: connected
+grpc: serving on localhost:50051
+$ python -m app.grpc_ask --genre classic & sleep 0.6; kill -TERM %1
+grpc: CountBooks('classic')
+grpc: stopping
+Run app.grpc_server.serve did not stop within 0.2s after Shutdown, cancelling it
+database: disconnected
+Run app.grpc_ask.ask failed
+Traceback (most recent call last):
+  ...
+grpc.aio._call.AioRpcError: <AioRpcError of RPC that terminated with:
+	status = StatusCode.UNAVAILABLE
+	details = "Cancelling all calls"
+	debug_error_string = "UNAVAILABLE:Cancelling all calls"
+>
+$ wait %1; echo $?
+143
+```
+
+A chamada foi abortada, e quem chamou recebeu `UNAVAILABLE`, em vez de ela continuar rodando contra um banco de
+dados desconectado.
 
 ## <a id="aiohttp"></a>aiohttp
 
@@ -196,8 +242,8 @@ class BookViews(Client):
 async def serve(views: BookViews, shutdown: Shutdown) -> None:
     app = web.Application()
     app.router.add_get("/books/{genre}/count", views.count)
-    # The requests in flight get 5 seconds: aiohttp's default of 60 is longer than SHUTDOWN_GRACE_SECONDS
-    runner = web.AppRunner(app, shutdown_timeout=5)
+    # cleanup() waits up to 2 × shutdown_timeout for the requests in flight: keep it below SHUTDOWN_GRACE_SECONDS
+    runner = web.AppRunner(app, shutdown_timeout=4)
     await runner.setup()
     await web.TCPSite(runner, "localhost", 8080).start()
     print("aiohttp: serving on http://localhost:8080")
@@ -234,10 +280,14 @@ $ curl -s -w '\n' localhost:8080/books/classic/count & sleep 0.5; pkill -TERM -f
 - `web.run_app()` não pode rodar dentro de um worker: ele inicia um event loop próprio e trata o SIGINT e o
   SIGTERM por conta própria. `AppRunner` e `TCPSite` rodam a mesma aplicação no loop do worker e deixam os sinais
   para o nuke-di.
-- `shutdown_timeout`, quanto tempo o `cleanup()` espera pelas requisições em andamento, é de 60 segundos por padrão:
-  defina-o abaixo de `SHUTDOWN_GRACE_SECONDS`.
-- Os `on_startup`, `on_cleanup` e `cleanup_ctx` da própria aplicação continuam rodando, em `setup()` e
-  `cleanup()`, enquanto os clientes estão conectados.
+- `cleanup()` espera até `shutdown_timeout` por uma requisição em andamento, depois a cancela e espera de novo até
+  `shutdown_timeout`: até o dobro do timeout, que é de 60 segundos por padrão. Mantenha o dobro do timeout abaixo
+  de `SHUTDOWN_GRACE_SECONDS`, como 4 segundos estão abaixo dos 10 padrão. Um `finally` não ajuda aqui: o
+  cancelamento do nuke-di cai dentro do `cleanup()`, e os handlers em andamento continuam rodando contra os
+  clientes que estão se desconectando.
+- Os callbacks de `on_shutdown` rodam no início do `cleanup()`, antes de ele esperar pelas requisições em
+  andamento: é ali que conexões WebSocket ou de server-sent events de longa duração são fechadas. `on_startup`,
+  `on_cleanup` e `cleanup_ctx` rodam em `setup()` e `cleanup()`, enquanto os clientes estão conectados.
 
 ## <a id="websockets"></a>websockets
 
@@ -292,9 +342,9 @@ from nuke_di import job
 @job
 async def ask(genre: list[str]) -> None:
     async with connect("ws://localhost:8765") as websocket:
-        for one in genre:
-            await websocket.send(one)
-            print(f"ask: {await websocket.recv(decode=True)} {one} books")
+        for name in genre:
+            await websocket.send(name)
+            print(f"ask: {await websocket.recv(decode=True)} {name} books")
 ```
 
 Em um terminal:
@@ -331,18 +381,23 @@ websockets.exceptions.ConnectionClosedOK: received 1001 (going away); then sent 
 ```
 
 - Sair do `serve()` fecha todas as conexões abertas de uma vez, com 1001 (going away). Diferente do gRPC e do
-  aiohttp, uma mensagem em andamento perde sua resposta: `classic -> 1` foi contado e nunca enviado. De todo modo,
-  um cliente WebSocket se reconecta ao receber 1001, então faça com que uma mensagem possa ser reenviada com segurança.
-- `close_timeout`, quanto tempo um cliente pode levar para responder ao handshake de fechamento, é de 10 segundos
-  por padrão, tanto quanto o período de tolerância padrão inteiro: reduza-o.
+  aiohttp, uma mensagem em andamento perde sua resposta: `classic -> 1` foi contado e nunca enviado. O chamador
+  acima falha com o 1001; um cliente de verdade deve se reconectar ao recebê-lo, por exemplo com
+  `async for websocket in connect(...)`, e enviar uma mensagem que possa ser reenviada com segurança.
+- `close_timeout`, 10 segundos por padrão, limita só o handshake de fechamento com cada cliente, e reduza-o mesmo
+  assim: o padrão é o período de tolerância padrão inteiro. Nada limita os handlers: sair do `serve()` espera que
+  cada um deles retorne, então um handler travado segura o worker além do período de tolerância, e continua
+  rodando contra os clientes que estão se desconectando depois que o worker é cancelado.
 
 ## <a id="apscheduler"></a>APScheduler
 
-Verificado com APScheduler 3.11.3, a versão atual. Os jobs são métodos de um cliente:
+Verificado com APScheduler 3.11.3, a versão atual. Os jobs do APScheduler são métodos de um cliente:
 
 ```python
 # app/scheduler.py
 import asyncio
+import contextlib
+from collections.abc import AsyncIterator
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -354,12 +409,18 @@ from app.clients import Database
 class Reports(Client):
     def __init__(self, db: Database) -> None:
         self.db = db
-        self.running = asyncio.Lock()
+        self._run = asyncio.Lock()
 
     async def count_sci_fi(self) -> None:
-        async with self.running:
+        async with self._run:
             print("reports: counting")
             print(f"reports: {await self.db.count_books('sci-fi')} sci-fi books")
+
+    @contextlib.asynccontextmanager
+    async def between_runs(self) -> AsyncIterator[None]:
+        # Wait for the run in flight, if any, and keep the next one from starting
+        async with self._run:
+            yield
 
 
 @worker
@@ -368,11 +429,16 @@ async def schedule(reports: Reports, shutdown: Shutdown) -> None:
     scheduler.add_job(reports.count_sci_fi, "interval", seconds=2)
     scheduler.start()
     print("scheduler: started")
-    await shutdown.wait()
-    scheduler.pause()  # no new runs
-    async with reports.running:  # the run in flight finishes
-        # APScheduler 3 cancels the coroutine jobs still running here, whatever `wait` says
+    try:
+        await shutdown.wait()
+        scheduler.pause()  # no new runs
+        async with reports.between_runs():  # the run in flight finishes
+            pass
+    finally:
+        # Also when the worker is cancelled past the grace period. shutdown() only schedules the stop,
+        # and the stop cancels the coroutine jobs still running, whatever `wait` says
         scheduler.shutdown()
+        await asyncio.sleep(0)  # the stop runs here, before the clients disconnect
     print("scheduler: stopped")
 ```
 
@@ -393,19 +459,26 @@ $ echo $?
 130
 ```
 
-- `AsyncIOScheduler.shutdown()` não consegue esperar por um job de corrotina: ele cancela os jobs ainda em execução,
-  seja qual for o valor de `wait=`. O lock deixa a execução em andamento terminar: o worker pausa o scheduler, pega
-  o lock assim que a execução o libera, e só então desliga o scheduler. Sem o lock, o mesmo Ctrl+C encerra a execução
-  com `asyncio.exceptions.CancelledError` em `count_books`.
-- `start()` usa o event loop em execução, então o scheduler é criado e iniciado dentro do worker, e não na
-  importação. Um job é um método de um cliente, e não uma função vinculada com `DI.inject()`: dentro de um worker o
-  container já está conectado, e `inject()` só funciona antes de ele se conectar.
+- `AsyncIOScheduler.shutdown()` não consegue esperar por um job de corrotina: ele só agenda a parada no event
+  loop, e a parada cancela os jobs ainda em execução, seja qual for o valor de `wait=`. O worker pausa o scheduler,
+  para que nenhuma execução nova comece, e espera a execução em andamento em `reports.between_runs()`; só então
+  desliga o scheduler. Sem essa espera, o mesmo Ctrl+C encerra a execução com `asyncio.exceptions.CancelledError`
+  em `count_books`.
+- O `finally` desliga o scheduler também quando o worker é cancelado, por exemplo por uma execução mais longa que
+  o período de tolerância: a execução é cancelada antes de o banco de dados se desconectar, em vez de continuar
+  rodando contra ele. `await asyncio.sleep(0)` deixa a parada agendada acontecer antes de o worker retornar.
+- O scheduler vive no worker, e não em um cliente próprio: um cliente de scheduler iniciaria em todo container
+  que o resolvesse, inclusive o de uma aplicação web, e o worker é dono da ordem da parada, primeiro a execução em
+  andamento e depois o scheduler. Os jobs do APScheduler são métodos de um cliente, então chegam ao banco de dados
+  por meio de `self` e compartilham o lock de `between_runs()`. Uma função de nível de módulo vinculada com
+  `DI.inject()` e passada ao `add_job()` também funciona, desde que `inject()` seja chamado antes de o worker
+  iniciar: dentro do worker o container está conectado, e `inject()` falha.
 
 ### <a id="apscheduler-4"></a>APScheduler 4
 
-O APScheduler 4 é uma pré-release, verificada com 4.0.0a6, e sua API é nova: `AsyncScheduler` é um gerenciador de
-contexto assíncrono, e um agendamento é adicionado com `await add_schedule()`. `Reports` continua como está; os
-imports e o worker ficam assim:
+O APScheduler 4 é uma versão alfa, verificada com 4.0.0a6, e sua API ainda pode mudar antes da 4.0.
+`AsyncScheduler` é um gerenciador de contexto assíncrono, e um agendamento é adicionado com
+`await add_schedule()`. `Reports` continua como está; os imports e o worker ficam assim:
 
 ```python
 # app/scheduler.py, on APScheduler 4
@@ -415,12 +488,13 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 @worker
 async def schedule(reports: Reports, shutdown: Shutdown) -> None:
+    # Leaving the block stops the scheduler, also when the worker is cancelled past the grace period
     async with AsyncScheduler() as scheduler:
         await scheduler.add_schedule(reports.count_sci_fi, IntervalTrigger(seconds=2), id="count-sci-fi")
         await scheduler.start_in_background()
         print("scheduler: started")
         await shutdown.wait()
-        async with reports.running:  # the run in flight finishes
+        async with reports.between_runs():  # the run in flight finishes
             await scheduler.stop()
     print("scheduler: stopped")
 ```
@@ -438,15 +512,18 @@ reports: counting
 reports: 2 sci-fi books
 scheduler: stopped
 database: disconnected
+$ echo $?
+130
 ```
 
 O APScheduler 4 executa um agendamento por intervalo imediatamente, e depois a cada 2 segundos. O `stop()` dele
-também cancela um job em execução, sem dizer nada na saída, então o lock continua.
+também cancela um job do APScheduler em execução, sem dizer nada na saída, então a espera pela execução em
+andamento continua.
 
 ## <a id="textual"></a>Textual
 
 Verificado com Textual 8.2.8. Uma aplicação Textual não é um cliente: o worker a constrói e lhe passa os clientes
-que recebeu, como um teste passa fakes.
+que recebeu, como um teste passa mocks.
 
 ```python
 # app/tui.py
@@ -503,7 +580,7 @@ A aplicação ocupa o terminal, aqui com 60 colunas por 8 linhas:
  r Refresh  q Quit                              ▏^p palette
 ```
 
-`q` a fecha, e o processo termina com `0`; o SIGTERM a fecha por meio de `exit_on_shutdown`, com `143`:
+`q` a fecha, e o processo termina com `0`:
 
 ```console
 $ python -m app.tui
@@ -514,15 +591,28 @@ $ echo $?
 0
 ```
 
+O SIGTERM, por exemplo `pkill -TERM -f app.tui` de outro terminal, a fecha por meio de `exit_on_shutdown`:
+
+```console
+$ python -m app.tui
+database: connected
+tui: closed
+database: disconnected
+$ echo $?
+143
+```
+
 - `App.run()` inicia um event loop próprio; dentro de um worker, `await app.run_async()` roda a aplicação no loop
-  do worker. `BackgroundTasks` cancela `exit_on_shutdown` quando a aplicação se fecha sozinha.
+  do worker. Quando a aplicação se fecha sozinha, `exit_on_shutdown` continua esperando: `BackgroundTasks` o
+  cancela ao se desconectar, depois que o worker retorna.
 - O Textual desativa as teclas de sinal do terminal: Ctrl+C é uma tecla que pergunta "Do you want to quit? Press
   ctrl+q to quit the app", e não SIGINT. Com `TEXTUAL_ALLOW_SIGNALS=1`, o Ctrl+C envia SIGINT: a aplicação se fecha e
   o processo termina com `130`. O SIGTERM chega ao nuke-di de qualquer forma.
 - Enquanto a aplicação roda, o Textual captura o `print()`; o worker imprime assim que `run_async()` retorna. Os
   workers do próprio Textual, `@work` e `run_worker()`, rodam dentro da aplicação e não têm nada a ver com `@worker`.
 
-A aplicação recebe seus clientes no `__init__`, então um teste passa um mock, com o `run_test()` do Textual:
+A aplicação recebe seus clientes no `__init__`, então um teste passa um mock, com o `run_test()` do Textual, sob
+pytest-asyncio com `asyncio_mode = auto` como em [Testes](testing.md):
 
 ```python
 # tests/test_tui.py
@@ -554,7 +644,7 @@ $ pytest -q tests/test_tui.py
 
 Verificado com temporalio 1.34.0 e o servidor de desenvolvimento da Temporal CLI 1.9.1. As activities fazem o I/O,
 e o jeito do Temporal de lhes dar um banco de dados é uma classe cujos métodos são as activities, construída uma vez
-por worker. Essa classe é um cliente:
+por worker do Temporal. Essa classe é um cliente:
 
 ```python
 # app/books/activities.py
@@ -721,14 +811,16 @@ temporal: disconnected
 ```
 
 A activity em andamento terminou dentro do `graceful_shutdown_timeout`, e o Temporal guardou o resultado dela. O
-worker parou antes de o workflow pegar esse resultado, então o `start` ficou esperando; o worker seguinte terminou
-o workflow sem executar a activity de novo.
+worker parou antes de o workflow pegar esse resultado, então o `start` ficou esperando; o processo de worker
+seguinte terminou o workflow sem executar a activity de novo.
 
 - `graceful_shutdown_timeout` é 0 por padrão: as activities em andamento são canceladas no instante em que o worker
-  desliga. Defina-o abaixo de `SHUTDOWN_GRACE_SECONDS`.
+  desliga. Defina-o bem abaixo de `SHUTDOWN_GRACE_SECONDS`: se o nuke-di cancelar o worker enquanto a saída do
+  `async with Worker(...)` ainda estiver desligando, as activities continuam rodando contra os clientes que estão
+  se desconectando.
 - O `Client` do temporalio tem o mesmo nome que o do nuke-di: importe-o como `TemporalClient`.
-- O worker recebe as activities como métodos vinculados da instância resolvida, `activities=[activities.count_books]`;
-  um workflow as nomeia pelo método da classe, `BookActivities.count_books`.
+- O `Worker` do Temporal recebe as activities como métodos vinculados da instância resolvida,
+  `activities=[activities.count_books]`; um workflow as nomeia pelo método da classe, `BookActivities.count_books`.
 
 ### <a id="workflows-never-take-clients"></a>Workflows nunca recebem clientes
 
@@ -740,7 +832,7 @@ os métodos dela, dentro de `workflow.unsafe.imports_passed_through()`, para que
 em vez de importá-lo de novo.
 
 Um teste roda o workflow no servidor de testes com avanço de tempo do Temporal, com as activities construídas à mão
-em torno de um mock:
+em torno de um mock, sob pytest-asyncio com `asyncio_mode = auto` como em [Testes](testing.md):
 
 ```python
 # tests/test_books.py

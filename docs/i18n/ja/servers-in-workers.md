@@ -8,17 +8,18 @@ grpc.aio、aiohttp、websockets、APScheduler、Textual、Temporal には独自�
 
 ## <a id="the-pattern"></a>パターン
 
-- **ハンドラーはクライアントのメソッドです。** gRPC のサービサー、aiohttp のビューをまとめたクラス、WebSocket のハンドラー、定期実行するジョブのクラス、Temporal のアクティビティ。どれも `__init__` で自分のクライアントを受け取り、ワーカーはそれを型ヒントで受け取ります。サーバーが起動する前にそれが解決され、そのクライアントが接続されるので、ハンドラーは `self` を通じてクライアントにアクセスできます。
+- **ハンドラーはクライアントのメソッドです。** gRPC のサービサー、aiohttp のビューをまとめたクラス、WebSocket のハンドラー、APScheduler のジョブのクラス、Temporal のアクティビティ。どれも `__init__` で自分のクライアントを受け取り、ワーカーはそれを型ヒントで受け取ります。サーバーが起動する前にそれが解決され、そのクライアントが接続されるので、ハンドラーは `self` を通じてクライアントにアクセスできます。
 - **サーバーはワーカーのものです。** ワーカーがサーバーを組み立てて起動し、[`Shutdown`](workers-and-jobs.md#your-first-worker) を待ち、サーバーを止めてから戻ります。そのあとクライアントが切断されます。終了コード、ログ、フックは[ほかのワーカー](workers-and-jobs.md#exit-codes)と同じです。
-- **サーバーは猶予期間内に停止します。** 停止の際には処理中の呼び出しが終わるのを待ちますが、その待ち時間のタイムアウトはサーバーごとに異なります。これは `SHUTDOWN_GRACE_SECONDS` より短くしてください。[猶予期間](workers-and-jobs.md#grace-period)を過ぎてもまだ停止中のワーカーはキャンセルされ、処理中の呼び出しも一緒にキャンセルされます。
+- **サーバーは猶予期間内に余裕をもって停止します。** 停止の際には処理中の呼び出しが終わるのを待ちますが、その待ち時間の上限はサーバーごとに異なります。これはプロセスが実際に使う `SHUTDOWN_GRACE_SECONDS` より短くしてください。こちらは環境変数から来る値で、レシピの上限はコードに書かれています。[猶予期間](workers-and-jobs.md#grace-period)を過ぎてもまだ停止中のワーカーはキャンセルされますが、ハンドラーはサーバー自身のタスクで動いているので、ワーカーをキャンセルしてもハンドラーは止まりません。切断中のクライアントに対してそのまま動き続けます。gRPC と APScheduler のレシピは `finally` の中でハンドラーを打ち切りますが、aiohttp、websockets、Temporal では上限だけが頼りです。
+- **停止全体には予算があります。** プロセスの停止には最大で `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × 最も長い依存関係の連鎖` かかります（[猶予期間](workers-and-jobs.md#grace-period)）。Pod の `terminationGracePeriodSeconds` はそれより長くしてください（[Kubernetes](workers-and-jobs.md#running-in-kubernetes)）。
 
-| サーバー | クライアント | 停止の方法 | タイムアウト（デフォルト） |
+| サーバー | クライアント | 停止の方法 | デフォルトの待ち時間 |
 |---|---|---|---|
 | [grpc.aio](#grpcaio) | サービサー | `await server.stop(grace)` | `grace`、必須。`None` だと処理中の呼び出しを打ち切る |
-| [aiohttp](#aiohttp) | ビューのクラス | `await runner.cleanup()` | `shutdown_timeout`、60 秒 |
-| [websockets](#websockets) | 接続ハンドラーを持つクラス | `async with serve(...)` を抜ける | `close_timeout`、10 秒 |
-| [APScheduler](#apscheduler) | ジョブのクラス | `scheduler.shutdown()` | タイムアウトなし：実行中のジョブはキャンセルされる |
-| [Textual](#textual) | なし：`App` はワーカーからクライアントを受け取る | `app.exit()` | タイムアウトなし |
+| [aiohttp](#aiohttp) | ビューのクラス | `await runner.cleanup()` | 最大 2 × `shutdown_timeout`、それぞれ 60 秒 |
+| [websockets](#websockets) | 接続ハンドラーを持つクラス | `async with serve(...)` を抜ける | `close_timeout`、10 秒、クロージングハンドシェイクのみ。ハンドラーには上限がない |
+| [APScheduler](#apscheduler) | APScheduler のジョブのクラス | `scheduler.shutdown()` | 待たない：実行中の APScheduler のジョブはキャンセルされる |
+| [Textual](#textual) | なし：`App` はワーカーからクライアントを受け取る | `app.exit()` | 待たない |
 | [Temporal](#temporal) | アクティビティのクラス | `async with Worker(...)` を抜ける | `graceful_shutdown_timeout`、0 |
 
 どのレシピも、同じクライアントモジュールを使います。クエリに 1 秒かかるデータベースで、プロセスを止めた時点でまだ呼び出しが処理中になるようにしています。
@@ -45,7 +46,7 @@ class Database(Client):
         return sum(1 for book_genre in self.genres.values() if book_genre == genre)
 ```
 
-どのレシピでも、Kubernetes が Pod を止めるときと同じように、呼び出しの最中に SIGTERM を送ります。
+どのレシピでも、Kubernetes が Pod を止めるときと同じように、呼び出しの最中に SIGTERM を送ります。`app/grpc_ask.py` のようにサーバーを呼び出すプログラムは、その場で接続を開きます。これらはデモ用の使い捨ての呼び出し側で、アプリの一部ではありません。アプリ自身が保持する接続はクライアントです。[後述](#temporal)の Temporal への接続がそうです。
 
 ## <a id="grpcaio"></a>grpc.aio
 
@@ -90,7 +91,9 @@ class BooksService(books_pb2_grpc.BooksServicer, Client):
         self.db = db
 
     async def CountBooks(
-        self, request: books_pb2.CountRequest, context: grpc.aio.ServicerContext
+        self,
+        request: books_pb2.CountRequest,
+        context: grpc.aio.ServicerContext[books_pb2.CountRequest, books_pb2.CountReply],
     ) -> books_pb2.CountReply:
         print(f"grpc: CountBooks({request.genre!r})")
         count = await self.db.count_books(request.genre)
@@ -105,10 +108,14 @@ async def serve(books: BooksService, shutdown: Shutdown) -> None:
     server.add_insecure_port("localhost:50051")
     await server.start()
     print("grpc: serving on localhost:50051")
-    await shutdown.wait()
-    print("grpc: stopping")
-    # New calls are refused at once, the calls in flight get 5 seconds: less than SHUTDOWN_GRACE_SECONDS
-    await server.stop(grace=5)
+    try:
+        await shutdown.wait()
+        print("grpc: stopping")
+        # New calls are refused at once, the calls in flight get 5 seconds: less than SHUTDOWN_GRACE_SECONDS
+        await server.stop(grace=5)
+    finally:
+        # Cancelled past the grace period: abort the calls in flight before the clients disconnect
+        await server.stop(None)
     print("grpc: stopped")
 ```
 
@@ -151,8 +158,33 @@ $ wait %1; echo $?
 
 SIGTERM は 2 回目の呼び出しの最中に届きました。呼び出しは最後まで処理されて応答を受け取り、そのあとサーバーが停止し、最後にデータベースが切断されました。
 
-- `server.stop(grace)` は新しい呼び出しをただちに拒否し、処理中の呼び出しに `grace` 秒の猶予を与えてから打ち切ります。`grace` は `SHUTDOWN_GRACE_SECONDS` より短くしてください。そうしないと、先に nuke-di がワーカーをキャンセルします。
-- `protoc` はプロジェクトのルートから `-I.` を付けて実行します。こうすると生成される `books_pb2_grpc.py` は `from app import books_pb2` でインポートするようになり、`--pyi_out` によって型チェッカーがメッセージのクラスを認識できます。
+- `server.stop(grace)` は新しい呼び出しをただちに拒否し、処理中の呼び出しに `grace` 秒の猶予を与えてから打ち切ります。`grace` は `SHUTDOWN_GRACE_SECONDS` より短くしてください。
+- `protoc` はプロジェクトのルートから `-I.` を付けて実行します。こうすると生成される `books_pb2_grpc.py` は `from app import books_pb2` でインポートするようになります。`--pyi_out` はメッセージに型を付けます。mypy にはさらに `pip install types-grpcio` が必要で、`--strict` では mypy-protobuf が生成する `books_pb2_grpc.py` のスタブも必要です：`--mypy_grpc_out=.`。
+
+`finally` は、猶予期間が終わってもワーカーがまだ停止中の場合に備えるものです。nuke-di がワーカーをキャンセルし、`server.stop(None)` がクライアントの切断より前に処理中の呼び出しを打ち切ります。猶予期間が呼び出しより短い場合：
+
+```console
+$ SHUTDOWN_GRACE_SECONDS=0.2 python -m app.grpc_server &
+database: connected
+grpc: serving on localhost:50051
+$ python -m app.grpc_ask --genre classic & sleep 0.6; kill -TERM %1
+grpc: CountBooks('classic')
+grpc: stopping
+Run app.grpc_server.serve did not stop within 0.2s after Shutdown, cancelling it
+database: disconnected
+Run app.grpc_ask.ask failed
+Traceback (most recent call last):
+  ...
+grpc.aio._call.AioRpcError: <AioRpcError of RPC that terminated with:
+	status = StatusCode.UNAVAILABLE
+	details = "Cancelling all calls"
+	debug_error_string = "UNAVAILABLE:Cancelling all calls"
+>
+$ wait %1; echo $?
+143
+```
+
+呼び出しは打ち切られ、呼び出し側は `UNAVAILABLE` を受け取りました。切断されたデータベースに対して処理が続くことはありません。
 
 ## <a id="aiohttp"></a>aiohttp
 
@@ -182,8 +214,8 @@ class BookViews(Client):
 async def serve(views: BookViews, shutdown: Shutdown) -> None:
     app = web.Application()
     app.router.add_get("/books/{genre}/count", views.count)
-    # The requests in flight get 5 seconds: aiohttp's default of 60 is longer than SHUTDOWN_GRACE_SECONDS
-    runner = web.AppRunner(app, shutdown_timeout=5)
+    # cleanup() waits up to 2 × shutdown_timeout for the requests in flight: keep it below SHUTDOWN_GRACE_SECONDS
+    runner = web.AppRunner(app, shutdown_timeout=4)
     await runner.setup()
     await web.TCPSite(runner, "localhost", 8080).start()
     print("aiohttp: serving on http://localhost:8080")
@@ -218,8 +250,8 @@ $ curl -s -w '\n' localhost:8080/books/classic/count & sleep 0.5; pkill -TERM -f
 ```
 
 - `web.run_app()` はワーカーの中では使えません。独自のイベントループを起動し、SIGINT と SIGTERM を自分で処理するからです。`AppRunner` と `TCPSite` を使えば、同じアプリをワーカーのループ上で動かし、シグナルの処理は nuke-di に任せられます。
-- `cleanup()` が処理中のリクエストを待つ時間である `shutdown_timeout` は、デフォルトで 60 秒です。`SHUTDOWN_GRACE_SECONDS` より短く設定してください。
-- アプリ自身の `on_startup`、`on_cleanup`、`cleanup_ctx` も、クライアントが接続されている間に `setup()` と `cleanup()` の中でそのまま実行されます。
+- `cleanup()` は処理中のリクエストを最大 `shutdown_timeout` だけ待ち、そのあとリクエストをキャンセルして、さらに最大 `shutdown_timeout` 待ちます。つまり最大でタイムアウトの 2 倍で、タイムアウトはデフォルトで 60 秒です。タイムアウトの 2 倍を `SHUTDOWN_GRACE_SECONDS` より短くしてください。レシピの 4 秒なら、その 2 倍はデフォルトの 10 秒より短くなります。ここでは `finally` は役に立ちません。nuke-di のキャンセルは `cleanup()` の中で起き、処理中のハンドラーは切断中のクライアントに対して動き続けます。
+- `on_shutdown` のコールバックは `cleanup()` の最初、処理中のリクエストを待つ前に実行されます。長く続く WebSocket や server-sent events の接続はここで閉じます。`on_startup`、`on_cleanup`、`cleanup_ctx` は、クライアントが接続されている間に `setup()` と `cleanup()` の中で実行されます。
 
 ## <a id="websockets"></a>websockets
 
@@ -273,9 +305,9 @@ from nuke_di import job
 @job
 async def ask(genre: list[str]) -> None:
     async with connect("ws://localhost:8765") as websocket:
-        for one in genre:
-            await websocket.send(one)
-            print(f"ask: {await websocket.recv(decode=True)} {one} books")
+        for name in genre:
+            await websocket.send(name)
+            print(f"ask: {await websocket.recv(decode=True)} {name} books")
 ```
 
 1 つ目のターミナル：
@@ -311,16 +343,18 @@ Traceback (most recent call last):
 websockets.exceptions.ConnectionClosedOK: received 1001 (going away); then sent 1001 (going away)
 ```
 
-- `serve()` を抜けると、開いているすべての接続が 1001（going away）でただちに閉じられます。gRPC や aiohttp と違い、処理中のメッセージは応答を失います。`classic -> 1` は数えられましたが、送信されませんでした。いずれにせよ WebSocket のクライアントは 1001 を受けると再接続するので、メッセージは再送しても安全なものにしてください。
-- クライアントがクロージングハンドシェイクに応答するまでの待ち時間である `close_timeout` は、デフォルトで 10 秒です。これはデフォルトの猶予期間全体と同じ長さなので、短くしてください。
+- `serve()` を抜けると、開いているすべての接続が 1001（going away）でただちに閉じられます。gRPC や aiohttp と違い、処理中のメッセージは応答を失います。`classic -> 1` は数えられましたが、送信されませんでした。上の呼び出し側は 1001 で失敗します。実際のクライアントは、たとえば `async for websocket in connect(...)` で 1001 を受けたら再接続し、再送しても安全なメッセージを送るべきです。
+- `close_timeout` はデフォルトで 10 秒で、各クライアントとのクロージングハンドシェイクだけを制限します。それでも短くしてください。デフォルト値はデフォルトの猶予期間全体と同じ長さです。ハンドラーには何の上限もありません。`serve()` を抜けるときはすべてのハンドラーが戻るのを待つので、止まったままのハンドラーがあるとワーカーは猶予期間を超えて残り、ワーカーがキャンセルされたあとは切断中のクライアントに対して動き続けます。
 
 ## <a id="apscheduler"></a>APScheduler
 
-現行リリースの APScheduler 3.11.3 で確認しています。ジョブはクライアントのメソッドです。
+現行リリースの APScheduler 3.11.3 で確認しています。APScheduler のジョブはクライアントのメソッドです。
 
 ```python
 # app/scheduler.py
 import asyncio
+import contextlib
+from collections.abc import AsyncIterator
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -332,12 +366,18 @@ from app.clients import Database
 class Reports(Client):
     def __init__(self, db: Database) -> None:
         self.db = db
-        self.running = asyncio.Lock()
+        self._run = asyncio.Lock()
 
     async def count_sci_fi(self) -> None:
-        async with self.running:
+        async with self._run:
             print("reports: counting")
             print(f"reports: {await self.db.count_books('sci-fi')} sci-fi books")
+
+    @contextlib.asynccontextmanager
+    async def between_runs(self) -> AsyncIterator[None]:
+        # Wait for the run in flight, if any, and keep the next one from starting
+        async with self._run:
+            yield
 
 
 @worker
@@ -346,11 +386,16 @@ async def schedule(reports: Reports, shutdown: Shutdown) -> None:
     scheduler.add_job(reports.count_sci_fi, "interval", seconds=2)
     scheduler.start()
     print("scheduler: started")
-    await shutdown.wait()
-    scheduler.pause()  # no new runs
-    async with reports.running:  # the run in flight finishes
-        # APScheduler 3 cancels the coroutine jobs still running here, whatever `wait` says
+    try:
+        await shutdown.wait()
+        scheduler.pause()  # no new runs
+        async with reports.between_runs():  # the run in flight finishes
+            pass
+    finally:
+        # Also when the worker is cancelled past the grace period. shutdown() only schedules the stop,
+        # and the stop cancels the coroutine jobs still running, whatever `wait` says
         scheduler.shutdown()
+        await asyncio.sleep(0)  # the stop runs here, before the clients disconnect
     print("scheduler: stopped")
 ```
 
@@ -371,12 +416,13 @@ $ echo $?
 130
 ```
 
-- `AsyncIOScheduler.shutdown()` はコルーチンのジョブを待てません。`wait=` の指定にかかわらず、実行中のジョブをキャンセルします。ロックがあれば、処理中の実行を最後まで終わらせられます。ワーカーはスケジューラーを一時停止し、実行がロックを解放したらそれを取得して、そこで初めてスケジューラーをシャットダウンします。ロックがないと、同じ Ctrl+C で実行が `count_books` の中の `asyncio.exceptions.CancelledError` で終わります。
-- `start()` は実行中のイベントループを使うので、スケジューラーはインポート時ではなくワーカーの中で作成して起動します。ジョブを `DI.inject()` でバインドした関数ではなくクライアントのメソッドにするのは、ワーカーの中ではコンテナがすでに接続されていて、`inject()` は接続前にしか使えないからです。
+- `AsyncIOScheduler.shutdown()` はコルーチンの APScheduler のジョブを待てません。イベントループ上に停止を予約するだけで、その停止は `wait=` の指定にかかわらず、実行中のジョブをキャンセルします。ワーカーはスケジューラーを一時停止して新しい実行が始まらないようにし、`reports.between_runs()` の中で処理中の実行を待ちます。そこで初めてスケジューラーをシャットダウンします。この待機がないと、同じ Ctrl+C で実行が `count_books` の中の `asyncio.exceptions.CancelledError` で終わります。
+- `finally` は、ワーカーがキャンセルされた場合にもスケジューラーをシャットダウンします。たとえば猶予期間より長い実行があった場合です。実行はデータベースが切断される前にキャンセルされ、切断中のデータベースに対して動き続けることはありません。`await asyncio.sleep(0)` によって、予約された停止がワーカーが戻る前に実行されます。
+- スケジューラーは専用のクライアントではなくワーカーの中に置きます。スケジューラーのクライアントは、それを解決するすべてのコンテナで起動してしまいます。Web アプリのコンテナも例外ではありません。また、停止の順序、つまり処理中の実行が先でスケジューラーがあと、という順序を決めるのはワーカーです。APScheduler のジョブはクライアントのメソッドなので、`self` を通じてデータベースにアクセスし、`between_runs()` のロックを共有します。`DI.inject()` でバインドしたモジュールレベルの関数を `add_job()` に渡す方法も使えますが、`inject()` はワーカーが起動する前に呼ぶ必要があります。ワーカーの中ではコンテナが接続済みで、`inject()` は失敗します。
 
 ### <a id="apscheduler-4"></a>APScheduler 4
 
-APScheduler 4 はプレリリースで、4.0.0a6 で確認しています。API は一新されており、`AsyncScheduler` は非同期コンテキストマネージャーで、スケジュールは `await add_schedule()` で追加します。`Reports` はそのままで、インポートとワーカーは次のようになります。
+APScheduler 4 はアルファ版で、4.0.0a6 で確認しています。API は 4.0 までにまだ変わる可能性があります。`AsyncScheduler` は非同期コンテキストマネージャーで、スケジュールは `await add_schedule()` で追加します。`Reports` はそのままで、インポートとワーカーは次のようになります。
 
 ```python
 # app/scheduler.py, on APScheduler 4
@@ -386,12 +432,13 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 @worker
 async def schedule(reports: Reports, shutdown: Shutdown) -> None:
+    # Leaving the block stops the scheduler, also when the worker is cancelled past the grace period
     async with AsyncScheduler() as scheduler:
         await scheduler.add_schedule(reports.count_sci_fi, IntervalTrigger(seconds=2), id="count-sci-fi")
         await scheduler.start_in_background()
         print("scheduler: started")
         await shutdown.wait()
-        async with reports.running:  # the run in flight finishes
+        async with reports.between_runs():  # the run in flight finishes
             await scheduler.stop()
     print("scheduler: stopped")
 ```
@@ -409,13 +456,15 @@ reports: counting
 reports: 2 sci-fi books
 scheduler: stopped
 database: disconnected
+$ echo $?
+130
 ```
 
-APScheduler 4 は、インターバルのスケジュールをまずすぐに実行し、そのあと 2 秒ごとに実行します。その `stop()` も実行中のジョブを、出力に何も残さずにキャンセルするので、ロックは引き続き必要です。
+APScheduler 4 は、インターバルのスケジュールをまずすぐに実行し、そのあと 2 秒ごとに実行します。その `stop()` も実行中の APScheduler のジョブを、出力に何も残さずにキャンセルするので、処理中の実行を待つ処理は引き続き必要です。
 
 ## <a id="textual"></a>Textual
 
-Textual 8.2.8 で確認しています。Textual のアプリはクライアントではありません。テストがフェイクを渡すのと同じように、ワーカーがアプリを組み立て、自分が受け取ったクライアントをアプリに渡します。
+Textual 8.2.8 で確認しています。Textual のアプリはクライアントではありません。テストがモックを渡すのと同じように、ワーカーがアプリを組み立て、自分が受け取ったクライアントをアプリに渡します。
 
 ```python
 # app/tui.py
@@ -472,7 +521,7 @@ async def tui(db: Database, tasks: BackgroundTasks, shutdown: Shutdown) -> None:
  r Refresh  q Quit                              ▏^p palette
 ```
 
-`q` でアプリを閉じると、プロセスは `0` で終了します。SIGTERM の場合は `exit_on_shutdown` 経由で閉じられ、`143` で終了します。
+`q` でアプリを閉じると、プロセスは `0` で終了します。
 
 ```console
 $ python -m app.tui
@@ -483,11 +532,22 @@ $ echo $?
 0
 ```
 
-- `App.run()` は独自のイベントループを起動します。ワーカーの中では、`await app.run_async()` でアプリをワーカーのループ上で動かします。アプリが自分で閉じた場合は、`BackgroundTasks` が `exit_on_shutdown` をキャンセルします。
+SIGTERM（たとえば別のターミナルから `pkill -TERM -f app.tui` を実行）の場合は、`exit_on_shutdown` 経由で閉じられます。
+
+```console
+$ python -m app.tui
+database: connected
+tui: closed
+database: disconnected
+$ echo $?
+143
+```
+
+- `App.run()` は独自のイベントループを起動します。ワーカーの中では、`await app.run_async()` でアプリをワーカーのループ上で動かします。アプリが自分で閉じた場合、`exit_on_shutdown` はまだ待機中です。`BackgroundTasks` が切断されるとき、つまりワーカーが戻ったあとに、それをキャンセルします。
 - Textual はターミナルのシグナルキーを無効にします。Ctrl+C は SIGINT ではなく、"Do you want to quit? Press ctrl+q to quit the app" と尋ねるキーになります。`TEXTUAL_ALLOW_SIGNALS=1` を設定すると Ctrl+C で SIGINT が送られ、アプリが閉じてプロセスは `130` で終了します。SIGTERM はどちらの場合も nuke-di に届きます。
 - アプリの実行中は Textual が `print()` を横取りするので、ワーカーは `run_async()` が戻ってから出力します。Textual 自身のワーカーである `@work` と `run_worker()` はアプリの中で動くもので、`@worker` とは関係ありません。
 
-アプリは `__init__` でクライアントを受け取るので、テストでは Textual の `run_test()` を使ってモックを渡します。
+アプリは `__init__` でクライアントを受け取るので、テストでは Textual の `run_test()` を使ってモックを渡します。[テスト](testing.md)と同じく、pytest-asyncio で `asyncio_mode = auto` を使います。
 
 ```python
 # tests/test_tui.py
@@ -517,7 +577,7 @@ $ pytest -q tests/test_tui.py
 
 ## <a id="temporal"></a>Temporal
 
-temporalio 1.34.0 と Temporal CLI 1.9.1 の開発サーバーで確認しています。I/O を行うのはアクティビティです。Temporal でアクティビティにデータベースを渡すには、アクティビティをメソッドとして持ち、ワーカーごとに一度だけ組み立てられるクラスを使います。このクラスがクライアントです。
+temporalio 1.34.0 と Temporal CLI 1.9.1 の開発サーバーで確認しています。I/O を行うのはアクティビティです。Temporal でアクティビティにデータベースを渡すには、アクティビティをメソッドとして持ち、Temporal のワーカーごとに一度だけ組み立てられるクラスを使います。このクラスがクライアントです。
 
 ```python
 # app/books/activities.py
@@ -682,17 +742,17 @@ start: 1 classic books
 temporal: disconnected
 ```
 
-処理中のアクティビティは `graceful_shutdown_timeout` の範囲内で終わり、Temporal はその結果を保存しました。ワークフローがその結果を受け取る前にワーカーが停止したので `start` は待ち続け、次のワーカーがアクティビティを再実行せずにワークフローを完了させました。
+処理中のアクティビティは `graceful_shutdown_timeout` の範囲内で終わり、Temporal はその結果を保存しました。ワークフローがその結果を受け取る前にワーカーが停止したので `start` は待ち続け、次のワーカープロセスがアクティビティを再実行せずにワークフローを完了させました。
 
-- `graceful_shutdown_timeout` はデフォルトで 0 です。つまりワーカーがシャットダウンした瞬間に、処理中のアクティビティはキャンセルされます。`SHUTDOWN_GRACE_SECONDS` より短い値を設定してください。
+- `graceful_shutdown_timeout` はデフォルトで 0 です。つまりワーカーがシャットダウンした瞬間に、処理中のアクティビティはキャンセルされます。`SHUTDOWN_GRACE_SECONDS` より十分に短い値を設定してください。`async with Worker(...)` を抜ける処理がまだシャットダウン中のうちに nuke-di がワーカーをキャンセルすると、アクティビティは切断中のクライアントに対して動き続けます。
 - temporalio の `Client` は nuke-di の `Client` と同じ名前なので、`TemporalClient` としてインポートします。
-- ワーカーには、解決されたインスタンスのバウンドメソッドとしてアクティビティを渡します（`activities=[activities.count_books]`）。ワークフローからは、クラスのメソッド `BookActivities.count_books` でアクティビティを指定します。
+- Temporal の `Worker` には、解決されたインスタンスのバウンドメソッドとしてアクティビティを渡します（`activities=[activities.count_books]`）。ワークフローからは、クラスのメソッド `BookActivities.count_books` でアクティビティを指定します。
 
 ### <a id="workflows-never-take-clients"></a>ワークフローはクライアントを受け取らない
 
 ワークフローは、Temporal が履歴からリプレイするコードです。どのワーカーでも、いつでも、サンドボックスの中で実行されるので、決定的でなければならず、I/O を行ってはいけません。したがって、ワークフローがクライアントを受け取ることはありません。`CountBooks` の `__init__` には引数がなく、Temporal がそれを組み立て、nuke-di がそれを目にすることはありません。データベースや HTTP API、キューにアクセスするものはすべてアクティビティです。ワークフローのモジュールが `BookActivities` をインポートするのはそのメソッドを指定するためだけで、`workflow.unsafe.imports_passed_through()` の下でインポートします。こうすると、サンドボックスはモジュールを改めてインポートせず、すでにインポート済みのものを使います。
 
-テストでは、Temporal の時間をスキップするテストサーバー上でワークフローを実行し、アクティビティはモックを使って手で組み立てます。
+テストでは、Temporal の時間をスキップするテストサーバー上でワークフローを実行し、アクティビティはモックを使って手で組み立てます。[テスト](testing.md)と同じく、pytest-asyncio で `asyncio_mode = auto` を使います。
 
 ```python
 # tests/test_books.py
