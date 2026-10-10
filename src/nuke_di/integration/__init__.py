@@ -7,6 +7,7 @@ See docs/guide/integrations.md and docs/adr/0003-fastapi-signature-rewrite.md.
 """
 
 import inspect
+import types
 import weakref
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
@@ -198,12 +199,12 @@ def bind(call: Callable[..., Any] | None, container: Dependencies, framework: De
         return cast(list[Binding], marks["__nuke_di_bindings__"])
 
     try:
-        hints = get_type_hints(init, include_extras=True)
         # The signature as written, not the one a binding to another container replaced it with
         signature: inspect.Signature = marks.get("__nuke_di_signature__") or inspect.signature(call)
     except NameError:
-        # E.g. a name imported under TYPE_CHECKING: the framework copes with it, or reports it itself
+        # Annotations evaluated when read (Python 3.14) name what does not exist: the framework reports it
         return []
+    hints = _hints(init, signature)
 
     parameters = []
     own: list[Binding] = []
@@ -241,6 +242,36 @@ def bind(call: Callable[..., Any] | None, container: Dependencies, framework: De
     call.__nuke_di_signature__ = signature  # type: ignore[union-attr]
     call.__nuke_di_bindings__ = reachable  # type: ignore[union-attr]
     return reachable
+
+
+def _hints(init: Callable[..., Any], signature: inspect.Signature) -> dict[str, Any]:
+    """
+    The type hints of `init`, each evaluated on its own: one that names what cannot be evaluated, e.g. a name
+    imported under TYPE_CHECKING, is left as written, and the others still show their clients and markers.
+    """
+    try:
+        return get_type_hints(init, include_extras=True)
+    except NameError:
+        pass
+
+    annotations = {name: param.annotation for name, param in signature.parameters.items()}
+    annotations["return"] = signature.return_annotation
+    namespace = getattr(inspect.unwrap(init), "__globals__", {})
+    hints = {}
+    for name, annotation in annotations.items():
+        if annotation is inspect.Parameter.empty:
+            continue
+        # A function of its own for each hint, evaluated in the namespace of `init`
+        probe = types.FunctionType(_probe.__code__, namespace)
+        probe.__annotations__ = {name: annotation}
+        try:
+            hints.update(get_type_hints(probe, include_extras=True))
+        except NameError:
+            hints[name] = annotation
+    return hints
+
+
+def _probe() -> None: ...  # pragma: no cover
 
 
 def _hint_class(hint: Any) -> Any:

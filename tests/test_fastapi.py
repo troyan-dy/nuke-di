@@ -721,6 +721,28 @@ def test_dependency_with_unevaluable_hints_is_left_to_fastapi() -> None:
         assert client.get("/").json() == 3
 
 
+async def greeting_of(users: UserService) -> str:
+    return await users.greet(5)
+
+
+async def merged_context(request: fastapi.Request, greeting: str = Depends(greeting_of)) -> Decimal:
+    # The shape of Strawberry's GraphQLRouter, which wraps the user's context getter in a dependency whose
+    # return type is imported only under TYPE_CHECKING
+    return f"{request.url.path}: {greeting}"  # type: ignore[return-value]
+
+
+async def with_context(context: Annotated[str, Depends(merged_context)]) -> str:
+    return context
+
+
+def test_dependency_with_an_unevaluable_hint_still_reaches_its_dependencies() -> None:
+    app = make_app(Dependencies())
+    app.get("/context")(with_context)
+
+    with TestClient(app) as client:
+        assert client.get("/context").json() == "/context: Hello, user-5!"
+
+
 # --- pydantic --------------------------------------------------------------------------------------------
 
 
