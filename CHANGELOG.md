@@ -6,6 +6,25 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.18.1] - 2026-10-10
+
+### Documentation
+
+- Servers without dependency injection of their own run inside a `@worker` (#73), and a new guide page,
+  `docs/guide/servers-in-workers.md`, in every language, shows each of them with its code, the command and the
+  output of a run stopped by SIGTERM in the middle of a call. Each server stops within its own bound, kept below
+  `SHUTDOWN_GRACE_SECONDS`, since a cancelled worker does not stop the handlers running in the server's tasks:
+  grpc.aio (the servicer is a client, `server.stop(grace)`, and `server.stop(None)` in a `finally` aborts the
+  calls when the grace period runs out), aiohttp (`AppRunner` instead of `web.run_app()`, `cleanup()` waits up to
+  twice `shutdown_timeout`), websockets (`close_timeout` bounds only the closing handshake; a message in flight
+  loses its reply), APScheduler 3 and the 4.0 alpha (a running coroutine job is cancelled on shutdown, so the
+  worker waits for the run in flight and shuts the scheduler down in a `finally`), Textual (`App.run_async()`,
+  Ctrl+C is a key, a test with `run_test()`) and Temporal (#105: the activities class is a client,
+  `temporalio.client.Client` is wrapped in one, `graceful_shutdown_timeout`, workflows never take clients, a test
+  on the time-skipping server). Linked from the README, `docs/guide/integrations.md`,
+  `docs/guide/workers-and-jobs.md`, the Agent Skill, `context7.json` and `llms.txt`; `llms-full.txt` grows to about
+  45k tokens. No code in the package.
+
 ## [1.18.0] - 2026-10-10
 
 ### Added
@@ -768,7 +787,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.1...HEAD
+[1.18.1]: https://github.com/troyan-dy/nuke-di/compare/v1.18.0...v1.18.1
 [1.18.0]: https://github.com/troyan-dy/nuke-di/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/troyan-dy/nuke-di/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/troyan-dy/nuke-di/compare/v1.15.0...v1.16.0

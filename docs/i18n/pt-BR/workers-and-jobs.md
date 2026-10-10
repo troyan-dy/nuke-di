@@ -359,6 +359,9 @@ Fora de um worker ou job, nada o aciona, então um loop que depende de `Shutdown
 sem mudanças dentro de uma aplicação web. Um worker que retorna ou lança uma exceção por conta própria também encerra o
 processo: reiniciá-lo é tarefa do orquestrador.
 
+Um servidor sem injeção de dependências própria, como um servidor gRPC, uma aplicação aiohttp ou um
+worker do Temporal, roda dentro de um worker da mesma forma: veja [Servidores dentro de um worker](servers-in-workers.md).
+
 No Windows, só o SIGINT (Ctrl+C) é tratado; o SIGTERM mantém o comportamento padrão.
 
 ## <a id="grace-period"></a>Período de tolerância

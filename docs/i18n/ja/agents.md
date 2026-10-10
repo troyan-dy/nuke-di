@@ -74,7 +74,7 @@ Manual: https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt
 | ファイル | 内容 |
 |----------|------|
 | [`llms.txt`](../../../llms.txt) | [llms.txt](https://llmstxt.org) 形式の索引。`nuke-di` が何をして何をしないか、そしてすべてのページへのリンク |
-| [`llms-full.txt`](../../../llms-full.txt) | README とガイド全体を 1 つにまとめたファイル。約 38k トークン |
+| [`llms-full.txt`](../../../llms-full.txt) | README とガイド全体を 1 つにまとめたファイル。約 45k トークン |
 
 エージェントに raw URL `https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt` を渡せば、
 1 回の取得でマニュアル全体を読み込めます。

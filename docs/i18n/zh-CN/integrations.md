@@ -9,6 +9,8 @@
 都基于 `nuke_di.integration` 构建；与其他框架的集成，除了它和公开 API 之外，不需要 nuke-di 的任何其他东西。
 没有自身依赖注入的框架，例如 Starlette 或 Quart，不需要集成：基于同一套工具的
 [`nuke_di.asgi.lifespan()`](asgi.md) 负责连接客户端，处理函数向它获取客户端。
+没有自己的依赖注入的服务器，例如 grpc.aio、aiohttp、websockets、APScheduler、Textual 或 Temporal worker，
+根本不需要集成：它在 `@worker` 中运行，参见 [worker 中的服务器](servers-in-workers.md)。
 
 | 名称 | 作用 |
 |---|---|

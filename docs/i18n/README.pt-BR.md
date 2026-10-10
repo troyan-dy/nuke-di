@@ -395,8 +395,9 @@ Routers, websockets e o lifespan da própria aplicação são tratados em [FastA
   `Shutdown`, o período de tolerância, tarefas em segundo plano, códigos de saída, hooks, Kubernetes
 - Frameworks: [FastAPI](pt-BR/fastapi.md), [Litestar](pt-BR/litestar.md),
   [FastStream](pt-BR/faststream.md), [servidores MCP](pt-BR/mcp.md) com o SDK e com o FastMCP, [aiogram](pt-BR/aiogram.md), [taskiq](pt-BR/taskiq.md),
-  [Starlette, Quart e qualquer aplicação ASGI](pt-BR/asgi.md) e
-  [como escrever uma integração](pt-BR/integrations.md) para outro framework com `nuke_di.integration`
+  [Starlette, Quart e qualquer aplicação ASGI](pt-BR/asgi.md),
+  [servidores dentro de um worker](pt-BR/servers-in-workers.md) para grpc.aio, aiohttp, websockets, APScheduler,
+  Textual e Temporal, e [como escrever uma integração](pt-BR/integrations.md) para outro framework com `nuke_di.integration`
 - [Testes](pt-BR/testing.md): `mock()`, `override()`, as fixtures do pytest, a verificação da ligação
 - [Configuração](pt-BR/configuration.md): timeouts, concorrência e o período de tolerância
 - [Erros](pt-BR/errors.md): cada exceção e quando ela é lançada

@@ -6,6 +6,7 @@
 
 フレームワークとのインテグレーションが行うことは 2 つです。フレームワークのハンドラーが、そのフレームワーク自身の依存性注入を通じて型ヒントでクライアントを受け取ること、そしてアプリの起動時にコンテナが接続し、停止時に切断することです。[FastAPI](fastapi.md)、[Litestar](litestar.md)、[FastStream](faststream.md)、[MCP](mcp.md)、[aiogram](aiogram.md)、[taskiq](taskiq.md) のインテグレーションは `nuke_di.integration` の上に作られており、ほかのフレームワークとのインテグレーションが nuke-di から必要とするのは、これと公開 API だけです。
 Starlette や Quart のように独自の依存性注入を持たないフレームワークには、インテグレーションは不要です。同じキットの上に作られた [`nuke_di.asgi.lifespan()`](asgi.md) がクライアントを接続し、ハンドラーはそこからクライアントを取得します。
+grpc.aio、aiohttp、websockets、APScheduler、Textual、Temporal のワーカーのように独自の依存性注入を持たないサーバーには、インテグレーションはまったく要りません。`@worker` の中で動かせばよく、詳しくは[ワーカーの中で動くサーバー](servers-in-workers.md)を参照してください。
 
 | 名前 | 役割 |
 |---|---|

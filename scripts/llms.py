@@ -27,6 +27,7 @@ GUIDE = [
     "aiogram",
     "taskiq",
     "asgi",
+    "servers-in-workers",
     "integrations",
     "testing",
     "configuration",

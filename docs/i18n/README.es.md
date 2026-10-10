@@ -397,8 +397,9 @@ Los routers, los websockets y el lifespan propio de la app se describen en [Fast
   `Shutdown`, el periodo de gracia, tareas en segundo plano, códigos de salida, hooks, Kubernetes
 - Frameworks: [FastAPI](es/fastapi.md), [Litestar](es/litestar.md),
   [FastStream](es/faststream.md), [servidores MCP](es/mcp.md) con el SDK y con FastMCP, [aiogram](es/aiogram.md), [taskiq](es/taskiq.md),
-  [Starlette, Quart y cualquier app ASGI](es/asgi.md), y
-  [escribir una integración](es/integrations.md) para otro framework con `nuke_di.integration`
+  [Starlette, Quart y cualquier app ASGI](es/asgi.md),
+  [servidores dentro de un worker](es/servers-in-workers.md) para grpc.aio, aiohttp, websockets, APScheduler,
+  Textual y Temporal, y [escribir una integración](es/integrations.md) para otro framework con `nuke_di.integration`
 - [Pruebas](es/testing.md): `mock()`, `override()`, los fixtures de pytest, la comprobación del cableado
 - [Configuración](es/configuration.md): timeouts, concurrencia y el periodo de gracia
 - [Errores](es/errors.md): cada excepción y cuándo se lanza

@@ -399,8 +399,9 @@ $ pytest -q tests/test_api.py
   `Shutdown`, grace period, фоновые задачи, коды завершения, хуки, Kubernetes
 - Фреймворки: [FastAPI](ru/fastapi.md), [Litestar](ru/litestar.md),
   [FastStream](ru/faststream.md), [MCP-серверы](ru/mcp.md) на SDK и на FastMCP, [aiogram](ru/aiogram.md), [taskiq](ru/taskiq.md),
-  [Starlette, Quart и любое ASGI-приложение](ru/asgi.md), а также
-  [своя интеграция](ru/integrations.md) для другого фреймворка на `nuke_di.integration`
+  [Starlette, Quart и любое ASGI-приложение](ru/asgi.md),
+  [серверы внутри воркера](ru/servers-in-workers.md) для grpc.aio, aiohttp, websockets, APScheduler,
+  Textual и Temporal, а также [своя интеграция](ru/integrations.md) для другого фреймворка на `nuke_di.integration`
 - [Тестирование](ru/testing.md): `mock()`, `override()`, фикстуры pytest, проверка связывания
 - [Настройка](ru/configuration.md): таймауты, конкурентность и grace period
 - [Ошибки](ru/errors.md): все исключения и когда они выбрасываются

@@ -393,7 +393,9 @@ Routery, websockety i własny lifespan aplikacji opisuje rozdział [FastAPI](pl/
   `Shutdown`, okres karencji, zadania w tle, kody wyjścia, hooki, Kubernetes
 - Frameworki: [FastAPI](pl/fastapi.md), [Litestar](pl/litestar.md),
   [FastStream](pl/faststream.md), [serwery MCP](pl/mcp.md) na SDK i na FastMCP, [aiogram](pl/aiogram.md), [taskiq](pl/taskiq.md),
-  [Starlette, Quart i dowolna aplikacja ASGI](pl/asgi.md) oraz
+  [Starlette, Quart i dowolna aplikacja ASGI](pl/asgi.md),
+  [serwery wewnątrz workera](pl/servers-in-workers.md) dla grpc.aio, aiohttp, websockets, APScheduler,
+  Textual i Temporal oraz
   [pisanie integracji](pl/integrations.md) z innym frameworkiem przez `nuke_di.integration`
 - [Testowanie](pl/testing.md): `mock()`, `override()`, fixture'y pytest, sprawdzanie okablowania
 - [Konfiguracja](pl/configuration.md): timeouty, współbieżność i okres karencji

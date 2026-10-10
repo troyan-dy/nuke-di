@@ -13,6 +13,9 @@ pública.
 Un framework sin inyección de dependencias propia, como Starlette o Quart, no necesita integración:
 [`nuke_di.asgi.lifespan()`](asgi.md), construido sobre el mismo kit, conecta los clientes, y los handlers
 se los piden a él.
+Un servidor sin inyección de dependencias propia, como grpc.aio, aiohttp, websockets, APScheduler, Textual o un
+worker de Temporal, no necesita ninguna integración: se ejecuta dentro de un `@worker`, consulta
+[Servidores dentro de un worker](servers-in-workers.md).
 
 | Nombre | Qué hace |
 |---|---|

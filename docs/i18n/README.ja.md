@@ -356,6 +356,7 @@ $ pytest -q tests/test_api.py
 - [コンテナ](ja/container.md)：`Dependencies` とグローバルな `DI`、`resolve()`、`inject()`、`mock()`、`override()`
 - [ワーカーとジョブ](ja/workers-and-jobs.md)：`@job` と `@worker`、コマンドラインパラメータ、`Shutdown`、猶予期間、バックグラウンドタスク、終了コード、フック、Kubernetes
 - フレームワーク：[FastAPI](ja/fastapi.md)、[Litestar](ja/litestar.md)、[FastStream](ja/faststream.md)、SDK と FastMCP の上の [MCP サーバー](ja/mcp.md)、[aiogram](ja/aiogram.md)、[taskiq](ja/taskiq.md)、[Starlette、Quart、任意の ASGI アプリ](ja/asgi.md)、
+  grpc.aio、aiohttp、websockets、APScheduler、Textual、Temporal 向けの[ワーカーの中で動くサーバー](ja/servers-in-workers.md)、
   そして `nuke_di.integration` でほかのフレームワーク向けに[インテグレーションを書く](ja/integrations.md)
 - [テスト](ja/testing.md)：`mock()`、`override()`、pytest フィクスチャ、配線の確認
 - [設定](ja/configuration.md)：タイムアウト、並行数、猶予期間

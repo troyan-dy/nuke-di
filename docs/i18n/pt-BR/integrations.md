@@ -12,6 +12,9 @@ integração com outro framework não precisa de nada do nuke-di além dele e da
 Um framework sem injeção de dependências própria, como Starlette ou Quart, não precisa de integração:
 [`nuke_di.asgi.lifespan()`](asgi.md), construído sobre o mesmo kit, conecta os clientes, e os handlers
 os pedem a ele.
+Um servidor sem injeção de dependências própria, como grpc.aio, aiohttp, websockets, APScheduler, Textual ou um
+worker do Temporal, não precisa de integração nenhuma: ele roda dentro de um `@worker`, veja
+[Servidores dentro de um worker](servers-in-workers.md).
 
 | Nome | O que faz |
 |---|---|
