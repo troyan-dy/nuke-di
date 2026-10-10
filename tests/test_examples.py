@@ -164,6 +164,10 @@ PROGRAMS = [
     ),
     Program("testing.main", output=("registered user 4",)),
     Program(
+        "taskiq_app.main",
+        output=("send_report(1): sent to alice", "mail to admin: taskiq_app.tasks:send_reports finished"),
+    ),
+    Program(
         "testing.jobs.reminders", ("--limit", "1", "--dry-run"), output=("reminders: would remind bob@example.com",)
     ),
     Program(

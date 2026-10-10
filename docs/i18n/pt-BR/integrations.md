@@ -6,7 +6,8 @@
 
 Uma integração com um framework faz duas coisas: os handlers do framework recebem clientes pelo type hint, por meio
 da injeção de dependências do próprio framework, e o container se conecta quando a aplicação inicia e se desconecta
-quando ela para. As integrações de [FastAPI](fastapi.md), [Litestar](litestar.md) e [FastStream](faststream.md) são
+quando ela para. As integrações de [FastAPI](fastapi.md), [Litestar](litestar.md), [FastStream](faststream.md) e
+[taskiq](taskiq.md) são
 construídas sobre `nuke_di.integration`, e uma integração com outro framework não precisa de nada do nuke-di
 além dele e da API pública.
 

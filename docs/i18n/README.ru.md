@@ -16,7 +16,7 @@
 зависимости, конкурентно со всеми остальными готовыми клиентами.
 
 Вдобавок один декоратор превращает асинхронную функцию в процесс с параметрами командной строки,
-а обработчики FastAPI, Litestar и FastStream получают клиенты по аннотации типа точно так же.
+а обработчики FastAPI, Litestar и FastStream и задачи taskiq получают клиенты по аннотации типа точно так же.
 
 Библиотека выделена из DI-подсистемы продакшен-фреймворка для микросервисов на Python
 и не имеет зависимостей во время выполнения.
@@ -386,7 +386,7 @@ $ pytest -q tests/test_api.py
 ```
 
 Роутеры, WebSocket и собственный lifespan приложения описаны в разделе [FastAPI](ru/fastapi.md);
-[Litestar](ru/litestar.md) и [FastStream](ru/faststream.md) работают так же.
+[Litestar](ru/litestar.md), [FastStream](ru/faststream.md) и [taskiq](ru/taskiq.md) работают так же.
 
 ## <a id="documentation"></a>Документация
 
@@ -397,13 +397,13 @@ $ pytest -q tests/test_api.py
 - [Воркеры и джобы](ru/workers-and-jobs.md): `@job` и `@worker`, параметры командной строки,
   `Shutdown`, grace period, фоновые задачи, коды завершения, хуки, Kubernetes
 - Фреймворки: [FastAPI](ru/fastapi.md), [Litestar](ru/litestar.md),
-  [FastStream](ru/faststream.md), а также
+  [FastStream](ru/faststream.md), [taskiq](ru/taskiq.md), а также
   [своя интеграция](ru/integrations.md) для другого фреймворка на `nuke_di.integration`
 - [Тестирование](ru/testing.md): `mock()`, `override()`, фикстуры pytest, проверка связывания
 - [Настройка](ru/configuration.md): таймауты, конкурентность и grace period
 - [Ошибки](ru/errors.md): все исключения и когда они выбрасываются
 - [Примеры](../../examples/README.md): 21 готовый к запуску сценарий, от разового скрипта и воркера очереди
-  до FastAPI, Litestar, FastStream, Starlette и целого сервиса, каждый с выводом и тестами
+  до FastAPI, Litestar, FastStream, taskiq, Starlette и целого сервиса, каждый с выводом и тестами
 - [Бенчмарки](../benchmarks.md): каждый сценарий, базовые замеры на Python 3.11–3.14 и сравнение
   с другими библиотеками
 - [Агенты для написания кода](ru/agents.md): Agent Skill, блок для `AGENTS.md`,

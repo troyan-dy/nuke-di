@@ -53,7 +53,7 @@ An agent without skills still reads the instructions of the project. Paste this 
 
 This project uses nuke-di. A dependency is a `nuke_di.Client` subclass whose `__init__` takes its own
 dependencies as type-hinted arguments; I/O goes in `async def connect()` / `disconnect()`, never in `__init__`.
-Functions, `@job` / `@worker` entrypoints and FastAPI / Litestar / FastStream handlers take clients by type hint.
+Functions, `@job` / `@worker` entrypoints, FastAPI / Litestar / FastStream handlers and taskiq tasks take clients by type hint.
 
 Do not write what nuke-di rejects:
 - provider or factory functions: wrap a third-party object in a Client that creates it in connect();

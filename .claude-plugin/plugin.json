@@ -1,6 +1,6 @@
 {
   "name": "nuke-di",
-  "description": "Writes nuke-di code in its own shape: clients, jobs, workers, FastAPI / Litestar / FastStream, tests, and none of the rejected designs",
+  "description": "Writes nuke-di code in its own shape: clients, jobs, workers, FastAPI / Litestar / FastStream / taskiq, tests, and none of the rejected designs",
   "author": {
     "name": "Dmitriy Troyan",
     "url": "https://github.com/troyan-dy"
