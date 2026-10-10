@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="984" viewBox="0 0 880 984" role="img" aria-labelledby="t d">
 <title id="t">A product page: 21 clients, started by each library</title>
-<desc id="d">A product page API needs four features, and every feature four connections that take 100 to 300 ms to connect. nuke-di connects every client as soon as its own dependencies have, so the startup takes the longest chain, 336 ms; dishka and wireup connect one client after another, 3.41 s. dependency-injector starts as fast with a Resource per client and stops layer by layer, 657 ms against 366 ms.</desc>
+<desc id="d">A product page API needs four features, and every feature four connections that take 100 to 300 ms to connect. nuke-di connects every client as soon as its own dependencies have, so the startup takes the longest chain, 336 ms; dishka and wireup connect one client after another, 3.41 s. dependency-injector starts as fast with a Resource per client and stops layer by layer, 657 ms against 365 ms.</desc>
 <style>
 svg {
   --surface: #fcfcfb; --border: #e4e3df; --text: #0b0b0b; --muted: #52514e; --grid: #ecebe7;
@@ -144,32 +144,32 @@ text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Ar
 <line class="grid" x1="24" x2="856" y1="622" y2="622"/>
 <text class="title" x="24" y="650">Startup: connect() of every client, median of 20 runs</text>
 <text class="label" x="24" y="681">nuke-di</text>
-<rect class="ours" x="300" y="668" width="40.9" height="18" rx="3"/>
-<text class="value" x="348.9" y="681">336 ms<tspan class="ratio"></tspan></text>
+<rect class="ours" x="300" y="668" width="40.8" height="18" rx="3"/>
+<text class="value" x="348.8" y="681">336 ms<tspan class="ratio"></tspan></text>
 <text class="label" x="24" y="707">dependency-injector, a Resource per client</text>
-<rect class="theirs" x="300" y="694" width="40.9" height="18" rx="3"/>
-<text class="value" x="348.9" y="707">336 ms<tspan class="ratio">  the same</tspan></text>
+<rect class="theirs" x="300" y="694" width="40.8" height="18" rx="3"/>
+<text class="value" x="348.8" y="707">336 ms<tspan class="ratio">  the same</tspan></text>
 <text class="label" x="24" y="733">wireup, the four features gathered by hand</text>
-<rect class="theirs" x="300" y="720" width="114.9" height="18" rx="3"/>
-<text class="value" x="422.9" y="733">945 ms<tspan class="ratio">  2.8× longer</tspan></text>
+<rect class="theirs" x="300" y="720" width="115.1" height="18" rx="3"/>
+<text class="value" x="423.1" y="733">947 ms<tspan class="ratio">  2.8× longer</tspan></text>
 <text class="label" x="24" y="759">wireup</text>
 <rect class="theirs" x="300" y="746" width="415.0" height="18" rx="3"/>
-<text class="value" x="723.0" y="759">3.41 s<tspan class="ratio">  10.1× longer</tspan></text>
+<text class="value" x="723.0" y="759">3.41 s<tspan class="ratio">  10.2× longer</tspan></text>
 <text class="label" x="24" y="785">dishka</text>
 <rect class="theirs" x="300" y="772" width="414.7" height="18" rx="3"/>
-<text class="value" x="722.7" y="785">3.41 s<tspan class="ratio">  10.1× longer</tspan></text>
+<text class="value" x="722.7" y="785">3.41 s<tspan class="ratio">  10.2× longer</tspan></text>
 <text class="title" x="24" y="824">Shutdown: disconnect() of every client</text>
 <text class="note" x="24" y="842">Checkout finishes the orders in flight and EventsProducer flushes its messages, 300 ms each; every client disconnects after the clients that need it.</text>
 <text class="label" x="24" y="873">nuke-di</text>
-<rect class="ours" x="300" y="860" width="44.5" height="18" rx="3"/>
-<text class="value" x="352.5" y="873">366 ms<tspan class="ratio"></tspan></text>
+<rect class="ours" x="300" y="860" width="44.4" height="18" rx="3"/>
+<text class="value" x="352.4" y="873">365 ms<tspan class="ratio"></tspan></text>
 <text class="label" x="24" y="899">dependency-injector</text>
 <rect class="theirs" x="300" y="886" width="79.9" height="18" rx="3"/>
 <text class="value" x="387.9" y="899">657 ms<tspan class="ratio">  1.8× longer</tspan></text>
 <text class="label" x="24" y="925">wireup</text>
-<rect class="theirs" x="300" y="912" width="103.3" height="18" rx="3"/>
-<text class="value" x="411.3" y="925">849 ms<tspan class="ratio">  2.3× longer</tspan></text>
+<rect class="theirs" x="300" y="912" width="103.4" height="18" rx="3"/>
+<text class="value" x="411.4" y="925">851 ms<tspan class="ratio">  2.3× longer</tspan></text>
 <text class="label" x="24" y="951">dishka</text>
-<rect class="theirs" x="300" y="938" width="103.2" height="18" rx="3"/>
-<text class="value" x="411.2" y="951">849 ms<tspan class="ratio">  2.3× longer</tspan></text>
+<rect class="theirs" x="300" y="938" width="103.3" height="18" rx="3"/>
+<text class="value" x="411.3" y="951">850 ms<tspan class="ratio">  2.3× longer</tspan></text>
 </svg>
