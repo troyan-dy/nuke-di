@@ -2,7 +2,7 @@
 FastMCP integration (`fastmcp` 4.x): the tools, resources and prompts of a `FastMCP` server, and the functions
 they depend on, take clients by type hint.
 
-See docs/specs/fastmcp.md and docs/adr/0011-mcp-clients-through-the-sdk-markers.md.
+See docs/specs/mcp.md and docs/adr/0011-mcp-clients-through-the-sdk-markers.md.
 """
 
 import inspect

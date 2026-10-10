@@ -5,7 +5,7 @@
 ← [文档](../README.zh-CN.md#documentation)
 
 与框架的集成要做两件事：框架的处理函数通过框架自身的依赖注入，按类型提示接收客户端；容器在应用启动时连接，
-在应用停止时断开。[FastAPI](fastapi.md)、[Litestar](litestar.md) 和 [FastStream](faststream.md) 的集成
+在应用停止时断开。[FastAPI](fastapi.md)、[Litestar](litestar.md)、[FastStream](faststream.md) 和 [MCP](mcp.md) 的集成
 都基于 `nuke_di.integration` 构建；与其他框架的集成，除了它和公开 API 之外，不需要 nuke-di 的任何其他东西。
 
 | 名称 | 作用 |

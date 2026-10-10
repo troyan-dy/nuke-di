@@ -6,9 +6,9 @@
 
 An integration with a framework does two things: the framework's handlers take clients by type hint, through
 the framework's own dependency injection, and the container connects when the app starts and disconnects when
-it stops. The [FastAPI](fastapi.md), [Litestar](litestar.md) and [FastStream](faststream.md) integrations are
-built on `nuke_di.integration`, and an integration with another framework needs nothing from nuke-di beyond it
-and the public API.
+it stops. The [FastAPI](fastapi.md), [Litestar](litestar.md), [FastStream](faststream.md) and [MCP](mcp.md)
+integrations are built on `nuke_di.integration`, and an integration with another framework needs nothing from
+nuke-di beyond it and the public API.
 
 | Name | What it does |
 |---|---|

@@ -10,7 +10,7 @@
     {
       "name": "nuke-di",
       "source": "./",
-      "description": "Writes nuke-di code in its own shape: clients, jobs, workers, FastAPI / Litestar / FastStream, tests, and none of the rejected designs",
+      "description": "Writes nuke-di code in its own shape: clients, jobs, workers, FastAPI / Litestar / FastStream / MCP, tests, and none of the rejected designs",
       "category": "development",
       "tags": ["python", "dependency-injection", "asyncio"]
     }
