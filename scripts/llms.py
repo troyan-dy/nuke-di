@@ -23,6 +23,7 @@ GUIDE = [
     "fastapi",
     "litestar",
     "faststream",
+    "servers-in-workers",
     "integrations",
     "testing",
     "configuration",

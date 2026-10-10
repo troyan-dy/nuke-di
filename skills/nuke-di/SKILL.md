@@ -116,6 +116,11 @@ per handler.
 - FastAPI: `from nuke_di.fastapi import setup`; `setup(app)` right after `app = FastAPI()`, before the routes.
 - Litestar: `from nuke_di.litestar import ClientPlugin`; `Litestar(handlers, plugins=[ClientPlugin()])`.
 - FastStream: `from nuke_di.faststream import setup`; `setup(app)` after `app = FastStream(broker)`.
+- A server with no DI of its own (grpc.aio, aiohttp, websockets, APScheduler, Textual, a Temporal worker): no
+  integration. A `@worker` builds and starts it, `await shutdown.wait()`, stops it within its own timeout
+  below `SHUTDOWN_GRACE_SECONDS`; the class whose methods are the handlers (servicer, views, jobs,
+  activities) is a `Client`. Workflows never take clients. See
+  [Servers inside a worker](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/servers-in-workers.md).
 
 **Per-request state** (a transaction, a unit of work, a request id) is not a client: open it in
 the handler through a method of a long-lived client, e.g. `async with db.transaction() as tx:`.

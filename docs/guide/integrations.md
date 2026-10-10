@@ -9,6 +9,9 @@ the framework's own dependency injection, and the container connects when the ap
 it stops. The [FastAPI](fastapi.md), [Litestar](litestar.md) and [FastStream](faststream.md) integrations are
 built on `nuke_di.integration`, and an integration with another framework needs nothing from nuke-di beyond it
 and the public API.
+A server with no dependency injection of its own, such as grpc.aio, aiohttp, websockets, APScheduler, Textual or a
+Temporal worker, needs no integration at all: it runs inside a `@worker`, see
+[Servers inside a worker](servers-in-workers.md).
 
 | Name | What it does |
 |---|---|

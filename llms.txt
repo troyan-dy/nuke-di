@@ -17,6 +17,7 @@ recipes in the guide reach the same results with plain clients, `mock()` and `ov
 - [FastAPI](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/fastapi.md)
 - [Litestar](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/litestar.md)
 - [FastStream](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/faststream.md)
+- [Servers inside a worker](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/servers-in-workers.md)
 - [Writing an integration](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/integrations.md)
 - [Testing](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/testing.md): `mock()`, `override()`, the pytest fixtures, checking the wiring
 - [Configuration](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/configuration.md): timeouts, concurrency and the grace period
