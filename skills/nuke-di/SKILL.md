@@ -118,12 +118,13 @@ per handler.
 - FastStream: `from nuke_di.faststream import setup`; `setup(app)` after `app = FastStream(broker)`.
 - Several FastAPI routes sharing request data and clients: a plain class whose `__init__` takes both, used
   as `Annotated[Account, Depends()]`; not a `Client` subclass, which FastAPI would build per request
-  unconnected. An app factory `make_app(container)` creates its `ClientRouter(container=container)` inside.
+  unconnected. An app factory `make_app(container)` calls `setup(app, container)` and creates its
+  `ClientRouter(container=container)` inside; apps on different containers can share route functions.
 - Publishing from a FastStream handler: a `Client` that takes the app's broker as a default argument,
   `def __init__(self, nats: NatsBroker = broker)`, and leaves `connect()` / `disconnect()` to FastStream.
 - Strawberry GraphQL: resolvers read clients from `info.context`, a context class or getter that takes the
-  clients; on FastAPI `GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute,
-  dependencies=[Depends(Context)])`, on Litestar `make_graphql_controller(..., context_getter=get_context)`.
+  clients; on FastAPI `GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute)`, on Litestar
+  `make_graphql_controller(..., context_getter=get_context)`.
 
 **Per-request state** (a transaction, a unit of work, a request id) is not a client: open it in
 the handler through a method of a long-lived client, e.g. `async with db.transaction() as tx:`.
