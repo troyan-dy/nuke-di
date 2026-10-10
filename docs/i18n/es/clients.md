@@ -606,7 +606,7 @@ Found 2 errors in 1 file (checked 1 source file)
 - Se deja al contenedor: un type hint que no se puede evaluar en tiempo de ejecución, que mypy evalúa
   de todos modos; una clase en una variable de tipo `type[...]`, que puede contener una subclase con
   otro `__init__`; un `__init__` decorado o sobrecargado; `inject()` de una clase; las rutas y los
-  handlers de las integraciones con FastAPI, Litestar y FastStream; un tipo que mypy no conoce, como
+  handlers de las integraciones con FastAPI, Litestar, FastStream y aiogram; un tipo que mypy no conoce, como
   una clase de una biblioteca sin type hints.
 - Un error intencionado, en una prueba de ese error, se silencia con `# type: ignore[nuke-di]`.
 - Funciona con mypy 1.13 y posteriores, con caché igual que sin ella: un cambio en un cliente en lo

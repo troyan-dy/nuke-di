@@ -1,7 +1,7 @@
 {
   "$schema": "https://context7.com/schema/context7.json",
   "projectTitle": "nuke-di",
-  "description": "Type-hint based dependency injection for async Python: a dependency is a Client class with connect() / disconnect(); jobs, workers, FastAPI, Litestar and FastStream integrations, pytest fixtures.",
+  "description": "Type-hint based dependency injection for async Python: a dependency is a Client class with connect() / disconnect(); jobs, workers, FastAPI, Litestar, FastStream, MCP (SDK and FastMCP), aiogram and taskiq integrations, a lifespan for Starlette, Quart and any ASGI app, pytest fixtures.",
   "folders": [
     "docs/guide",
     "examples"
@@ -22,7 +22,7 @@
     "Depend on concrete client classes: there is no bind(Protocol, Impl), no qualifiers and no multibinding; tests swap a client with DI.mock() or DI.override().",
     "A client lives as long as its container: there are no request or message scopes; open per-request state through a method of a client, and do not build new code on NotSingletonClient.",
     "Never retry or wait in connect(): it fails fast and the orchestrator restarts the process.",
-    "Use @job or @worker for a process, nuke_di.fastapi.setup(app), nuke_di.litestar.ClientPlugin or nuke_di.faststream.setup(app) for a framework; handlers take clients by type hint.",
+    "Use @job or @worker for a process, nuke_di.fastapi.setup(app), nuke_di.litestar.ClientPlugin, nuke_di.faststream.setup(app), nuke_di.mcp.setup(server) or nuke_di.fastmcp.setup(mcp) before the tools, nuke_di.aiogram.setup(dp) or nuke_di.taskiq.setup(broker) for a framework; handlers, tools and tasks take clients by type hint. Starlette, Quart and plain ASGI apps use clients = nuke_di.asgi.lifespan(DI, UserService) as the lifespan and clients.get(UserService) in a handler. A server with no DI of its own (grpc.aio, aiohttp, websockets, APScheduler, Textual, Temporal) runs inside a @worker, and the class whose methods are its handlers is a Client.",
     "Register mock() or override() before anything is resolved; check the wiring with mypy and plugins = [\"nuke_di.mypy\"]."
   ]
 }

@@ -357,6 +357,9 @@ $ echo $?
 原样工作。自行返回或抛出异常的 worker 同样会结束进程：
 重启它是编排系统的职责。
 
+没有自己的依赖注入的服务器，例如 gRPC 服务器、aiohttp 应用或 Temporal worker，
+也以同样的方式在 worker 中运行：参见 [worker 中的服务器](servers-in-workers.md)。
+
 在 Windows 上只处理 SIGINT（Ctrl+C）；SIGTERM 保持默认行为。
 
 ## <a id="grace-period"></a>宽限期

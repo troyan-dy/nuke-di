@@ -1,6 +1,6 @@
 ---
 name: nuke-di
-description: Use when writing, changing, reviewing or testing Python code that uses nuke-di (import nuke_di) - Client classes, DI.resolve / DI.inject, @job, @worker, nuke_di.fastapi / litestar / faststream, mock() / override(), the di / global_di pytest fixtures. Gives the whole model and the recipes, and keeps out the designs nuke-di rejects - provider functions, interface binding, per-request scopes and retries in connect().
+description: Use when writing, changing, reviewing or testing Python code that uses nuke-di (import nuke_di) - Client classes, DI.resolve / DI.inject, @job, @worker, nuke_di.fastapi / litestar / faststream / mcp / fastmcp / aiogram / taskiq / asgi, mock() / override(), the di / global_di pytest fixtures. Gives the whole model and the recipes, and keeps out the designs nuke-di rejects - provider functions, interface binding, per-request scopes and retries in connect().
 ---
 
 # nuke-di
@@ -125,6 +125,28 @@ per handler.
 - Strawberry GraphQL: resolvers read clients from `info.context`, a context class or getter that takes the
   clients; on FastAPI `GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute)`, on Litestar
   `make_graphql_controller(..., context_getter=get_context)`.
+- MCP SDK (`mcp` 2.x): `from nuke_di.mcp import setup`; `setup(server)` right after
+  `server = MCPServer(...)`, before the tools. Tools and their `Resolve(...)` resolvers take clients;
+  resources and prompts do not.
+- FastMCP: `from nuke_di.fastmcp import setup`; `setup(mcp)` right after `mcp = FastMCP(...)`, before the
+  tools, resources and prompts, which take clients, as do their `Depends(...)` functions.
+- aiogram: `from nuke_di.aiogram import setup`; `setup(dp)` on the `Dispatcher`, not on a router; a handler is
+  `async def start(message: Message, users: UserService)`. Filters and scenes take no clients.
+- taskiq: `from nuke_di.taskiq import setup`; `setup(broker)` right after the broker, before the tasks;
+  the worker connects the clients, a process that only kicks tasks connects none. A client argument of a
+  task takes `= TaskiqDepends()` as its default, so type checkers accept `.kiq()` without it.
+  Run `taskiq worker --max-fails 1`, so a failed connect exits the process instead of looping.
+- A server with no DI of its own (grpc.aio, aiohttp, websockets, APScheduler, Textual, a Temporal worker): no
+  integration. A `@worker` builds and starts it, `await shutdown.wait()`, stops it within its own timeout
+  below `SHUTDOWN_GRACE_SECONDS`; the class whose methods are the handlers (servicer, views, APScheduler
+  jobs, activities) is a `Client`. Workflows never take clients. See
+  [Servers inside a worker](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/servers-in-workers.md).
+
+A framework without dependency injection (Starlette, Quart, aiohttp, a plain ASGI app) lists the
+clients its handlers take: `from nuke_di.asgi import lifespan`; `clients = lifespan(DI, UserService)`;
+`Starlette(routes, lifespan=clients)`, and a handler calls `clients.get(UserService)`. Quart enters
+`clients(self)` in `startup()` of a `Quart` subclass, around every serving hook (see the guide page
+asgi.md); aiohttp 3.14 takes `app.cleanup_ctx.append(clients)`.
 
 **Per-request state** (a transaction, a unit of work, a request id) is not a client: open it in
 the handler through a method of a long-lived client, e.g. `async with db.transaction() as tx:`.

@@ -582,7 +582,7 @@ Found 2 errors in 1 file (checked 1 source file)
   位于客户端参数之后的参数会变为仅限关键字参数，因为按位置传入的值会落到客户端的位置上。
 - 留给容器处理的情况：运行时无法求值的类型提示（mypy 仍会对它求值）；存放在 `type[...]` 类型变量中的类，
   它可能持有带有另一个 `__init__` 的子类；被装饰或被重载的 `__init__`；对类调用 `inject()`；
-  FastAPI、Litestar 和 FastStream 集成中的路由与处理函数；mypy 不认识的类型，例如没有类型提示的库中的类。
+  FastAPI、Litestar、FastStream 和 aiogram 集成中的路由与处理函数；mypy 不认识的类型，例如没有类型提示的库中的类。
 - 有意为之的错误（例如在测试该错误的测试中）用 `# type: ignore[nuke-di]` 屏蔽。
 - 它支持 mypy 1.13 及更高版本，无论是否使用缓存都能工作：修改依赖树深处的某个客户端后，
   该依赖树的所有调用都会被重新检查。mypy 的守护进程 `dmypy` 在重启之前可能察觉不到这类修改。

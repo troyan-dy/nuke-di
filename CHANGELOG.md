@@ -26,7 +26,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   - Strawberry GraphQL (#105): resolvers read clients from `info.context`. On FastAPI the context is a class
     that takes the clients, given to `GraphQLRouter` with `route_class=ClientRoute`; on Litestar a context
     getter function, through `ClientPlugin`; queries and subscriptions.
-- `skills/nuke-di/SKILL.md` names the three recipes.
+- `skills/nuke-di/SKILL.md` names the three recipes; `llms-full.txt` grows to about 52k tokens.
 
 ## [1.18.2] - 2026-10-10
 
@@ -47,10 +47,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   the same time gave the override the other container's clients, since FastAPI reads the signature of an
   override on every request. It gets its own app's clients now.
 - `bind()` evaluates the type hints of a function each on its own, for every integration built on
-  `nuke_di.integration` (FastAPI, FastStream and third-party ones): a hint that cannot be evaluated, such as a
-  name imported under `TYPE_CHECKING`, is left as written instead of making `bind()` skip the whole function,
-  and on Python 3.14, which evaluates annotations when it reads a signature, such a name is read as a
-  `ForwardRef`. The client arguments and `Depends(...)` of that function are found again, so Strawberry's
+  `nuke_di.integration` (FastAPI, FastStream, taskiq and third-party ones): a hint that cannot be evaluated,
+  such as a name imported under `TYPE_CHECKING`, is left as written instead of making `bind()` skip the whole
+  function, and on Python 3.14, which evaluates annotations when it reads a signature, such a name is read as
+  a `ForwardRef`. The client arguments and `Depends(...)` of that function are found again, so Strawberry's
   `GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute)` works with clients in `Context`
   without also listing `Depends(Context)` in its `dependencies=`: Strawberry wraps the getter in a dependency
   whose return type is imported only under `TYPE_CHECKING`.
@@ -62,6 +62,167 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   constructor and its `cls` and `instance`; the [FastAPI](docs/guide/fastapi.md) rules say which container's
   clients an app gets, mounted apps included; in every language. ADR-0003 has a dated revisit with the
   designs considered and rejected.
+
+## [1.18.1] - 2026-10-10
+
+### Documentation
+
+- Servers without dependency injection of their own run inside a `@worker` (#73), and a new guide page,
+  `docs/guide/servers-in-workers.md`, in every language, shows each of them with its code, the command and the
+  output of a run stopped by SIGTERM in the middle of a call. Each server stops within its own bound, kept below
+  `SHUTDOWN_GRACE_SECONDS`, since a cancelled worker does not stop the handlers running in the server's tasks:
+  grpc.aio (the servicer is a client, `server.stop(grace)`, and `server.stop(None)` in a `finally` aborts the
+  calls when the grace period runs out), aiohttp (`AppRunner` instead of `web.run_app()`, `cleanup()` waits up to
+  twice `shutdown_timeout`), websockets (`close_timeout` bounds only the closing handshake; a message in flight
+  loses its reply), APScheduler 3 and the 4.0 alpha (a running coroutine job is cancelled on shutdown, so the
+  worker waits for the run in flight and shuts the scheduler down in a `finally`), Textual (`App.run_async()`,
+  Ctrl+C is a key, a test with `run_test()`) and Temporal (#105: the activities class is a client,
+  `temporalio.client.Client` is wrapped in one, `graceful_shutdown_timeout`, workflows never take clients, a test
+  on the time-skipping server). Linked from the README, `docs/guide/integrations.md`,
+  `docs/guide/workers-and-jobs.md`, the Agent Skill, `context7.json` and `llms.txt`; `llms-full.txt` grows to about
+  45k tokens. No code in the package.
+
+## [1.18.0] - 2026-10-10
+
+### Added
+
+- `nuke_di.asgi.lifespan(container, *clients)` for an app whose framework has no dependency injection: Starlette,
+  Quart, aiohttp, a plain ASGI app, or a FastAPI app that keeps its signatures (#72). `clients = lifespan(DI,
+  UserService, Database)` is the app's lifespan, `Starlette(lifespan=clients)`: on startup it resolves the
+  listed clients and connects them with their dependencies, on shutdown it sets `Shutdown`, stops the
+  `BackgroundTasks` and disconnects, and a failed connect fails the startup with a `RuntimeError`, all through
+  `nuke_di.integration.running()`. A handler takes a client with `clients.get(UserService)`, typed for mypy and
+  pyright; a client the list lacks, or a handler run without the lifespan, raises a `RuntimeError` that says
+  what to do. `clients(app)` is an async context manager, so the app's own lifespan runs inside it, a
+  `Quart` subclass enters it around `startup()` and `shutdown()`, and aiohttp 3.14 takes it in `cleanup_ctx`
+  as it is. No framework is
+  imported and no extra is needed. `tests/test_asgi.py` runs `nuke_di.integration.testing.check()` on a
+  Starlette app.
+
+### Changed
+
+- `examples/starlette_app` uses `lifespan()` instead of a hand-written `Wiring` class that bound every handler
+  with `inject()`.
+
+### Documentation
+
+- A guide page, `docs/guide/asgi.md`, "Starlette, Quart and any ASGI app": Starlette, the app's own lifespan,
+  testing, Quart, aiohttp and a plain ASGI app, each run with its real output, and the errors; in every
+  language, linked from the README and from "Writing an integration". `docs/specs/asgi.md` records why
+  handlers take clients from `get()` rather than from `request.state`, and why Quart connects around
+  `startup()` / `shutdown()` rather than in serving hooks.
+- The Agent Skill, the `AGENTS.md` block of `docs/guide/agents.md`, `context7.json`, the plugin manifests and
+  `llms.txt` / `llms-full.txt` name the new module; `llms-full.txt` grows to about 38k tokens.
+
+## [1.17.0] - 2026-10-10
+
+### Added
+
+- The taskiq integration (#69): `nuke_di.taskiq.setup(broker, container=DI)`, with the `taskiq` extra
+  (`taskiq>=0.11`, `taskiq-dependencies>=1.5`). A task takes a client by type hint next to its arguments,
+  `async def send_report(user_id: int, users: UserService)`, and so does every `TaskiqDepends(...)` function it
+  uses, generator dependencies included. The signatures are rewritten as in FastAPI and FastStream, when a task is
+  registered: `setup()` rewrites the tasks the broker has, shared ones included, and wraps `broker.task` (and
+  with it `register_task()`) for the tasks declared later, since `taskiq worker` reads them before it starts.
+- The container connects on `WORKER_STARTUP`, before the other startup handlers, and disconnects once
+  `broker.shutdown()` has run the shutdown handlers, the middlewares and the result backend. A process that only
+  kicks tasks connects nothing; an `InMemoryBroker`, which runs the tasks it is kicked, connects on its
+  `startup()`. A task run without the worker's startup fails with "is not connected", and a failed `connect()`
+  fails `broker.startup()` with a `RuntimeError`. `nuke_di.integration.testing.check()` passes on an
+  `InMemoryBroker`; CI runs the tests on taskiq 0.11.0 with taskiq-dependencies 1.5.0 as well (`make
+  test-taskiq-min`).
+- A dependency class whose `__init__` takes clients, `Annotated[Auth, TaskiqDepends()]`, is refused with a
+  `TypeError` when its task is registered, since taskiq builds it from that `__init__`; so is a function that
+  takes clients in FastAPI handlers, before taskiq registers the task. On an `InMemoryBroker` the shared tasks
+  declared before the broker get their clients too, and its shutdown waits for the tasks in flight before the
+  clients disconnect.
+
+### Documentation
+
+- A guide page, `docs/guide/taskiq.md`, in every language: an `InMemoryBroker` run, a real `taskiq worker` on
+  NATS, the rules, the default `= TaskiqDepends()` that lets type checkers accept `.kiq()` without the client, the
+  worker flags `--max-fails 1` and `--shutdown-timeout`, and testing. ADR-0003 names taskiq among the integrations
+  that share the rewrite. A spec, `docs/specs/taskiq.md`, and an example, `examples/taskiq_app`.
+- taskiq is named with the other integrations in the README, the integrations page, the Agent Skill, `llms.txt`,
+  `context7.json` and the plugin manifests; `llms-full.txt` grows to about 35k tokens.
+
+## [1.16.0] - 2026-10-10
+
+### Added
+
+- The aiogram integration (#70): `nuke_di.aiogram.setup(dp)`, installed with the `aiogram` extra (`aiogram>=3.2`).
+  A handler of the dispatcher or of any router included into it, before `setup()` or after, takes a client by
+  type hint next to the message, `async def start(message: Message, users: UserService)`, and nothing marks it.
+  One inner middleware per event type fills the client arguments of the handler that matched the update into
+  a copy of aiogram's data, from a dictionary by the id of the handler's callback: under 1 µs per update. A
+  handler is a function, a bound method, a `functools.partial` or a callable object; a type hint that does not
+  evaluate is skipped alone. Startup and shutdown handlers take clients too.
+- The dispatcher runs the container: the clients are resolved and connected before the startup handlers of the
+  dispatcher and its routers, so `override()` before `start_polling()` or `dp.emit_startup()` applies, and
+  disconnect after all their shutdown handlers, and after a startup handler that fails, which aiogram follows
+  with no shutdown. A failed `connect()` fails `start_polling()` with a `RuntimeError` before its first request
+  to Telegram.
+- `TypeError` on startup for a filter with a client argument, of a handler or of an observer (aiogram runs
+  filters before the middleware), for a scene whose handlers take clients, for a client argument under a name
+  aiogram passes itself (`bot`, `state`, `scenes`, `event_from_user`, the workflow data, the keyword arguments
+  of `start_polling()`), and for `setup()` on a `Router` or twice on one dispatcher. A key of an update's data
+  under a client's name, from a filter, a middleware or `feed_update()`, raises `TypeError` on that update
+  instead of being replaced, and so does an argument of `emit_shutdown()` under one.
+- A shutdown after a failed startup, which aiogram's webhook app calls on cleanup, or a second shutdown runs
+  the shutdown handlers with the caller's arguments.
+- A guide page, `docs/guide/aiogram.md`, mirrored in the six translations: the bot, a `Bot` with a session that
+  answers in the process to feed it updates with no token, the rules, testing and the errors, each with its real
+  output. `docs/specs/aiogram.md` holds the decisions and the aiogram internals read.
+- `examples/aiogram_bot`: a bot whose `start_polling()` runs against a fake Telegram, with its tests.
+- `make test-aiogram-min` and the `aiogram-min` CI job run the aiogram tests on aiogram 3.2.0.
+
+### Changed
+
+- aiogram is named with the other integrations in the README, the integrations page, the Agent Skill, `llms.txt`,
+  `context7.json` and the plugin manifests; `llms-full.txt` grows to about 32k tokens.
+
+## [1.15.0] - 2026-10-10
+
+### Added
+
+- MCP servers: tools take clients by type hint ([#67](https://github.com/troyan-dy/nuke-di/issues/67), #105),
+  the way they take `Context`, and the clients are left out of the input schema the LLM sees. The container
+  connects when the server's lifespan starts and disconnects when it ends, and `override()` before the server
+  starts replaces a client. Two modules, one per library:
+  - `nuke_di.mcp.setup(server)` for the official SDK's `MCPServer` (`pip install "nuke-di[mcp]"`, `mcp` 2.0 or
+    newer). The client arguments of a tool, and of the resolvers it uses, are handed to the SDK's own
+    `Resolve(...)` marker while the SDK reads the tool; the function is left as written, with no wrapper.
+    Functions, bound methods and callable objects take clients. The SDK has no resolvers for resources and
+    prompts, so they take no clients. `mcp` 1.x is not supported.
+  - `nuke_di.fastmcp.setup(mcp)` for FastMCP (`pip install "nuke-di[fastmcp]"`, FastMCP 4.0 or newer): tools,
+    resources, prompts and the functions of their `Depends(...)` take clients, through a `Depends` default that
+    the integration gives every client argument. A server mounted with `mount()` on one set up on the same
+    container shares its clients, which connect once.
+
+  A shape that takes no clients (a `functools.partial`, a FastMCP callable object or class in `Depends(...)`,
+  an SDK tool that returns an `InputRequiredResult`) raises a `TypeError` that says so when it is added.
+
+  Both run the contract of `nuke_di.integration.testing.check()`. ADR-0011 records why there is no wrapper and
+  why there are two modules; `docs/specs/mcp.md` lists the internals read. CI runs the tests on `mcp` 2.0.0 and
+  FastMCP 4.0.0 too (`make test-mcp-min`, `make test-fastmcp-min`).
+- `examples/mcp_server`: the bookshop on the SDK and on FastMCP, asked over stdio by a host in a few lines.
+
+### Changed
+
+- The `TypeError` of a client where pydantic expects a type names the MCP integrations next to FastAPI and
+  links to the documentation of every framework. A pydantic model that allows arbitrary types raises it too
+  when pydantic fails to generate its JSON schema, which is what the SDK does with a tool declared before
+  `setup()`; a JSON schema generator that tolerates such types keeps its own answer.
+
+### Removed
+
+- `nuke_di._integration`, deprecated in 1.14.0: import from `nuke_di.integration`.
+
+### Documentation
+
+- A guide page, `docs/guide/mcp.md`, in every language: the bookshop on the SDK and on FastMCP with the real
+  output, the rules of each, testing with `override()` and the errors. The README, the integrations page, the
+  Agent Skill, the `AGENTS.md` block, `context7.json` and `llms.txt` name the MCP integrations.
 
 ## [1.14.3] - 2026-10-10
 
@@ -686,6 +847,11 @@ First public release, extracted from the `nuke.di` package of the nuke framework
 [Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.3...HEAD
 [1.18.3]: https://github.com/troyan-dy/nuke-di/compare/v1.18.2...v1.18.3
 [1.18.2]: https://github.com/troyan-dy/nuke-di/compare/v1.18.1...v1.18.2
+[1.18.1]: https://github.com/troyan-dy/nuke-di/compare/v1.18.0...v1.18.1
+[1.18.0]: https://github.com/troyan-dy/nuke-di/compare/v1.17.0...v1.18.0
+[1.17.0]: https://github.com/troyan-dy/nuke-di/compare/v1.16.0...v1.17.0
+[1.16.0]: https://github.com/troyan-dy/nuke-di/compare/v1.15.0...v1.16.0
+[1.15.0]: https://github.com/troyan-dy/nuke-di/compare/v1.14.3...v1.15.0
 [1.14.3]: https://github.com/troyan-dy/nuke-di/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/troyan-dy/nuke-di/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/troyan-dy/nuke-di/compare/v1.14.0...v1.14.1
