@@ -6,9 +6,9 @@
 
 Uma integração com um framework faz duas coisas: os handlers do framework recebem clientes pelo type hint, por meio
 da injeção de dependências do próprio framework, e o container se conecta quando a aplicação inicia e se desconecta
-quando ela para. As integrações de [FastAPI](fastapi.md), [Litestar](litestar.md) e [FastStream](faststream.md) são
-construídas sobre `nuke_di.integration`, e uma integração com outro framework não precisa de nada do nuke-di
-além dele e da API pública.
+quando ela para. As integrações de [FastAPI](fastapi.md), [Litestar](litestar.md), [FastStream](faststream.md) e
+[aiogram](aiogram.md) são construídas sobre `nuke_di.integration`, e uma integração com outro framework não precisa
+de nada do nuke-di além dele e da API pública.
 
 | Nome | O que faz |
 |---|---|
@@ -118,7 +118,9 @@ O Litestar fornece dependências pelo nome, e o aiogram as passa pelo nome a par
 não se aplica: use `Framework` para as mensagens, `client_of()` para encontrar os argumentos de cliente de um
 handler, um `Binding` por cliente cujo `get` o framework chama pelos próprios meios, e `running()` dentro do
 lifespan da aplicação. O `nuke_di.litestar` é o exemplo completo: ele registra `Provide(binding.get)` sob o nome
-do argumento.
+do argumento. O `nuke_di.aiogram` é outro: um inner middleware do dispatcher coloca `binding.instance` nos
+dados de um update, sob o nome de cada argumento de cliente do handler que casou com ele, e `running()` envolve a
+inicialização e o desligamento do dispatcher.
 
 ## <a id="checking-an-integration"></a>Verificando uma integração
 

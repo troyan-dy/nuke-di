@@ -25,7 +25,9 @@ __all__ = ("setup",)
 _AIOGRAM = Framework(
     name="aiogram",
     not_started="{client} was not started with the dispatcher: register its handler before the dispatcher starts",
-    not_connected="{client} is not connected: start the dispatcher, e.g. `await dp.emit_startup()` in a test",
+    not_connected=(
+        "{client} is not connected: start the dispatcher with `start_polling()`, or `await dp.emit_startup()` in a test"
+    ),
 )
 
 # What aiogram itself puts into the data of an update or the arguments of a startup handler: a client under

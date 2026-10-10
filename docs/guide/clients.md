@@ -603,7 +603,7 @@ Found 2 errors in 1 file (checked 1 source file)
 - Left to the container: a type hint that cannot be evaluated at runtime, which mypy evaluates
   anyway; a class in a variable of type `type[...]`, which may hold a subclass with another
   `__init__`; a decorated or overloaded `__init__`; `inject()` of a class; the routes and handlers
-  of the FastAPI, Litestar and FastStream integrations; a type mypy does not know, such as a class
+  of the FastAPI, Litestar, FastStream and aiogram integrations; a type mypy does not know, such as a class
   of a library without type hints.
 - An intended error, in a test of that error, is silenced with `# type: ignore[nuke-di]`.
 - It works with mypy 1.13 and later, with the cache as without it: a change to a client deep in a
