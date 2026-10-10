@@ -1,0 +1,183 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="1010" viewBox="0 0 880 1010" role="img" aria-labelledby="t d">
+<title id="t">A product page: 21 clients, started by each library</title>
+<desc id="d">A product page API needs 4 features, and every feature its own connections, which take 100 to 300 ms to connect. nuke-di connects every client as soon as its own dependencies have, so the startup takes the longest chain, 335 ms; dishka and wireup connect one client after another, 3.41 s. dependency-injector starts as fast with a Resource per client and stops layer by layer, 657 ms against 365 ms.</desc>
+<style>
+svg {
+  --surface: #fcfcfb; --border: #e4e3df; --text: #0b0b0b; --muted: #52514e; --grid: #ecebe7;
+  --bar: #2a78d6; --other: #a3a29c; --edge: #c9c8c2; --node: #ffffff; --feature: #eef4fc; --api: #2a78d6;
+  --stop: #eb6834;
+}
+@media (prefers-color-scheme: dark) {
+  svg {
+    --surface: #1a1a19; --border: #33332f; --text: #ffffff; --muted: #c3c2b7; --grid: #2a2a27;
+    --bar: #3987e5; --other: #77766f; --edge: #4a4945; --node: #232321; --feature: #1d2a3b; --api: #3987e5;
+    --stop: #d95926;
+  }
+}
+text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--text); }
+.bg { fill: var(--surface); stroke: var(--border); }
+.heading { font-size: 15px; font-weight: 600; }
+.title { font-size: 13px; font-weight: 600; }
+.note, .time, .column { fill: var(--muted); font-size: 11px; }
+.name { font-size: 12px; }
+.api-name { font-size: 12px; font-weight: 600; fill: #ffffff; }
+.api-time { font-size: 11px; fill: #ffffff; }
+.edge { fill: none; stroke: var(--edge); stroke-width: 1.2; }
+.leaf { fill: var(--node); stroke: var(--border); }
+.feature { fill: var(--feature); stroke: var(--border); }
+.slow-stop { fill: none; stroke: var(--stop); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.api { fill: var(--api); }
+.load { fill: var(--bar); opacity: 0.18; }
+.ours { fill: var(--bar); }
+.theirs { fill: var(--other); }
+.label { font-size: 12px; }
+.value { font-size: 12px; font-weight: 600; white-space: pre; }
+.ratio { font-weight: 400; fill: var(--muted); }
+.grid { stroke: var(--grid); stroke-width: 1; }
+</style>
+<rect class="bg" x="0.5" y="0.5" width="879" height="1009" rx="10"/>
+<text class="heading" x="24" y="32">A product page: 21 clients, the time of each connect() on its box</text>
+<text class="note" x="24" y="52">Every client connects once the clients to its left have. Along the longest chain that takes 0.33 s; one client after another, 3.37 s.</text>
+<text class="column" x="24" y="80">Connections</text>
+<text class="column" x="330" y="80">Features</text>
+<text class="column" x="600" y="80">HTTP API</text>
+<path class="edge" d="M234,104.0 C282.0,104.0 282.0,146.0 330,146.0"/>
+<path class="edge" d="M234,132.0 C282.0,132.0 282.0,146.0 330,146.0"/>
+<path class="edge" d="M234,160.0 C282.0,160.0 282.0,146.0 330,146.0"/>
+<path class="edge" d="M234,188.0 C282.0,188.0 282.0,146.0 330,146.0"/>
+<path class="edge" d="M500,146.0 C550.0,146.0 550.0,341.0 600,341.0"/>
+<path class="edge" d="M234,234.0 C282.0,234.0 282.0,276.0 330,276.0"/>
+<path class="edge" d="M234,262.0 C282.0,262.0 282.0,276.0 330,276.0"/>
+<path class="edge" d="M234,290.0 C282.0,290.0 282.0,276.0 330,276.0"/>
+<path class="edge" d="M234,318.0 C282.0,318.0 282.0,276.0 330,276.0"/>
+<path class="edge" d="M500,276.0 C550.0,276.0 550.0,341.0 600,341.0"/>
+<path class="edge" d="M234,364.0 C282.0,364.0 282.0,406.0 330,406.0"/>
+<path class="edge" d="M234,392.0 C282.0,392.0 282.0,406.0 330,406.0"/>
+<path class="edge" d="M234,420.0 C282.0,420.0 282.0,406.0 330,406.0"/>
+<path class="edge" d="M234,448.0 C282.0,448.0 282.0,406.0 330,406.0"/>
+<path class="edge" d="M500,406.0 C550.0,406.0 550.0,341.0 600,341.0"/>
+<path class="edge" d="M234,494.0 C282.0,494.0 282.0,536.0 330,536.0"/>
+<path class="edge" d="M234,522.0 C282.0,522.0 282.0,536.0 330,536.0"/>
+<path class="edge" d="M234,550.0 C282.0,550.0 282.0,536.0 330,536.0"/>
+<path class="edge" d="M234,578.0 C282.0,578.0 282.0,536.0 330,536.0"/>
+<path class="edge" d="M500,536.0 C550.0,536.0 550.0,341.0 600,341.0"/>
+<rect class="leaf" x="24" y="92" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="92" width="175.0" height="24" rx="5"/>
+<text class="name" x="33" y="108">CatalogClient</text>
+<text class="time" x="225" y="108" text-anchor="end">250 ms</text>
+<rect class="leaf" x="24" y="120" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="120" width="140.0" height="24" rx="5"/>
+<text class="name" x="33" y="136">PricesClient</text>
+<text class="time" x="225" y="136" text-anchor="end">200 ms</text>
+<rect class="leaf" x="24" y="148" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="148" width="140.0" height="24" rx="5"/>
+<text class="name" x="33" y="164">StockClient</text>
+<text class="time" x="225" y="164" text-anchor="end">200 ms</text>
+<rect class="leaf" x="24" y="176" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="176" width="105.0" height="24" rx="5"/>
+<text class="name" x="33" y="192">ReviewsClient</text>
+<text class="time" x="225" y="192" text-anchor="end">150 ms</text>
+<rect class="feature" x="330" y="134.0" width="170" height="24" rx="5"/>
+<rect class="load" x="330" y="134.0" width="28.3" height="24" rx="5"/>
+<text class="name" x="339" y="150.0">ProductCard</text>
+<text class="time" x="491" y="150.0" text-anchor="end">50 ms</text>
+<rect class="leaf" x="24" y="222" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="222" width="210.0" height="24" rx="5"/>
+<text class="name" x="33" y="238">PaymentsClient</text>
+<text class="time" x="225" y="238" text-anchor="end">300 ms</text>
+<rect class="leaf" x="24" y="250" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="250" width="140.0" height="24" rx="5"/>
+<text class="name" x="33" y="266">DeliveryClient</text>
+<text class="time" x="225" y="266" text-anchor="end">200 ms</text>
+<rect class="leaf" x="24" y="278" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="278" width="105.0" height="24" rx="5"/>
+<text class="name" x="33" y="294">LoyaltyClient</text>
+<text class="time" x="225" y="294" text-anchor="end">150 ms</text>
+<rect class="leaf" x="24" y="306" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="306" width="140.0" height="24" rx="5"/>
+<text class="name" x="33" y="322">PromotionsClient</text>
+<text class="time" x="225" y="322" text-anchor="end">200 ms</text>
+<rect class="feature" x="330" y="264.0" width="170" height="24" rx="5"/>
+<rect class="slow-stop" x="327" y="261.0" width="176" height="30" rx="7"/>
+<rect class="load" x="330" y="264.0" width="11.3" height="24" rx="5"/>
+<text class="name" x="339" y="280.0">Checkout</text>
+<text class="time" x="491" y="280.0" text-anchor="end">20 ms</text>
+<rect class="leaf" x="24" y="352" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="352" width="140.0" height="24" rx="5"/>
+<text class="name" x="33" y="368">UsersClient</text>
+<text class="time" x="225" y="368" text-anchor="end">200 ms</text>
+<rect class="leaf" x="24" y="380" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="380" width="175.0" height="24" rx="5"/>
+<text class="name" x="33" y="396">RecommendationsClient</text>
+<text class="time" x="225" y="396" text-anchor="end">250 ms</text>
+<rect class="leaf" x="24" y="408" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="408" width="105.0" height="24" rx="5"/>
+<text class="name" x="33" y="424">FavoritesClient</text>
+<text class="time" x="225" y="424" text-anchor="end">150 ms</text>
+<rect class="leaf" x="24" y="436" width="210" height="24" rx="5"/>
+<rect class="slow-stop" x="21" y="433" width="216" height="30" rx="7"/>
+<rect class="load" x="24" y="436" width="210.0" height="24" rx="5"/>
+<text class="name" x="33" y="452">EventsProducer</text>
+<text class="time" x="225" y="452" text-anchor="end">300 ms</text>
+<rect class="feature" x="330" y="394.0" width="170" height="24" rx="5"/>
+<rect class="load" x="330" y="394.0" width="11.3" height="24" rx="5"/>
+<text class="name" x="339" y="410.0">Personalization</text>
+<text class="time" x="491" y="410.0" text-anchor="end">20 ms</text>
+<rect class="leaf" x="24" y="482" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="482" width="175.0" height="24" rx="5"/>
+<text class="name" x="33" y="498">Elasticsearch</text>
+<text class="time" x="225" y="498" text-anchor="end">250 ms</text>
+<rect class="leaf" x="24" y="510" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="510" width="70.0" height="24" rx="5"/>
+<text class="name" x="33" y="526">Redis</text>
+<text class="time" x="225" y="526" text-anchor="end">100 ms</text>
+<rect class="leaf" x="24" y="538" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="538" width="105.0" height="24" rx="5"/>
+<text class="name" x="33" y="554">SynonymsClient</text>
+<text class="time" x="225" y="554" text-anchor="end">150 ms</text>
+<rect class="leaf" x="24" y="566" width="210" height="24" rx="5"/>
+<rect class="load" x="24" y="566" width="140.0" height="24" rx="5"/>
+<text class="name" x="33" y="582">CategoriesClient</text>
+<text class="time" x="225" y="582" text-anchor="end">200 ms</text>
+<rect class="feature" x="330" y="524.0" width="170" height="24" rx="5"/>
+<rect class="load" x="330" y="524.0" width="11.3" height="24" rx="5"/>
+<text class="name" x="339" y="540.0">Search</text>
+<text class="time" x="491" y="540.0" text-anchor="end">20 ms</text>
+<rect class="api" x="600" y="329.0" width="190" height="24" rx="5"/>
+<text class="api-name" x="610" y="345.0">ProductPageApi</text>
+<text class="api-time" x="780" y="345.0" text-anchor="end">10 ms</text>
+<line class="grid" x1="24" x2="856" y1="622" y2="622"/>
+<text class="title" x="24" y="650">Startup: connect() of every client, median of 20 runs</text>
+<text class="label" x="24" y="681">nuke-di</text>
+<rect class="ours" x="300" y="668" width="40.8" height="18" rx="3"/>
+<text class="value" x="348.8" y="681">335 ms<tspan class="ratio"></tspan></text>
+<text class="label" x="24" y="707">dependency-injector, a Resource per client</text>
+<rect class="theirs" x="300" y="694" width="41.0" height="18" rx="3"/>
+<text class="value" x="349.0" y="707">337 ms<tspan class="ratio">  the same</tspan></text>
+<text class="label" x="24" y="733">wireup, the features gathered by hand</text>
+<rect class="theirs" x="300" y="720" width="114.9" height="18" rx="3"/>
+<text class="value" x="422.9" y="733">945 ms<tspan class="ratio">  2.8× longer</tspan></text>
+<text class="label" x="24" y="759">dishka, the same with its lock off</text>
+<rect class="theirs" x="300" y="746" width="114.7" height="18" rx="3"/>
+<text class="value" x="422.7" y="759">943 ms<tspan class="ratio">  2.8× longer</tspan></text>
+<text class="label" x="24" y="785">wireup</text>
+<rect class="theirs" x="300" y="772" width="415.0" height="18" rx="3"/>
+<text class="value" x="723.0" y="785">3.41 s<tspan class="ratio">  10.2× longer</tspan></text>
+<text class="label" x="24" y="811">dishka</text>
+<rect class="theirs" x="300" y="798" width="414.7" height="18" rx="3"/>
+<text class="value" x="722.7" y="811">3.41 s<tspan class="ratio">  10.2× longer</tspan></text>
+<text class="title" x="24" y="850">Shutdown: disconnect() of every client</text>
+<text class="note" x="24" y="868">Checkout and EventsProducer, outlined above, take 300 ms each to stop, the others up to 50 ms; every client disconnects after the clients that need it.</text>
+<text class="label" x="24" y="899">nuke-di</text>
+<rect class="ours" x="300" y="886" width="44.4" height="18" rx="3"/>
+<text class="value" x="352.4" y="899">365 ms<tspan class="ratio"></tspan></text>
+<text class="label" x="24" y="925">dependency-injector</text>
+<rect class="theirs" x="300" y="912" width="79.9" height="18" rx="3"/>
+<text class="value" x="387.9" y="925">657 ms<tspan class="ratio">  1.8× longer</tspan></text>
+<text class="label" x="24" y="951">wireup</text>
+<rect class="theirs" x="300" y="938" width="103.4" height="18" rx="3"/>
+<text class="value" x="411.4" y="951">850 ms<tspan class="ratio">  2.3× longer</tspan></text>
+<text class="label" x="24" y="977">dishka</text>
+<rect class="theirs" x="300" y="964" width="103.4" height="18" rx="3"/>
+<text class="value" x="411.4" y="977">850 ms<tspan class="ratio">  2.3× longer</tspan></text>
+</svg>

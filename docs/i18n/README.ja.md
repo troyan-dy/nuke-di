@@ -97,6 +97,35 @@ database: disconnected
 
 ## <a id="performance"></a>パフォーマンス
 
+実際の接続では起動のコストは待ち時間であり、それを決めるのは依存ツリーの構造です。商品ページのバックエンドを例にします。
+API が 4 つの機能を必要とし、各機能がそれぞれ 100–300 ms かかる接続を 4 つずつ持つ、合計 21 クライアントです:
+
+![21 クライアントの商品ページ: 接続、機能、API。nuke-di と dependency-injector は 0.34 s、dishka と wireup は 3.41 s で起動](https://raw.githubusercontent.com/troyan-dy/nuke-di/c402c5086426dc28c0886f62656fcf9d901c5de8/docs/product-page.svg)
+
+`nuke-di` は各クライアントを、その依存先が接続し終えた時点で接続するため、起動時間は最長のチェーン、0.34 s です。
+dishka と wireup は 1 回の `get()` の中でクライアントを 1 つずつ接続するため 3.41 s、10 倍かかり、ツリーが広いほど
+差は広がります。4 つの機能を手作業で gather すれば wireup は 0.95 s まで縮まり、
+dishka もロックを外せば同様ですが、その場合 2 つの機能が共有するクライアントは 2 回作られます。dependency-injector は、すべてのクライアントを手書きの `Resource` にすれば同じ速さで起動しますが、
+停止は層ごとで、各層が最も遅いクライアントを待ちます: 停止にそれぞれ 300 ms かかる `Checkout` と `EventsProducer` が
+別の層にあるため、0.37 s に対して 0.66 s です。injector には非同期のライフサイクルがありません。
+
+```console
+$ uv run python benchmarks/compare.py --only connect --summary
+nuke-di 1.14.3 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 17c8815 · N = 10, 100, 1000 · 20 repeats
+nuke-di 1.14.3 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+| Lower is better                          | nuke-di     | dishka         | wireup         | dependency-injector | injector |
+|------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
+| Startup: 8 clients, connect() of 1–60 ms | **70.8 ms** | 156 ms (2.2×)  | 157 ms (2.2×)  | **71.5 ms**         | —        |
+| Shutdown: the same 8 clients             | **18.8 ms** | 30.9 ms (1.6×) | 30.5 ms (1.6×) | 26.0 ms (1.4×)      | —        |
+| Startup: the product page, 21 clients    | **335 ms**  | 3.41 s (10.2×) | 3.41 s (10.2×) | **337 ms**          | —        |
+| Shutdown: the product page               | **365 ms**  | 850 ms (2.3×)  | 850 ms (2.3×)  | 657 ms (1.8×)       | —        |
+```
+
+3 つのライブラリはいずれも、コンテナーの作成時には何も接続しません。アプリケーションが起動時にルートを取得しなければ、
+最初のリクエストが接続を待ち、接続が失敗すればそのリクエストも失敗します。`nuke-di` は `async with DI` で
+すべてのクライアントを接続し、接続できないクライアントがあれば起動を止めます。
+
 `benchmarks/compare.py` は同じクライアントのツリーを dishka、wireup、dependency-injector、injector に通します。各ライブラリは同じクラス群を
 自分の流儀で登録し、プロセスにとって新しいクラスでルートを解決したコールドなコンテナ、ルートの再取得、各ライブラリの統合経由の
 FastAPI リクエスト 1 回を計ります。
@@ -125,28 +154,6 @@ dependency-injector が 2 割ほど先行します。キャッシュ済みのル
 単体では、`resolve()` はクライアント 1 件あたり 3.5–6.3 µs なので、1000 クライアントのツリーは 5.5 ms 未満で構築されます。`connect()` は
 クライアント 1 件あたり 13–18 µs を加えます。[docs/benchmarks.md](../benchmarks.md) は各シナリオを説明し、Python 3.11–3.14 の
 ベースラインを記録し、比較の全体をその方法と共に載せています。
-
-実際の接続ではコストは待ち時間であり、起動時間を決めるのは各 `connect()` がいつ始まるかです。
-dishka と wireup は 1 回の `get()` の中でクライアントを 1 つずつ接続するため、アプリケーションが手作業で
-ブランチを並行に取得しない限り、起動時間はすべての `connect()` の合計になります。
-dependency-injector は、すべてのクライアントを手書きの `Resource` にすれば `nuke-di` と同じく並行に起動しますが、
-停止は層ごとに行われます。injector には非同期のライフサイクルがありません:
-
-```console
-$ uv run python benchmarks/compare.py --only connect --summary
-nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 8d0700b · N = 10, 100, 1000 · 20 repeats
-nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
-
-| Lower is better                                     | nuke-di     | dishka         | wireup         | dependency-injector | injector |
-|-----------------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
-| Startup: 8 clients, connect() of 1–60 ms            | **70.8 ms** | 156 ms (2.2×)  | 156 ms (2.2×)  | 71.1 ms (1.0×)      | —        |
-| Shutdown: the same 8 clients                        | **18.7 ms** | 30.1 ms (1.6×) | 29.8 ms (1.6×) | 26.0 ms (1.4×)      | —        |
-| Startup: 10 independent clients, connect() of 50 ms | **52.3 ms** | 520 ms (10.0×) | 522 ms (10.0×) | 52.5 ms (1.0×)      | —        |
-```
-
-3 つのライブラリはいずれも、コンテナーの作成時には何も接続しません。アプリケーションが起動時にルートを取得しなければ、
-最初のリクエストが接続を待ち、接続が失敗すればそのリクエストも失敗します。`nuke-di` は `async with DI` で
-すべてのクライアントを接続し、接続できないクライアントがあれば起動を止めます。
 
 ## <a id="a-job-with-command-line-arguments"></a>コマンドライン引数を持つジョブ
 

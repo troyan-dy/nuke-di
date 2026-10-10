@@ -117,6 +117,37 @@ zależności.
 
 ## <a id="performance"></a>Wydajność
 
+Przy prawdziwych połączeniach kosztem startu jest czekanie, a decyduje o nim struktura drzewa. Backend strony
+produktu: API, cztery funkcje i w każdej cztery połączenia po 100–300 ms, razem 21 klientów:
+
+![Strona produktu z 21 klientów: połączenia, funkcje i API. nuke-di i dependency-injector uruchamiają je w 0.34 s, dishka i wireup w 3.41 s](https://raw.githubusercontent.com/troyan-dy/nuke-di/c402c5086426dc28c0886f62656fcf9d901c5de8/docs/product-page.svg)
+
+`nuke-di` łączy każdego klienta, gdy tylko połączą się jego własne zależności, więc start trwa tyle, co
+najdłuższy łańcuch, 0,34 s. dishka i wireup łączą klientów jednego po drugim w ramach `get()`: 3,41 s, dziesięć
+razy dłużej, a im szersze drzewo, tym większa różnica. Ręczne zebranie czterech funkcji skraca start wireup do
+0,95 s, a dishka również, gdy wyłączy się jej lock, ale wtedy klient wspólny dla dwóch funkcji powstaje
+dwa razy. dependency-injector startuje równie szybko, gdy każdy klient jest ręcznie napisanym
+`Resource`, a zatrzymuje się warstwami i każda warstwa czeka na swojego najwolniejszego klienta: 0,66 s wobec
+0,37 s, bo `Checkout` i `EventsProducer`, którym zatrzymanie zajmuje po 300 ms, są w różnych warstwach. injector
+nie ma asynchronicznego cyklu życia.
+
+```console
+$ uv run python benchmarks/compare.py --only connect --summary
+nuke-di 1.14.3 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 17c8815 · N = 10, 100, 1000 · 20 repeats
+nuke-di 1.14.3 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+
+| Lower is better                          | nuke-di     | dishka         | wireup         | dependency-injector | injector |
+|------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
+| Startup: 8 clients, connect() of 1–60 ms | **70.8 ms** | 156 ms (2.2×)  | 157 ms (2.2×)  | **71.5 ms**         | —        |
+| Shutdown: the same 8 clients             | **18.8 ms** | 30.9 ms (1.6×) | 30.5 ms (1.6×) | 26.0 ms (1.4×)      | —        |
+| Startup: the product page, 21 clients    | **335 ms**  | 3.41 s (10.2×) | 3.41 s (10.2×) | **337 ms**          | —        |
+| Shutdown: the product page               | **365 ms**  | 850 ms (2.3×)  | 850 ms (2.3×)  | 657 ms (1.8×)       | —        |
+```
+
+Żadna z trzech bibliotek niczego nie łączy przy tworzeniu kontenera: jeśli aplikacja nie pobierze korzenia
+przy starcie, pierwsze żądanie czeka na połączenia i kończy się błędem razem z nimi. `nuke-di` łączy każdego
+klienta w `async with DI`, a klient, który nie może się połączyć, zatrzymuje start.
+
 `benchmarks/compare.py` przepuszcza te same drzewa klientów przez dishka, wireup, dependency-injector i
 injector, rejestrując te same klasy tak, jak robi to każda biblioteka: zimny kontener z rozwiązanym korzeniem na
 klasach nowych dla procesu, ponowne pobranie korzenia i jedno żądanie FastAPI przez integrację każdej biblioteki:
@@ -146,28 +177,6 @@ dependency-injector napisany w Cythonie wygrywa o około 50 ns, czego żadna apl
 Sam `resolve()` kosztuje 3,5–6,3 µs na klienta, więc drzewo z 1000 klientów powstaje w mniej niż 5,5 ms,
 a `connect()` dokłada 13–18 µs na klienta. [docs/benchmarks.md](../benchmarks.md) objaśnia każdy
 scenariusz, zapisuje punkt odniesienia dla Pythona 3.11–3.14 i zawiera pełne porównanie wraz z metodą.
-
-Przy prawdziwych połączeniach kosztem jest czekanie, a o starcie decyduje to, kiedy zaczyna się każde
-`connect()`. dishka i wireup łączą klientów jednego po drugim w ramach `get()`, więc ich start to suma
-wszystkich `connect()`, chyba że aplikacja ręcznie zbierze swoje gałęzie;
-dependency-injector startuje równie współbieżnie jak `nuke-di`, gdy każdy klient jest ręcznie napisanym
-`Resource`, a zatrzymuje się warstwami; injector nie ma asynchronicznego cyklu życia:
-
-```console
-$ uv run python benchmarks/compare.py --only connect --summary
-nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 8d0700b · N = 10, 100, 1000 · 20 repeats
-nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
-
-| Lower is better                                     | nuke-di     | dishka         | wireup         | dependency-injector | injector |
-|-----------------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
-| Startup: 8 clients, connect() of 1–60 ms            | **70.8 ms** | 156 ms (2.2×)  | 156 ms (2.2×)  | 71.1 ms (1.0×)      | —        |
-| Shutdown: the same 8 clients                        | **18.7 ms** | 30.1 ms (1.6×) | 29.8 ms (1.6×) | 26.0 ms (1.4×)      | —        |
-| Startup: 10 independent clients, connect() of 50 ms | **52.3 ms** | 520 ms (10.0×) | 522 ms (10.0×) | 52.5 ms (1.0×)      | —        |
-```
-
-Żadna z trzech bibliotek niczego nie łączy przy tworzeniu kontenera: jeśli aplikacja nie pobierze korzenia
-przy starcie, pierwsze żądanie czeka na połączenia i kończy się błędem razem z nimi. `nuke-di` łączy każdego
-klienta w `async with DI`, a klient, który nie może się połączyć, zatrzymuje start.
 
 ## <a id="a-job-with-command-line-arguments"></a>Job z argumentami wiersza poleceń
 

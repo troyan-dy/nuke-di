@@ -2,6 +2,7 @@
 The benchmark suite of benchmarks/ keeps running: CI runs it the same way, as a smoke test.
 """
 
+import asyncio
 import importlib
 import json
 import platform
@@ -134,18 +135,23 @@ def test_compares_slow_connections(tmp_path: Path) -> None:
 
     data = json.loads(out.read_text())
     figures = {(row["library"], row["scenario"], row["shape"]): row for row in data["results"]}
-    wide = "wide: 10 clients, connect() of 50 ms"
+    page = "product page: 21 clients, connect() of 10–300 ms"  # noqa: RUF001
     startup = "startup: connect() of every client"
-    # Ten clients of 50 ms: concurrently in about 50 ms, one after another in about 500 ms
-    assert figures["nuke-di", startup, wide]["median"] < 0.2
-    assert figures["dependency-injector", startup, wide]["median"] < 0.2
-    assert figures["dishka", startup, wide]["median"] > 0.45
-    assert figures["wireup", startup, wide]["median"] > 0.45
-    assert figures["injector", startup, wide]["error"] == "no async lifecycle"
-    # wireup connects concurrently what the application gets concurrently by hand, dishka still one at a time
+    shutdown = "shutdown: disconnect() of every client"
+    # 21 clients: 0.33 s along the longest chain, 3.37 s one after another
+    assert figures["nuke-di", startup, page]["median"] < 1
+    assert figures["dependency-injector", startup, page]["median"] < 1
+    assert figures["dishka", startup, page]["median"] > 3
+    assert figures["wireup", startup, page]["median"] > 3
+    assert figures["injector", startup, page]["error"] == "no async lifecycle"
+    # dependency-injector stops layer by layer, 0.65 s, where the longest chain is 0.36 s
+    assert (
+        figures["dependency-injector", shutdown, page]["median"] > figures["nuke-di", shutdown, page]["median"] + 0.15
+    )
+    # wireup connects concurrently what the application gets concurrently by hand, dishka with its lock off
     gathered = "startup, the root's arguments gathered by hand"
-    assert figures["wireup", gathered, wide]["median"] < 0.2
-    assert figures["dishka", gathered, wide]["median"] > 0.45
+    assert figures["wireup", gathered, page]["median"] < 2
+    assert figures["dishka", gathered, page]["median"] < 2
 
 
 async def test_the_other_containers_connect_on_the_first_get(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -181,6 +187,56 @@ async def test_the_other_containers_connect_on_the_first_get(monkeypatch: pytest
     await deps.connect()
     assert connected == ["connect"]
     await deps.disconnect()
+
+
+async def test_dishka_without_its_lock_builds_a_shared_client_twice(monkeypatch: pytest.MonkeyPatch) -> None:
+    # What docs/benchmarks.md says of the gathered startup of dishka: its `get()` calls run concurrently only with
+    # `lock_factory=None`, and then a client that two of them need is built and connected once per call
+    pytest.importorskip("dishka")
+    monkeypatch.syspath_prepend(str(ROOT / "benchmarks"))
+    compare = importlib.import_module("compare")
+    connected: list[int] = []
+
+    class Database(Client):
+        async def connect(self) -> None:
+            connected.append(id(self))
+            await asyncio.sleep(0.01)
+
+    class Users(Client):
+        def __init__(self, db: Database) -> None:
+            self.db = db
+
+    class Orders(Client):
+        def __init__(self, db: Database) -> None:
+            self.db = db
+
+    provider = compare.Provider(scope=compare.Scope.APP)
+    for cls in (Database, Users, Orders):
+        provider.provide(compare.lifecycle(cls))
+    container = compare.make_async_container(provider, lock_factory=None)
+
+    users, orders = await asyncio.gather(container.get(Users), container.get(Orders))
+
+    assert users.db is not orders.db
+    assert len(connected) == 2
+    await container.close()
+
+
+def test_draws_the_product_page(tmp_path: Path) -> None:
+    pytest.importorskip("dishka")
+    out = tmp_path / "product-page.svg"
+
+    process = run(
+        str(ROOT / "docs" / "benchmarks" / "connect-py3.11.json"),
+        str(out),
+        script=ROOT / "benchmarks" / "product_page.py",
+    )
+
+    assert process.returncode == 0, process.stderr
+    svg = out.read_text()
+    assert svg.startswith("<svg ") and "ProductPageApi" in svg and "prefers-color-scheme: dark" in svg
+    # The picture of the README is the one the committed figures give
+    assert svg == (ROOT / "docs" / "product-page.svg").read_text()
 
 
 def test_rejects_an_unknown_scenario() -> None:

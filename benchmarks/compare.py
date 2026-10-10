@@ -23,7 +23,7 @@ from dataclasses import dataclass, fields
 from functools import partial
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any, get_type_hints
+from typing import Any, NamedTuple, get_type_hints
 
 import wireup
 from dependency_injector import containers, providers
@@ -191,19 +191,68 @@ def injector_warm(tree: Tree) -> Callable[[], object]:
 STARTUP = "startup: connect() of every client"
 SHUTDOWN = "shutdown: disconnect() of every client"
 STARTUP_GATHERED = "startup, the root's arguments gathered by hand"
-WIDE_SLOW = "wide: 10 clients, connect() of 50 ms"
+PRODUCT_PAGE = "product page: 21 clients, connect() of 10–300 ms"  # noqa: RUF001
 
 
-class Slow(Sleeper):
-    connect_seconds = 0.050
-    disconnect_seconds = 0.005
-
-
-def wide_slow() -> type[Client]:
+# The backend of an online shop's product page, a tree as wide as a real service's: the HTTP API needs four
+# features, and every feature its own four connections, gRPC clients of other services, Kafka, Elasticsearch,
+# Redis. Connected
+# one after another, the startup is the sum, 3.37 s; along the longest chain, PaymentsClient → Checkout →
+# ProductPageApi or EventsProducer → Personalization → ProductPageApi, it is 0.33 s. To stop, the longest chain is
+# ProductPageApi → Checkout → PaymentsClient, 0.36 s; layer by layer, every layer waiting for its slowest client,
+# it is 0.65 s, since Checkout and EventsProducer stop slowly in different layers
+class Node(NamedTuple):
     """
-    A root that declares 10 slow clients with no dependencies of their own.
+    A client of the product page: how long its connect() and disconnect() take, and the clients its `__init__`
+    takes.
     """
-    return client("SlowRoot", [client(f"Slow{number}", base=Slow) for number in range(10)], base=Sleeper)
+
+    connect: float
+    disconnect: float
+    dependencies: tuple[str, ...] = ()
+
+
+PRODUCT_PAGE_TREE: dict[str, Node] = {
+    "CatalogClient": Node(0.250, 0.010),
+    "PricesClient": Node(0.200, 0.010),
+    "StockClient": Node(0.200, 0.010),
+    "ReviewsClient": Node(0.150, 0.010),
+    "ProductCard": Node(0.050, 0.005, ("CatalogClient", "PricesClient", "StockClient", "ReviewsClient")),
+    "PaymentsClient": Node(0.300, 0.010),
+    "DeliveryClient": Node(0.200, 0.010),
+    "LoyaltyClient": Node(0.150, 0.010),
+    "PromotionsClient": Node(0.200, 0.010),
+    # Finishes the orders in flight before it stops
+    "Checkout": Node(0.020, 0.300, ("PaymentsClient", "DeliveryClient", "LoyaltyClient", "PromotionsClient")),
+    "UsersClient": Node(0.200, 0.010),
+    "RecommendationsClient": Node(0.250, 0.010),
+    "FavoritesClient": Node(0.150, 0.010),
+    # Flushes the messages it has buffered
+    "EventsProducer": Node(0.300, 0.300),
+    "Personalization": Node(
+        0.020, 0.005, ("UsersClient", "RecommendationsClient", "FavoritesClient", "EventsProducer")
+    ),
+    "Elasticsearch": Node(0.250, 0.010),
+    "Redis": Node(0.100, 0.010),
+    "SynonymsClient": Node(0.150, 0.010),
+    "CategoriesClient": Node(0.200, 0.010),
+    "Search": Node(0.020, 0.005, ("Elasticsearch", "Redis", "SynonymsClient", "CategoriesClient")),
+    "ProductPageApi": Node(0.010, 0.050, ("ProductCard", "Checkout", "Personalization", "Search")),
+}
+
+
+def product_page() -> type[Client]:
+    """
+    The classes of `PRODUCT_PAGE_TREE`, each a client whose `__init__` takes its dependencies by type hint;
+    the root, ProductPageApi.
+    """
+    made: dict[str, type[Client]] = {}
+    for name, node in PRODUCT_PAGE_TREE.items():
+        cls = client(name, [made[dependency] for dependency in node.dependencies], base=Sleeper)
+        cls.connect_seconds = node.connect  # type: ignore[attr-defined]
+        cls.disconnect_seconds = node.disconnect  # type: ignore[attr-defined]
+        made[name] = cls
+    return made["ProductPageApi"]
 
 
 def init_arguments(cls: type[Client]) -> dict[str, type[Client]]:
@@ -278,8 +327,10 @@ async def dishka_start(root: type[Client], gather: bool = False) -> Stop:
     provider = Provider(scope=Scope.APP)
     for cls in tree_of(root):
         provider.provide(lifecycle(cls))
-    # The container connects nothing until a client is asked for
-    container = make_async_container(provider)
+    # The container connects nothing until a client is asked for. It serializes the `get()` calls with a lock, so
+    # gathered ones run one after another unless the lock is off; without it, a client that two gathered branches
+    # share is built and connected twice
+    container = make_async_container(provider, lock_factory=None) if gather else make_async_container(provider)
     await get_root(container, root, gather)
     return container.close
 
@@ -499,7 +550,7 @@ def samples_of(start: Start, root: type[Client], repeat: int) -> list[tuple[floa
 
 def connect_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
     # The sleeps are the figure, so the trees are fixed and nothing is per client
-    for shape, root in ((APPLICATION, Api), (WIDE_SLOW, wide_slow())):
+    for shape, root in ((APPLICATION, Api), (PRODUCT_PAGE, product_page())):
         for library in LIBRARIES:
             figure = partial(Result, shape=shape, n=None, per_client=False, library=library.name)
             if library.start is None:
@@ -544,7 +595,8 @@ FIGURES = [
     Figure("A FastAPI request with a client", "one request, a client in the handler", "FastAPI", None),
     Figure("Startup: 8 clients, connect() of 1–60 ms", STARTUP, APPLICATION, None, chart=False),  # noqa: RUF001
     Figure("Shutdown: the same 8 clients", SHUTDOWN, APPLICATION, None, chart=False),
-    Figure("Startup: 10 independent clients, connect() of 50 ms", STARTUP, WIDE_SLOW, None, chart=False),
+    Figure("Startup: the product page, 21 clients", STARTUP, PRODUCT_PAGE, None, chart=False),
+    Figure("Shutdown: the product page", SHUTDOWN, PRODUCT_PAGE, None, chart=False),
 ]
 
 
@@ -576,9 +628,14 @@ def summary_figures(
     return figures
 
 
+# Figures this close to the best are as good as the best
+TIE = 1.01
+
+
 def pivot(results: list[Result], sizes: list[int]) -> str:
     """
-    One row per figure, one column per library: the best in bold, the others with their ratio to it.
+    One row per figure, one column per library: the best in bold, and every figure within 1% of it, a difference
+    inside the noise of a run; the others with their ratio to the best.
     """
     libraries = [library.name for library in LIBRARIES]
     rows = [["Lower is better", *libraries]]
@@ -590,7 +647,7 @@ def pivot(results: list[Result], sizes: list[int]) -> str:
             median = medians.get(library)
             if median is None:
                 cells.append("—")
-            elif median == best:
+            elif best is not None and median <= best * TIE:
                 cells.append(f"**{fmt(median, unit)}**")
             else:
                 assert best is not None
