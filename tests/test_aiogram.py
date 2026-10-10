@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import functools
+import types
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ForwardRef
 
 import pytest
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.session.base import BaseSession
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.filters import Command, Filter
 from aiogram.handlers import MessageHandler
 from aiogram.methods import GetMe, GetUpdates, SendMessage, TelegramMethod
@@ -21,6 +24,9 @@ from nuke_di.integration.testing import check
 
 if TYPE_CHECKING:
     from decimal import Decimal
+
+    # Never defined: a hint that does not evaluate
+    from missing import Missing  # type: ignore[import-not-found]
 
 events: list[str] = []
 
@@ -276,7 +282,7 @@ async def test_error_handler_gets_clients() -> None:
         assert await dp.feed_update(BOT, update()) == "boom Hello, user-3!"
 
 
-async def unevaluable(message: Message, amount: Decimal, users: UserService) -> str:
+async def unevaluable(message: Message, amount: Decimal, users: UserService, note: Missing | None = None) -> str:
     return "unevaluable"  # pragma: no cover
 
 
@@ -285,9 +291,104 @@ async def test_handler_with_unevaluable_hints_is_left_to_aiogram() -> None:
     dp.message.register(unevaluable)
 
     async with started(dp):
-        # aiogram passes by name and found no `amount` nor `users`
-        with pytest.raises(TypeError, match=r"missing 2 required positional arguments: 'amount' and 'users'"):
+        # A hint that does not evaluate is skipped alone: `users` is filled, and aiogram finds no `amount`
+        with pytest.raises(TypeError, match=r"missing 1 required positional argument: 'amount'"):
             await dp.feed_update(BOT, update())
+
+
+async def broken_hint(message: Message, users: UserService, other: types.NoSuchThing | None = None) -> str:  # type: ignore[name-defined]
+    return await users.greet(5)
+
+
+async def test_hint_that_fails_with_another_error_is_skipped() -> None:
+    dp = make_dispatcher(Dependencies())
+    # `types.NoSuchThing` raises AttributeError, not NameError, when it is evaluated
+    dp.message.register(broken_hint)
+
+    async with started(dp):
+        assert await dp.feed_update(BOT, update()) == "Hello, user-5!"
+
+
+async def test_hints_set_by_hand_with_a_forward_reference() -> None:
+    async def handler(message: Any, users: Any, note: Any = None) -> str:
+        return await users.greet(8)  # type: ignore[no-any-return]
+
+    # As a decorator may leave them: evaluated already, but one of them a reference that does not resolve
+    handler.__annotations__ = {"message": Message, "users": UserService, "note": ForwardRef("Missing")}
+    dp = make_dispatcher(Dependencies())
+    dp.message.register(handler)
+
+    async with started(dp):
+        assert await dp.feed_update(BOT, update()) == "Hello, user-8!"
+
+
+@dataclasses.dataclass
+class Reply:
+    """A callable handler that cannot be a dictionary key: a dataclass with `eq` has no `__hash__`."""
+
+    prefix: str
+
+    def __call__(self, message: Message, billing: Billing) -> str:
+        return f"{self.prefix} {type(billing).__name__}"
+
+
+@dataclasses.dataclass
+class Plain:
+    def __call__(self, message: Message) -> str:
+        return "plain"
+
+
+async def test_unhashable_callable_handlers() -> None:
+    dp = make_dispatcher(Dependencies())
+    dp.message.register(Reply("paid with"), Command("pay"))
+    dp.message.register(Plain())
+
+    async with started(dp):
+        assert await dp.feed_update(BOT, update("/pay")) == "paid with Billing"
+        assert await dp.feed_update(BOT, update("/other")) == "plain"
+
+
+async def prefixed(prefix: str, message: Message, users: UserService) -> str:
+    return f"{prefix}: {await users.greet(6)}"
+
+
+async def test_partial_handler() -> None:
+    dp = make_dispatcher(Dependencies())
+    dp.message.register(functools.partial(prefixed, "partial"))
+
+    async with started(dp):
+        assert await dp.feed_update(BOT, update()) == "partial: Hello, user-6!"
+
+
+async def test_handler_after_skip_handler_sees_no_clients_of_the_skipped_one() -> None:
+    dp = make_dispatcher(Dependencies())
+
+    @dp.message()
+    async def skipped(message: Message, users: UserService) -> None:
+        raise SkipHandler
+
+    @dp.message()
+    async def everything(message: Message, **data: Any) -> bool:
+        return "users" in data
+
+    async with started(dp):
+        assert await dp.feed_update(BOT, update()) is False
+
+
+async def test_handler_registered_after_startup_gets_a_client_connected_as_a_dependency() -> None:
+    deps = Dependencies()
+    dp = make_dispatcher(deps)
+    dp.message.register(greet, Command("start"))
+
+    async with started(dp):
+        late = Router()
+
+        @late.message(Command("db"))
+        async def database(message: Message, db: Database) -> bool:
+            return db is deps.clients[Database]
+
+        dp.include_router(late)
+        assert await dp.feed_update(BOT, update("/db")) is True
 
 
 # --- startup and shutdown --------------------------------------------------------------------------------
@@ -518,7 +619,7 @@ async def test_handler_registered_after_startup_explains() -> None:
             await dp.feed_update(BOT, update("/bill"))
 
 
-@pytest.mark.parametrize("name", ["state", "bot", "event_from_user"])
+@pytest.mark.parametrize("name", ["state", "bot", "event_from_user", "scenes", "callback_answer"])
 async def test_client_under_a_reserved_name_is_refused(name: str) -> None:
     dp = make_dispatcher(Dependencies())
     namespace: dict[str, Any] = {}
@@ -604,15 +705,112 @@ def test_setup_twice_and_on_a_router() -> None:
         setup(Router())  # type: ignore[arg-type]
 
 
-async def test_shutdown_without_startup_with_clients_in_shutdown_handlers_explains() -> None:
+async def test_shutdown_after_a_failed_startup_runs_the_shutdown_handlers() -> None:
     dp = make_dispatcher(Dependencies())
+
+    @dp.startup()
+    async def on_startup(db: Database) -> None:
+        raise ConnectionError("telegram is down")
+
+    @dp.shutdown()
+    async def on_shutdown(bot: Bot) -> None:
+        events.append("shutdown handler")
+
+    # The aiohttp webhook app calls the shutdown on cleanup, also after a failed startup
+    with pytest.raises(ConnectionError, match="telegram is down"):
+        await dp.emit_startup(bot=BOT)
+    await dp.emit_shutdown(bot=BOT)
+
+    assert events == ["database: connected", "database: disconnected", "shutdown handler"]
+
+
+async def test_second_shutdown_runs_the_shutdown_handlers_without_clients() -> None:
+    dp = make_dispatcher(Dependencies())
+
+    @dp.shutdown()
+    async def on_shutdown(bot: Bot, db: Database) -> None:
+        events.append("shutdown handler")
+
+    @dp.shutdown()
+    async def plain_shutdown(bot: Bot) -> None:
+        events.append("plain shutdown handler")
+
+    async with started(dp):
+        pass
+    # Not connected any more: aiogram itself reports the client argument it cannot fill
+    with pytest.raises(TypeError, match=r"missing 1 required positional argument: 'db'"):
+        await dp.emit_shutdown(bot=BOT)
+
+    assert events == [
+        "database: connected",
+        "shutdown handler",
+        "plain shutdown handler",
+        "database: disconnected",
+    ]
+
+
+async def test_shutdown_argument_under_a_client_name_is_refused() -> None:
+    deps = Dependencies()
+    dp = make_dispatcher(deps)
 
     @dp.shutdown()
     async def on_shutdown(users: UserService) -> None: ...
 
-    with pytest.raises(RuntimeError, match=r"UserService is not connected"):
-        async with started(dp):
-            await dp.emit_shutdown(bot=BOT)
+    await dp.emit_startup(bot=BOT)
+    with pytest.raises(TypeError, match=r'"users" is passed to emit_shutdown\(\), but it is the client UserService'):
+        await dp.emit_shutdown(bot=BOT, users="from the caller")
+    assert not deps.connected
+
+
+async def test_data_under_a_client_name_is_refused() -> None:
+    dp = make_dispatcher(Dependencies())
+
+    async def user_filter(message: Message) -> dict[str, Any]:
+        return {"users": "from a filter"}
+
+    dp.message.register(greet, Command("start"), user_filter)
+
+    async with started(dp):
+        with pytest.raises(TypeError, match=r'"users" is in the data of the update already, and greet takes'):
+            await dp.feed_update(BOT, update())
+
+    dp = make_dispatcher(Dependencies())
+    dp.message.register(greet)
+    async with started(dp):
+        with pytest.raises(TypeError, match=r'"users" is in the data'):
+            await dp.feed_update(BOT, update(), users="from feed_update()")
+
+
+async def test_root_filter_with_a_client_is_refused() -> None:
+    async def is_admin(message: Message, users: UserService) -> bool:
+        return True  # pragma: no cover
+
+    router = Router()
+    router.message.filter(is_admin)
+    dp = make_dispatcher(Dependencies(), router)
+    with pytest.raises(TypeError, match=r'Argument "users" of the filter is_admin is UserService'):
+        await dp.emit_startup(bot=BOT)
+
+    dp = make_dispatcher(Dependencies())
+    dp.message.filter(is_admin)
+    with pytest.raises(TypeError, match=r'Argument "users" of the filter is_admin'):
+        await dp.emit_startup(bot=BOT)
+
+
+async def test_scene_with_a_client_is_refused() -> None:
+    from tests.aiogram_scenes import Plain, Quiz, Survey
+
+    dp = make_dispatcher(Dependencies(), Quiz.as_router())
+    with pytest.raises(TypeError, match=r'Argument "users" of the scene handler Quiz.answer is UserService: aiogram'):
+        await dp.emit_startup(bot=BOT)
+
+    dp = make_dispatcher(Dependencies(), Survey.as_router())
+    with pytest.raises(TypeError, match=r'Argument "db" of the scene handler Survey.start is Database'):
+        await dp.emit_startup(bot=BOT)
+
+    dp = make_dispatcher(Dependencies(), Plain.as_router())
+    async with started(dp):
+        pass
 
 
 # --- the contract ----------------------------------------------------------------------------------------

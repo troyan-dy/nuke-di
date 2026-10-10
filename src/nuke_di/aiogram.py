@@ -5,13 +5,16 @@ connect before its startup handlers and disconnect after its shutdown handlers.
 See docs/specs/aiogram.md.
 """
 
+import functools
 import inspect
+import sys
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
-from typing import Any, get_type_hints
+from typing import Any, ForwardRef, get_type_hints
 
 from aiogram import Dispatcher
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
+from aiogram.fsm.scene import SceneHandlerWrapper
 from aiogram.types import TelegramObject
 
 from nuke_di.core import DI, Dependencies
@@ -49,11 +52,20 @@ _RESERVED = frozenset(
         "fsm_storage",
         "state",
         "raw_state",
+        "scenes",
+        "callback_answer",
     }
 )
 
 # The client arguments of one function, with the binding that fills each
 Arguments = tuple[tuple[str, Binding], ...]
+
+# How aiogram reads a signature: on Python 3.14 an annotation that does not evaluate is left as it is
+_SIGNATURE: dict[str, Any] = {}
+if sys.version_info >= (3, 14):  # pragma: no cover - the other branch runs on Python 3.11-3.13
+    import annotationlib
+
+    _SIGNATURE["annotation_format"] = annotationlib.Format.FORWARDREF
 
 
 def setup(dp: Dispatcher, container: Dependencies = DI) -> None:
@@ -85,17 +97,26 @@ def setup(dp: Dispatcher, container: Dependencies = DI) -> None:
         await stack.enter_async_context(running(container, list(found.bindings.values())))
         # Only once connected: a dispatcher started twice keeps the clients of the first startup
         clients.found = found
+        clients.started = True
         try:
             await emit_startup(*args, **kwargs, **await clients.lifecycle())
         except BaseException:
-            await stack.aclose()
+            await stop()
             raise
 
     async def shutdown(*args: Any, **kwargs: Any) -> None:
+        if not clients.started:
+            # After a failed startup, or a second shutdown: the shutdown handlers run with what aiogram passes
+            await emit_shutdown(*args, **kwargs)
+            return
         try:
-            await emit_shutdown(*args, **kwargs, **await clients.lifecycle())
+            await emit_shutdown(*args, **clients.shutdown_arguments(kwargs), **await clients.lifecycle())
         finally:
-            await stack.aclose()
+            await stop()
+
+    async def stop() -> None:
+        clients.started = False
+        await stack.aclose()
 
     startup.__nuke_di__ = True  # type: ignore[attr-defined]
     dp.emit_startup = startup  # type: ignore[method-assign]
@@ -113,6 +134,8 @@ class _Clients(BaseMiddleware):
         self.container = container
         # What the last startup found; before the first one, every handler is found as it is first called
         self.found = _Found(container, _RESERVED)
+        # Between a startup that connected the container and its shutdown
+        self.started = False
 
     async def __call__(
         self,
@@ -122,15 +145,36 @@ class _Clients(BaseMiddleware):
     ) -> Any:
         found = self.found
         callback = data["handler"].callback
-        arguments = found.arguments.get(callback)
-        if arguments is None:
-            # A handler registered after startup, or an update fed before it: it raises "not started" or
-            # "not connected" below
-            arguments = found.arguments[callback] = found.of(callback)
+        # By identity: a callable object may not be hashable; the entry keeps the callback, so its id stays its own
+        entry = found.arguments.get(id(callback))
+        if entry is None or entry[0] is not callback:
+            # A handler registered after startup, or an update fed before it
+            entry = found.arguments[id(callback)] = (callback, found.of(callback))
+        arguments = entry[1]
+        if not arguments:
+            return await handler(event, data)
+        # A copy: aiogram passes the same data to the next handler when this one raises SkipHandler
+        data = dict(data)
         for name, binding in arguments:
+            if name in data:
+                raise TypeError(
+                    f'"{name}" is in the data of the update already, and {sname(callback)} takes the client '
+                    f"{sname(binding.cls)} under that name: a filter, a middleware or feed_update() passed it; "
+                    f"rename the argument or the key"
+                )
             instance = binding.instance
-            data[name] = instance if instance is not None else await binding.get()
+            data[name] = instance if instance is not None else await self.late(binding)
         return await handler(event, data)
+
+    async def late(self, binding: Binding) -> NotSingletonClient:
+        """
+        The client of a handler the startup did not see: connected if another client depends on it.
+        """
+        if self.started:
+            instance = self.container.clients.get(binding.cls)
+            if instance is not None:
+                return instance
+        return await binding.get()
 
     def find(self, kwargs: dict[str, Any]) -> "_Found":
         """
@@ -140,8 +184,12 @@ class _Clients(BaseMiddleware):
         found = _Found(self.container, _RESERVED | self.dp.workflow_data.keys() | kwargs.keys())
         for router in self.dp.chain_tail:
             for observer in router.observers.values():
+                # The filters of the observer itself, `router.message.filter(...)`, which run first
+                for item in observer._handler.filters or ():
+                    _refuse_filter(item.callback)
                 for handler in observer.handlers:
-                    found.arguments[handler.callback] = found.of(handler.callback)
+                    _refuse_scene(handler.callback)
+                    found.arguments[id(handler.callback)] = (handler.callback, found.of(handler.callback))
                     for item in handler.filters or ():
                         _refuse_filter(item.callback)
             for handler in [*router.startup.handlers, *router.shutdown.handlers]:
@@ -154,6 +202,19 @@ class _Clients(BaseMiddleware):
                             f"different clients different names"
                         )
         return found
+
+    def shutdown_arguments(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """
+        The arguments of a shutdown, which leave the names of the clients to nuke-di.
+        """
+        taken = sorted(kwargs.keys() & self.found.lifecycle.keys())
+        if taken:
+            name = taken[0]
+            raise TypeError(
+                f'"{name}" is passed to emit_shutdown(), but it is the client {sname(self.found.lifecycle[name].cls)} '
+                f"of a startup or shutdown handler: rename the argument or the key"
+            )
+        return kwargs
 
     async def lifecycle(self) -> dict[str, NotSingletonClient]:
         """
@@ -173,8 +234,9 @@ class _Found:
         self.reserved = reserved
         # One binding per client class
         self.bindings: dict[type[NotSingletonClient], Binding] = {}
-        # The client arguments of every handler, by its callback: the cost of an update is a lookup here
-        self.arguments: dict[Any, Arguments] = {}
+        # The client arguments of every handler, by the id of its callback, which the entry keeps: the cost of an
+        # update is a lookup here
+        self.arguments: dict[int, tuple[Any, Arguments]] = {}
         # The client arguments of the startup and shutdown handlers, by name: aiogram passes them all the same
         # arguments
         self.lifecycle: dict[str, Binding] = {}
@@ -199,27 +261,63 @@ class _Found:
 
 def _client_arguments(call: Any) -> list[tuple[str, type[NotSingletonClient]]]:
     """
-    The arguments of `call` whose type hint is a client, as aiogram reads them: through `functools.wraps`.
+    The arguments of `call` whose type hint is a client, as aiogram reads them: through `functools.wraps`, and
+    without the arguments a `functools.partial` binds.
     """
     target = inspect.unwrap(call)
-    function: Any
-    if inspect.isfunction(target):
-        function = target
-    elif inspect.ismethod(target):
-        function = target.__func__
-    elif not inspect.isclass(target) and callable(target):
-        # A `Filter` object
-        function = type(target).__call__
-    else:
-        # aiogram's class-based handlers take what they need from `self.data`
-        return []
+    function = inspect.unwrap(target.func) if isinstance(target, functools.partial) else target
+    if inspect.ismethod(function):
+        function = function.__func__
+    elif not inspect.isfunction(function):
+        if inspect.isclass(function) or not callable(function):
+            # aiogram's class-based handlers take what they need from `self.data`
+            return []
+        # A callable object, e.g. a `Filter`
+        function = type(function).__call__
     try:
-        hints = get_type_hints(function, include_extras=True)
-        parameters = inspect.signature(target).parameters
-    except NameError:
-        # E.g. a name imported under TYPE_CHECKING: aiogram does not read type hints, it passes by name
+        parameters = inspect.signature(target, **_SIGNATURE).parameters
+    except (TypeError, ValueError):  # pragma: no cover - aiogram cannot read such a signature either
         return []
+    hints = _hints(function, parameters)
     return [(name, client) for name in parameters if (client := client_of(hints.get(name))) is not None]
+
+
+def _hints(function: Any, parameters: Any) -> dict[str, Any]:
+    """
+    The type hints of `function`, without those that do not evaluate: a name imported under TYPE_CHECKING, or any
+    other error. aiogram does not read type hints, it passes by name, so it copes with them.
+    """
+    try:
+        return get_type_hints(function, include_extras=True)
+    except Exception:
+        # Whatever a string annotation raises when it is evaluated
+        hints = {}
+        for name, parameter in parameters.items():
+            hint = _hint(function, parameter.annotation)
+            if hint is not None:
+                hints[name] = hint
+        return hints
+
+
+class _Annotation:
+    """
+    One annotation of a function, for get_type_hints() to evaluate alone.
+    """
+
+    def __init__(self, function: Any, annotation: str) -> None:
+        self.__annotations__ = {"hint": annotation}
+        self.__globals__ = getattr(function, "__globals__", {})
+
+
+def _hint(function: Any, annotation: Any) -> Any:
+    if isinstance(annotation, ForwardRef):
+        annotation = annotation.__forward_arg__
+    if not isinstance(annotation, str):
+        return annotation
+    try:
+        return get_type_hints(_Annotation(function, annotation), include_extras=True)["hint"]
+    except Exception:
+        return None
 
 
 def _refuse_filter(call: Any) -> None:
@@ -230,3 +328,25 @@ def _refuse_filter(call: Any) -> None:
             f'Argument "{name}" of the filter {sname(call)} is {sname(client)}: aiogram calls filters before '
             f"the middlewares that fill clients, so a filter takes no clients; check it in the handler instead"
         )
+
+
+def _refuse_scene(call: Any) -> None:
+    """
+    Refuse a scene whose handlers take clients: aiogram calls the handlers of a scene's actions, such as
+    `on.message.enter()`, from its own machinery, which no middleware of nuke-di reaches.
+    """
+    if not isinstance(call, SceneHandlerWrapper):
+        return
+    config = call.scene.__scene_config__
+    handlers = [item.handler for item in config.handlers]
+    handlers += [item.callback for actions in config.actions.values() for item in actions.values()]
+    for handler in handlers:
+        found = _client_arguments(handler)
+        if found:
+            name, client = found[0]
+            where = handler.__qualname__.rsplit("<locals>.", 1)[-1]
+            raise TypeError(
+                f'Argument "{name}" of the scene handler {where} is {sname(client)}: aiogram calls '
+                f"the handlers of a scene from its own machinery, so a scene takes no clients; pass what it needs "
+                f"from a handler outside it, e.g. `await scenes.enter({sname(call.scene)}, ...)`"
+            )
