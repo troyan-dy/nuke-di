@@ -134,18 +134,23 @@ def test_compares_slow_connections(tmp_path: Path) -> None:
 
     data = json.loads(out.read_text())
     figures = {(row["library"], row["scenario"], row["shape"]): row for row in data["results"]}
-    wide = "wide: 10 clients, connect() of 50 ms"
+    page = "product page: 21 clients, connect() of 10–300 ms"  # noqa: RUF001
     startup = "startup: connect() of every client"
-    # Ten clients of 50 ms: concurrently in about 50 ms, one after another in about 500 ms
-    assert figures["nuke-di", startup, wide]["median"] < 0.2
-    assert figures["dependency-injector", startup, wide]["median"] < 0.2
-    assert figures["dishka", startup, wide]["median"] > 0.45
-    assert figures["wireup", startup, wide]["median"] > 0.45
-    assert figures["injector", startup, wide]["error"] == "no async lifecycle"
+    shutdown = "shutdown: disconnect() of every client"
+    # 21 clients: 0.33 s along the longest chain, 3.37 s one after another
+    assert figures["nuke-di", startup, page]["median"] < 1
+    assert figures["dependency-injector", startup, page]["median"] < 1
+    assert figures["dishka", startup, page]["median"] > 3
+    assert figures["wireup", startup, page]["median"] > 3
+    assert figures["injector", startup, page]["error"] == "no async lifecycle"
+    # dependency-injector stops layer by layer, 0.65 s, where the longest chain is 0.36 s
+    assert (
+        figures["dependency-injector", shutdown, page]["median"] > figures["nuke-di", shutdown, page]["median"] + 0.15
+    )
     # wireup connects concurrently what the application gets concurrently by hand, dishka still one at a time
     gathered = "startup, the root's arguments gathered by hand"
-    assert figures["wireup", gathered, wide]["median"] < 0.2
-    assert figures["dishka", gathered, wide]["median"] > 0.45
+    assert figures["wireup", gathered, page]["median"] < 2
+    assert figures["dishka", gathered, page]["median"] > 3
 
 
 async def test_the_other_containers_connect_on_the_first_get(monkeypatch: pytest.MonkeyPatch) -> None:

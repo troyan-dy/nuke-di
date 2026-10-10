@@ -191,19 +191,58 @@ def injector_warm(tree: Tree) -> Callable[[], object]:
 STARTUP = "startup: connect() of every client"
 SHUTDOWN = "shutdown: disconnect() of every client"
 STARTUP_GATHERED = "startup, the root's arguments gathered by hand"
-WIDE_SLOW = "wide: 10 clients, connect() of 50 ms"
+PRODUCT_PAGE = "product page: 21 clients, connect() of 10–300 ms"  # noqa: RUF001
+
+# The backend of an online shop's product page, a tree as wide as a real service's: the HTTP API needs four
+# features, and every feature its own four connections, gRPC clients of other services, Kafka, Elasticsearch,
+# Redis. Every client: (connect() seconds, disconnect() seconds, the clients its `__init__` takes). Connected
+# one after another, the startup is the sum, 3.37 s; along the longest chain, PaymentsClient → Checkout →
+# ProductPageApi or EventsProducer → Personalization → ProductPageApi, it is 0.33 s. To stop, the longest chain is
+# ProductPageApi → Checkout → PaymentsClient, 0.36 s; layer by layer, every layer waiting for its slowest client,
+# it is 0.65 s, since Checkout and EventsProducer stop slowly in different layers
+PRODUCT_PAGE_TREE: dict[str, tuple[float, float, tuple[str, ...]]] = {
+    "CatalogClient": (0.250, 0.010, ()),
+    "PricesClient": (0.200, 0.010, ()),
+    "StockClient": (0.200, 0.010, ()),
+    "ReviewsClient": (0.150, 0.010, ()),
+    "ProductCard": (0.050, 0.005, ("CatalogClient", "PricesClient", "StockClient", "ReviewsClient")),
+    "PaymentsClient": (0.300, 0.010, ()),
+    "DeliveryClient": (0.200, 0.010, ()),
+    "LoyaltyClient": (0.150, 0.010, ()),
+    "PromotionsClient": (0.200, 0.010, ()),
+    # Finishes the orders in flight before it stops
+    "Checkout": (0.020, 0.300, ("PaymentsClient", "DeliveryClient", "LoyaltyClient", "PromotionsClient")),
+    "UsersClient": (0.200, 0.010, ()),
+    "RecommendationsClient": (0.250, 0.010, ()),
+    "FavoritesClient": (0.150, 0.010, ()),
+    # Flushes the messages it has buffered
+    "EventsProducer": (0.300, 0.300, ()),
+    "Personalization": (
+        0.020,
+        0.005,
+        ("UsersClient", "RecommendationsClient", "FavoritesClient", "EventsProducer"),
+    ),
+    "Elasticsearch": (0.250, 0.010, ()),
+    "Redis": (0.100, 0.010, ()),
+    "SynonymsClient": (0.150, 0.010, ()),
+    "CategoriesClient": (0.200, 0.010, ()),
+    "Search": (0.020, 0.005, ("Elasticsearch", "Redis", "SynonymsClient", "CategoriesClient")),
+    "ProductPageApi": (0.010, 0.050, ("ProductCard", "Checkout", "Personalization", "Search")),
+}
 
 
-class Slow(Sleeper):
-    connect_seconds = 0.050
-    disconnect_seconds = 0.005
-
-
-def wide_slow() -> type[Client]:
+def product_page() -> type[Client]:
     """
-    A root that declares 10 slow clients with no dependencies of their own.
+    The classes of `PRODUCT_PAGE_TREE`, each a client whose `__init__` takes its dependencies by type hint;
+    the root, ProductPageApi.
     """
-    return client("SlowRoot", [client(f"Slow{number}", base=Slow) for number in range(10)], base=Sleeper)
+    made: dict[str, type[Client]] = {}
+    for name, (connect_seconds, disconnect_seconds, dependencies) in PRODUCT_PAGE_TREE.items():
+        cls = client(name, [made[dependency] for dependency in dependencies], base=Sleeper)
+        cls.connect_seconds = connect_seconds  # type: ignore[attr-defined]
+        cls.disconnect_seconds = disconnect_seconds  # type: ignore[attr-defined]
+        made[name] = cls
+    return made["ProductPageApi"]
 
 
 def init_arguments(cls: type[Client]) -> dict[str, type[Client]]:
@@ -499,7 +538,7 @@ def samples_of(start: Start, root: type[Client], repeat: int) -> list[tuple[floa
 
 def connect_scenario(sizes: list[int], repeat: int) -> Iterator[Result]:
     # The sleeps are the figure, so the trees are fixed and nothing is per client
-    for shape, root in ((APPLICATION, Api), (WIDE_SLOW, wide_slow())):
+    for shape, root in ((APPLICATION, Api), (PRODUCT_PAGE, product_page())):
         for library in LIBRARIES:
             figure = partial(Result, shape=shape, n=None, per_client=False, library=library.name)
             if library.start is None:
@@ -544,7 +583,8 @@ FIGURES = [
     Figure("A FastAPI request with a client", "one request, a client in the handler", "FastAPI", None),
     Figure("Startup: 8 clients, connect() of 1–60 ms", STARTUP, APPLICATION, None, chart=False),  # noqa: RUF001
     Figure("Shutdown: the same 8 clients", SHUTDOWN, APPLICATION, None, chart=False),
-    Figure("Startup: 10 independent clients, connect() of 50 ms", STARTUP, WIDE_SLOW, None, chart=False),
+    Figure("Startup: the product page, 21 clients", STARTUP, PRODUCT_PAGE, None, chart=False),
+    Figure("Shutdown: the product page", SHUTDOWN, PRODUCT_PAGE, None, chart=False),
 ]
 
 
