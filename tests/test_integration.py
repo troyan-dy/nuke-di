@@ -6,12 +6,12 @@ that break the contract. The integrations of this package run the check in their
 import inspect
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Any, get_args
+from typing import Annotated, Any, get_args, get_origin
 
 import pytest
 
 import nuke_di.integration
-from nuke_di import Dependencies
+from nuke_di import Client, Dependencies
 from nuke_di.integration import Binding, DependsFramework, Framework, bind, running, unique
 from nuke_di.integration.testing import Send, check
 
@@ -202,6 +202,86 @@ async def test_check_skips_the_dependency_without_depends() -> None:
         "_not_connected",
         "_failed_connect",
     ]
+
+
+# --- bind() ------------------------------------------------------------------------------------------------
+
+
+class Greeter(Client):
+    def greet(self) -> str:
+        return "hello"
+
+
+async def greeting(greeter: Greeter) -> str:
+    return greeter.greet()
+
+
+GREETING = ToyDepends(greeting)
+
+
+# String annotations on purpose: `Missing` cannot be evaluated, as a name imported under TYPE_CHECKING
+async def wrapped(  # type: ignore[no-untyped-def]
+    missing: "Missing",  # type: ignore[name-defined]  # noqa: F821
+    greeter: "Greeter",
+    text: "str" = GREETING,  # type: ignore[assignment]
+    untyped=None,
+) -> "Missing":  # type: ignore[name-defined]  # noqa: F821
+    return text  # pragma: no cover
+
+
+async def test_bind_evaluates_each_hint_on_its_own() -> None:
+    # One hint that cannot be evaluated leaves only itself as written: the clients of the dependencies are
+    # still found
+    container = Dependencies()
+
+    bindings = bind(wrapped, container, TOY)
+
+    # The dependency's client, then its own
+    assert [binding.cls for binding in bindings] == [Greeter, Greeter]
+    async with running(container, bindings):
+        assert await toy_call(greeting) == "hello"
+    signature = inspect.signature(wrapped)
+    assert signature.parameters["missing"].annotation == "Missing"
+    assert signature.parameters["text"].annotation is str
+    assert get_origin(signature.parameters["greeter"].annotation) is Annotated
+    assert signature.return_annotation == "Missing"
+
+
+class _Unreadable(type):
+    @property
+    def __signature__(cls) -> inspect.Signature:
+        # What Python 3.14 raises for a signature whose annotations name what does not exist, evaluated
+        # when read without `from __future__ import annotations`
+        raise NameError("name 'Missing' is not defined")
+
+
+class Unreadable(metaclass=_Unreadable):
+    def __init__(self, greeter: Greeter) -> None: ...
+
+
+def test_bind_leaves_an_unreadable_signature_to_the_framework() -> None:
+    assert bind(Unreadable, Dependencies(), TOY) == []
+
+
+async def test_getter_replaces_what_a_marker_calls() -> None:
+    async def get() -> str:
+        return "from the getter"
+
+    framework = DependsFramework(
+        name="Toy",
+        depends=ToyDepends,
+        make_depends=ToyDepends,
+        not_started=TOY.not_started,
+        not_connected=TOY.not_connected,
+        _getter=lambda binding: get,
+    )
+
+    async def handler(greeter: Greeter) -> object:
+        return greeter
+
+    bind(handler, Dependencies(), framework)
+
+    assert await toy_call(handler) == "from the getter"
 
 
 # --- the public names ------------------------------------------------------------------------------------

@@ -4,11 +4,13 @@ FastAPI integration: path operations and their dependencies take clients by type
 See docs/specs/fastapi.md and docs/adr/0003-fastapi-signature-rewrite.md.
 """
 
-from collections.abc import Callable
+import weakref
+from collections.abc import Awaitable, Callable
 from typing import Any, ClassVar
 
 from fastapi import APIRouter, Depends, FastAPI, params
 from fastapi.routing import APIRoute
+from starlette.requests import HTTPConnection
 
 from nuke_di.core import DI, Dependencies
 from nuke_di.integration import Binding, DependsFramework, bind, unique, wrap_lifespan
@@ -19,6 +21,66 @@ __all__ = ("ClientRoute", "ClientRouter", "setup")
 # Where a container keeps its route class: the container is an unhashable dataclass, and keeping it here
 # lets both be garbage collected together
 _ROUTE_CLASS = "_nuke_di_route_class"
+# Where an app set up by setup() keeps its _AppBindings
+_APP_BINDINGS = "_nuke_di_app_bindings"
+
+
+class _AppBindings:
+    """
+    The clients one app serves, resolved in its own container.
+
+    A function is bound once, whatever the container: FastAPI 0.137+ reads the signatures of included routes
+    lazily, on the app's first request, so a signature rewritten again for another container would reach the
+    routes of every app. Each app instead keeps its own `Binding` for every shared one, and the getter in the
+    signature takes the one of the app the request came to.
+    """
+
+    # Every app's own Binding of each shared one, for a request to an app that has none of its own: the
+    # routes of a set-up app served by another app object, a mounted app, an app without setup()
+    _copies: ClassVar[weakref.WeakKeyDictionary[Binding, weakref.WeakSet[Binding]]] = weakref.WeakKeyDictionary()
+
+    def __init__(self, container: Dependencies) -> None:
+        self.container = container
+        # Kept from one start of the app to the next: replaced, they would leave a running app without them
+        self.bindings: dict[Binding, Binding] = {}
+
+    def for_app(self, shared: list[Binding]) -> list[Binding]:
+        """
+        The app's own `Binding` of each of `shared`, for its startup to resolve.
+        """
+        for binding in shared:
+            if binding not in self.bindings:
+                own = self.bindings[binding] = Binding(binding.cls, self.container, _FASTAPI)
+                self._copies.setdefault(binding, weakref.WeakSet()).add(own)
+        return [self.bindings[binding] for binding in shared]
+
+    @classmethod
+    def serving(cls, app: object, shared: Binding) -> Binding:
+        """
+        The `Binding` that fills `shared` in a request to `app`.
+        """
+        bindings: _AppBindings | None = getattr(app, _APP_BINDINGS, None)
+        own = bindings.bindings.get(shared) if bindings is not None else None
+        if own is not None:
+            return own
+        # Not its own: the one app that filled it, e.g. the set-up app whose routes another app serves
+        filled = [copy for copy in cls._copies.get(shared, ()) if copy.instance is not None]
+        if len(filled) == 1:
+            return filled[0]
+        if bindings is None:
+            # None, or one per running container: an app without setup() cannot tell which is its own
+            raise RuntimeError(_FASTAPI.not_connected.format(client=sname(shared.cls)))
+        # Raises "not started" while the app's container is connected, "not connected" otherwise
+        return Binding(shared.cls, bindings.container, _FASTAPI)
+
+
+def _getter(binding: Binding) -> Callable[[HTTPConnection], Awaitable[Any]]:
+    async def get(connection: HTTPConnection) -> Any:
+        # `async`, so FastAPI calls it inline rather than in a threadpool; the connection is a request or a
+        # websocket, and its app the one that serves it, a mounted app included
+        return await _AppBindings.serving(connection.app, binding).get()
+
+    return get
 
 
 _FASTAPI = DependsFramework(
@@ -30,6 +92,9 @@ _FASTAPI = DependsFramework(
         "or into a ClientRouter, not into a plain APIRouter"
     ),
     not_connected="{client} is not connected: start the app with its lifespan, e.g. `with TestClient(app)`",
+    # One signature for every container, read whenever FastAPI likes; the app is chosen per request
+    per_container=False,
+    _getter=_getter,
 )
 
 
@@ -109,10 +174,12 @@ def setup(app: FastAPI, container: Dependencies = DI) -> None:
             )
         app.router.route_class = route_cls
 
+    bindings = _AppBindings(route_cls.container)
     # The app's own lifespan runs inside, so its startup and shutdown code can use the clients
     app.router.lifespan_context = wrap_lifespan(
-        app.router.lifespan_context, route_cls.container, lambda: _router_bindings(app.router)
+        app.router.lifespan_context, route_cls.container, lambda: bindings.for_app(_router_bindings(app.router))
     )
+    setattr(app, _APP_BINDINGS, bindings)
 
     _track(app.router, route_cls)
     # On the router of the app rather than the app: app.include_router() calls it, and so may the user

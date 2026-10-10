@@ -7,7 +7,10 @@ container connected for the time an app runs. `nuke_di.fastapi`, `nuke_di.fastst
 See docs/guide/integrations.md and docs/adr/0003-fastapi-signature-rewrite.md.
 """
 
+import importlib
+import importlib.util
 import inspect
+import types
 import weakref
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
@@ -20,6 +23,14 @@ from nuke_di.types import NotSingletonClient
 from nuke_di.utils import sname
 
 __all__ = ("Binding", "DependsFramework", "Framework", "bind", "client_of", "running", "unique", "wrap_lifespan")
+
+# Python 3.14+ evaluates annotations when they are read: this format keeps a name it cannot evaluate as a
+# ForwardRef instead of raising NameError
+_FORWARDREF: dict[str, Any] = (
+    {"annotation_format": importlib.import_module("annotationlib").Format.FORWARDREF}
+    if importlib.util.find_spec("annotationlib")
+    else {}
+)
 
 
 @dataclass(frozen=True, eq=False)
@@ -43,10 +54,14 @@ class DependsFramework(Framework):
     depends: type
     # Builds the marker for a callable
     make_depends: Callable[[Callable[..., Any]], Any]
-    # Whether a function is bound again for every container: FastAPI analyses a route once, when it is
-    # declared, so each app keeps the bindings it captured. Otherwise a function is bound once, and every
-    # app that starts resolves the same bindings
+    # Whether a function is bound again for every container, for a framework that reads a signature once,
+    # when the handler is declared, so each app keeps the bindings it captured. Otherwise a function is
+    # bound once, and every app that starts resolves the same bindings
     per_container: bool = True
+    # Internal, for nuke_di.fastapi: what the marker of a client argument calls, `binding.get` when not given.
+    # FastAPI's is a function that takes the request and finds the client of the app it came to, since
+    # FastAPI reads signatures lazily and serves one function from several apps at once
+    _getter: Callable[["Binding"], Callable[..., Any]] | None = None
 
 
 class Binding:
@@ -190,17 +205,16 @@ def bind(call: Callable[..., Any] | None, container: Dependencies, framework: De
             f"its signature for one framework, so give each framework its own function"
         )
     if owner is not None and (owner[0]() is container or not framework.per_container):
-        # Bound already, e.g. a route of an included router copied by an older FastAPI. A function bound to
-        # another container is bound again for FastAPI: the routes declared before keep their dependencies
+        # Bound already, e.g. a route of an included router copied by an older FastAPI. With
+        # `per_container=True` a function bound to another container is bound again: the handlers declared
+        # before keep the dependencies they captured
         return cast(list[Binding], marks["__nuke_di_bindings__"])
 
-    try:
-        hints = get_type_hints(init, include_extras=True)
-        # The signature as written, not the one a binding to another container replaced it with
-        signature: inspect.Signature = marks.get("__nuke_di_signature__") or inspect.signature(call)
-    except NameError:
-        # E.g. a name imported under TYPE_CHECKING: the framework copes with it, or reports it itself
+    # The signature as written, not the one a binding to another container replaced it with
+    signature = marks.get("__nuke_di_signature__") or _signature(call)
+    if signature is None:
         return []
+    hints = _hints(init, signature)
 
     parameters = []
     own: list[Binding] = []
@@ -218,7 +232,8 @@ def bind(call: Callable[..., Any] | None, container: Dependencies, framework: De
 
         binding = Binding(client, container, framework)
         own.append(binding)
-        parameters.append(param.replace(annotation=Annotated[client, framework.make_depends(binding.get)]))
+        getter = binding.get if framework._getter is None else framework._getter(binding)
+        parameters.append(param.replace(annotation=Annotated[client, framework.make_depends(getter)]))
 
     reachable += own
     if not own:
@@ -237,6 +252,55 @@ def bind(call: Callable[..., Any] | None, container: Dependencies, framework: De
     call.__nuke_di_signature__ = signature  # type: ignore[union-attr]
     call.__nuke_di_bindings__ = reachable  # type: ignore[union-attr]
     return reachable
+
+
+def _signature(call: Callable[..., Any]) -> inspect.Signature | None:
+    """
+    The signature of `call`. One whose annotations name what cannot be evaluated keeps those names as
+    ForwardRefs on Python 3.14, where reading a signature evaluates them; `None` if it cannot be read even so.
+    """
+    try:
+        return inspect.signature(call)
+    except NameError:
+        pass
+    try:
+        return inspect.signature(call, **_FORWARDREF)
+    except NameError:
+        # Before Python 3.14, or not even as ForwardRefs: the framework reports it
+        return None
+
+
+def _hints(init: Callable[..., Any], signature: inspect.Signature) -> dict[str, Any]:
+    """
+    The type hints of `init`, each evaluated on its own: one that names what cannot be evaluated, e.g. a name
+    imported under TYPE_CHECKING, is left as written, and the others still show their clients and markers.
+    """
+    try:
+        return get_type_hints(init, include_extras=True)
+    except NameError:
+        pass
+
+    annotations = {name: param.annotation for name, param in signature.parameters.items()}
+    annotations["return"] = signature.return_annotation
+    namespace = getattr(inspect.unwrap(init), "__globals__", {})
+    hints = {}
+    for name, annotation in annotations.items():
+        if annotation is inspect.Parameter.empty:
+            continue
+        # A function of its own for each hint, evaluated in the namespace of `init`
+        probe = types.FunctionType(_probe.__code__, namespace)
+        probe.__annotations__ = {name: annotation}
+        try:
+            hints.update(get_type_hints(probe, include_extras=True))
+        except NameError:
+            hints[name] = annotation
+    return hints
+
+
+def _probe() -> None:  # pragma: no cover
+    """
+    The code of the function `_hints()` evaluates each type hint on: it is never called.
+    """
 
 
 def _hint_class(hint: Any) -> Any:
