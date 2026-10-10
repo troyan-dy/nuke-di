@@ -169,7 +169,7 @@ def draw(data: dict[str, Any]) -> str:
     startup: list[Bar] = [
         ("nuke-di", figures["nuke-di", STARTUP], True),
         ("dependency-injector, a Resource per client", figures["dependency-injector", STARTUP], False),
-        (f"wireup, the {len(features)} features gathered by hand", figures["wireup", STARTUP_GATHERED], False),
+        ("wireup, the features gathered by hand", figures["wireup", STARTUP_GATHERED], False),
         ("dishka, the same with its lock off", figures["dishka", STARTUP_GATHERED], False),
         ("wireup", figures["wireup", STARTUP], False),
         ("dishka", figures["dishka", STARTUP], False),
@@ -240,7 +240,7 @@ def draw(data: dict[str, Any]) -> str:
     svg.add(
         f'<text class="note" x="24" y="{shutdown_heading + 22}">{" and ".join(slow_stops)}, outlined above, take '
         f"{seconds(max(PRODUCT_PAGE_TREE[name].disconnect for name in slow_stops))} each to stop, the others up to "
-        f"{seconds(max(n.disconnect for k, n in PRODUCT_PAGE_TREE.items() if k not in slow_stops))}; "
+        f"{max(n.disconnect for k, n in PRODUCT_PAGE_TREE.items() if k not in slow_stops) * 1000:.0f} ms; "
         "every client disconnects after the clients that need it.</text>"
     )
     svg.bars(shutdown, shutdown_top, scale)
