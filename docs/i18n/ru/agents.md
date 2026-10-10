@@ -73,7 +73,7 @@ Manual: https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt
 | Файл | Содержимое |
 |------|------------|
 | [`llms.txt`](../../../llms.txt) | Оглавление в формате [llms.txt](https://llmstxt.org): что `nuke-di` делает и чего не делает, ссылка на каждую страницу |
-| [`llms-full.txt`](../../../llms-full.txt) | README и всё руководство одним файлом, около 26 тысяч токенов |
+| [`llms-full.txt`](../../../llms-full.txt) | README и всё руководство одним файлом, около 32 тысяч токенов |
 
 Дайте агенту raw-ссылку `https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt`,
 и он прочитает всё руководство за один запрос.
