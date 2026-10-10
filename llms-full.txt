@@ -2050,6 +2050,382 @@ the app or into a ClientRouter, not into a plain APIRouter`.
 A request that arrives without the lifespan, e.g. through `TestClient(app)` without `with`, gets a
 `RuntimeError`: `UserService is not connected: start the app with its lifespan`.
 
+## Class-based views
+
+Routes that share what they need, the user of the request and a few clients, take it as one class. The
+class is a FastAPI dependency with a type-hinted `__init__`, written the way a client is, and its
+`__init__` takes request data and clients side by side:
+
+```python
+# app/views.py
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Header
+
+from app.clients import Database, UserService
+from nuke_di.fastapi import setup
+
+app = FastAPI()
+setup(app)
+
+
+class Account:
+    # Built by FastAPI for every request, from a header and two clients
+    def __init__(self, x_user_id: Annotated[int, Header()], db: Database, users: UserService) -> None:
+        self.user_id = x_user_id
+        self.db = db
+        self.users = users
+
+    async def name(self) -> str:
+        return await self.db.fetch_user(self.user_id)
+
+    async def greeting(self) -> str:
+        return await self.users.greet(self.user_id)
+
+
+CurrentAccount = Annotated[Account, Depends()]
+
+
+@app.get("/me")
+async def me(account: CurrentAccount) -> str:
+    return await account.name()
+
+
+@app.get("/me/greeting")
+async def greeting(account: CurrentAccount) -> str:
+    return await account.greeting()
+```
+
+```console
+$ uvicorn app.views:app
+INFO:     Started server process [50908]
+INFO:     Waiting for application startup.
+database: connected
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51798 - "GET /me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51800 - "GET /me/greeting HTTP/1.1" 200 OK
+^C
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+database: disconnected
+INFO:     Application shutdown complete.
+INFO:     Finished server process [50908]
+```
+
+```console
+$ curl localhost:8000/me -H "X-User-Id: 7"
+"user-7"
+$ curl localhost:8000/me/greeting -H "X-User-Id: 7"
+"Hello, user-7!"
+```
+
+A test replaces a client once for every route that uses the class:
+
+```python
+# tests/test_views.py
+from fastapi.testclient import TestClient
+
+from app.clients import Database
+from app.views import app
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+def test_account() -> None:
+    with DI.override(Database, FakeDatabase()), TestClient(app) as client:
+        assert client.get("/me", headers={"X-User-Id": "7"}).json() == "alice"
+        assert client.get("/me/greeting", headers={"X-User-Id": "7"}).json() == "Hello, alice!"
+```
+
+```console
+$ pytest -q tests/test_views.py
+.                                                                        [100%]
+1 passed in 0.18s
+```
+
+The rules:
+
+- **One view per request, one client per container.** FastAPI builds an `Account` for every request;
+  the `db` and `users` in it are the connected clients of the container, the same objects in every
+  request. nuke-di rewrote the signature of the class, as it does for a dependency function, and left
+  its `__init__` alone: `Account(x_user_id=7, db=db, users=users)` in a unit test works as before. A
+  dataclass works the same way, its fields being the arguments.
+- **A view that needs nothing from the request is a client.** `class Account(Client)` taken as
+  `account: Account` is built once per container and connects with the others. A client class written
+  as `Annotated[Account, Depends()]`, e.g. one decorated with `@client_dataclass`, is built by FastAPI
+  for every request instead, and its `connect()` never runs: leave the `Depends()` out.
+- **`@cbv` of fastapi-utils is not needed.** It declares the routes again on a plain `APIRouter` of its
+  own, so a class attribute typed as a client fails at `include_router()` with
+  `TypeError: Database is a nuke-di client, not a pydantic type`. The class above shares the clients
+  between routes with nothing but FastAPI.
+
+## An app per test container
+
+An app factory builds the app around the container it is given, so every test runs on a container of
+its own and the server on the global `DI`. The functions stay at module level:
+
+```python
+# app/factory.py
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Header
+
+from app.clients import Database, UserService
+from nuke_di import DI, Dependencies
+from nuke_di.fastapi import ClientRouter, setup
+
+
+async def get_user(user_id: int, users: UserService) -> str:
+    return await users.greet(user_id)
+
+
+async def current_user(x_user_id: Annotated[int, Header()], db: Database) -> str:
+    return await db.fetch_user(x_user_id)
+
+
+async def me(user: Annotated[str, Depends(current_user)]) -> str:
+    return user
+
+
+def make_app(container: Dependencies) -> FastAPI:
+    app = FastAPI()
+    setup(app, container)
+    app.add_api_route("/users/{user_id}", get_user)
+
+    # A router fills clients from one container, so every app creates its own
+    account = ClientRouter(prefix="/me", container=container)
+    account.add_api_route("", me)
+    app.include_router(account)
+    return app
+
+
+def create_app() -> FastAPI:
+    # For the server: `uvicorn --factory app.factory:create_app`
+    return make_app(DI)
+```
+
+```console
+$ uvicorn --factory app.factory:create_app
+INFO:     Started server process [50968]
+INFO:     Waiting for application startup.
+database: connected
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51815 - "GET /users/42 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51817 - "GET /me HTTP/1.1" 200 OK
+^C
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+database: disconnected
+INFO:     Application shutdown complete.
+INFO:     Finished server process [50968]
+```
+
+The tests build an app on the `di` fixture:
+
+```python
+# tests/test_factory.py
+from collections.abc import Iterator
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.clients import Database
+from app.factory import current_user, make_app
+from nuke_di import Dependencies
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+@pytest.fixture
+def app(di: Dependencies) -> Iterator[FastAPI]:
+    # `di` is a fresh container for every test, a fixture of nuke-di
+    with di.override(Database, FakeDatabase()):
+        yield make_app(di)
+
+
+@pytest.fixture
+def client(app: FastAPI) -> Iterator[TestClient]:
+    with TestClient(app) as client:
+        yield client
+
+
+def test_get_user(client: TestClient) -> None:
+    assert client.get("/users/1").json() == "Hello, alice!"
+
+
+def test_me(client: TestClient) -> None:
+    assert client.get("/me", headers={"X-User-Id": "7"}).json() == "alice"
+
+
+def test_dependency_overrides(app: FastAPI, client: TestClient) -> None:
+    app.dependency_overrides[current_user] = lambda: "carol"
+    assert client.get("/me").json() == "carol"
+```
+
+```console
+$ pytest -q tests/test_factory.py
+...                                                                      [100%]
+3 passed in 0.16s
+```
+
+The rules:
+
+- **One `override()` for the whole app.** `di.override(Database, FakeDatabase())` replaces the database
+  for the dependency `current_user`, for `UserService` and for everything else that takes a `Database`,
+  where FastAPI alone needs an `app.dependency_overrides` entry per dependency function.
+- **A function on several containers.** `get_user` and `current_user` are rewritten once; every app
+  resolves their clients in its own container on startup, and a request gets the clients of the app it
+  came to. Apps built on different containers serve the same functions, one after another or at once.
+- **A router per app.** A `ClientRouter` fills clients from one container; an app that includes a
+  router of another container raises `TypeError: the router fills clients from another container than
+  this app`. Create the routers inside the factory.
+- **`app.dependency_overrides`** belongs to one app and keeps working, also for a dependency that takes
+  clients, like `current_user` above.
+
+## Strawberry GraphQL
+
+Strawberry's FastAPI router, `GraphQLRouter`, is an `APIRouter`, and its routes build the GraphQL
+context with a FastAPI dependency. The context is then a class with a type-hinted `__init__` that takes
+the clients, and resolvers read them from `info.context`:
+
+```bash
+pip install "nuke-di[fastapi]" strawberry-graphql
+```
+
+```python
+# app/graphql.py
+from collections.abc import AsyncIterator
+
+import strawberry
+from fastapi import FastAPI
+from strawberry.fastapi import BaseContext, GraphQLRouter
+
+from app.clients import UserService
+from nuke_di.fastapi import ClientRoute, setup
+
+
+class Context(BaseContext):
+    # Built by FastAPI for every request, as a dependency of Strawberry's routes
+    def __init__(self, users: UserService) -> None:
+        super().__init__()
+        self.users = users
+
+
+@strawberry.type
+class Query:
+    @strawberry.field
+    async def greeting(self, info: strawberry.Info[Context], user_id: int) -> str:
+        return await info.context.users.greet(user_id)
+
+
+@strawberry.type
+class Subscription:
+    @strawberry.subscription
+    async def greetings(self, info: strawberry.Info[Context], user_ids: list[int]) -> AsyncIterator[str]:
+        for user_id in user_ids:
+            yield await info.context.users.greet(user_id)
+
+
+schema = strawberry.Schema(query=Query, subscription=Subscription)
+
+app = FastAPI()
+setup(app)
+graphql = GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute)
+app.include_router(graphql, prefix="/graphql")
+```
+
+```console
+$ uvicorn app.graphql:app
+INFO:     Started server process [61129]
+INFO:     Waiting for application startup.
+database: connected
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51979 - "POST /graphql HTTP/1.1" 200 OK
+^C
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+database: disconnected
+INFO:     Application shutdown complete.
+INFO:     Finished server process [61129]
+```
+
+```console
+$ curl localhost:8000/graphql -H 'Content-Type: application/json' -d '{"query": "{ greeting(userId: 42) }"}'
+{"data":{"greeting":"Hello, user-42!"}}
+```
+
+A query, and a subscription over the websocket of the same router:
+
+```python
+# tests/test_graphql.py
+from fastapi.testclient import TestClient
+
+from app.clients import Database
+from app.graphql import app
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+def test_query() -> None:
+    with DI.override(Database, FakeDatabase()), TestClient(app) as client:
+        response = client.post("/graphql", json={"query": "{ greeting(userId: 1) }"})
+
+    assert response.json() == {"data": {"greeting": "Hello, alice!"}}
+
+
+def test_subscription() -> None:
+    query = "subscription { greetings(userIds: [1, 2]) }"
+    with (
+        TestClient(app) as client,
+        client.websocket_connect("/graphql", subprotocols=["graphql-transport-ws"]) as ws,
+    ):
+        ws.send_json({"type": "connection_init"})
+        assert ws.receive_json() == {"type": "connection_ack"}
+        ws.send_json({"id": "1", "type": "subscribe", "payload": {"query": query}})
+        assert ws.receive_json()["payload"] == {"data": {"greetings": "Hello, user-1!"}}
+        assert ws.receive_json()["payload"] == {"data": {"greetings": "Hello, user-2!"}}
+        assert ws.receive_json() == {"id": "1", "type": "complete"}
+```
+
+```console
+$ pytest -q tests/test_graphql.py
+..                                                                       [100%]
+2 passed in 0.21s
+```
+
+The rules:
+
+- **The context takes the clients, the resolvers take the context.** FastAPI builds a `Context` for
+  every request and every websocket connection, with the connected clients of the container in it;
+  `strawberry.Info[Context]` gives the resolvers its type. A resolver takes no client by type hint:
+  Strawberry has no dependency injection of its own, and `info.context` is how it hands things down.
+- **`route_class=ClientRoute`** makes the routes of the router fill clients, as for any `APIRouter`.
+  Strawberry hands the context getter to FastAPI wrapped in a dependency of its own, and nuke-di follows
+  it down to `Context`.
+- **Subscriptions.** FastAPI builds the websocket route of the router without the route class, as for any
+  websocket on an `APIRouter`, yet it gets a `Context` with the clients: it shares Strawberry's context
+  dependency with the GET and POST routes, which the router declares first through `ClientRoute`. They
+  rewrite `Context` and bring its clients into the startup of the app. A websocket endpoint of your own on
+  such a router still raises `TypeError`, see [Not supported](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md#not-supported).
+- **Another container**: `route_class=app.router.route_class`, after `setup(app, container)`.
+- Strawberry's Litestar controller takes clients through `ClientPlugin`, see
+  [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md#strawberry-graphql).
+
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md -->
 
 # Litestar
@@ -2177,6 +2553,145 @@ raises `TypeError` and names a `@websocket` handler instead. A client argument u
 reserves, such as `state` or `request`, raises `TypeError` too. A handler registered after the app is
 created, with `app.register()`, is not seen.
 
+## Differences from FastAPI
+
+A handler is written the same way in both, `users: UserService`. What differs comes from how each
+framework injects: FastAPI reads a `Depends` in the signature of every function, Litestar matches a
+dependency by the argument's name, so `ClientPlugin` provides every client under its argument name, on
+the app ([ADR-0004](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0004-litestar-clients-by-name.md)).
+
+| | FastAPI | Litestar |
+|---|---|---|
+| Set up | `setup(app)` before the routes; routers through `ClientRouter` | `ClientPlugin()` in `plugins=`; any router or controller |
+| Handlers seen | Every route declared after `setup(app)`, on the app or on an included `ClientRouter` or `APIRouter(route_class=ClientRoute)` | The handlers the app is created with; one added later with `app.register()` is not |
+| Argument names | Free: `users: UserService` here and `users: Billing` there | One name, one client in the whole app; two clients under one name raise `TypeError` when the app is created |
+| A `NotSingletonClient` (slated for removal, [ADR-0006](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0006-clients-live-as-long-as-the-container.md)) | One instance per argument | One instance per argument name, shared by every handler that uses the name |
+| What changes in the function | Its `__signature__`; `get_type_hints()` still shows `UserService` | Its `__annotations__`; `get_type_hints(include_extras=True)` shows `Annotated[UserService, Dependency(), SkipValidationMarker()]` |
+| Websockets | `@app.websocket` endpoints | `@websocket` handlers; a websocket listener raises `TypeError` |
+| The app's own lifespan | Runs inside: the clients connect before it and disconnect after it | The clients connect before `lifespan=` and `on_startup=`, disconnect after `on_shutdown=` |
+| Replacing a dependency in a test | `override()`, or `app.dependency_overrides` | `override()`, or a dependency of the same name on a layer, which wins over the client |
+| Another container | `setup(app, container)` and `ClientRouter(container=container)` | `ClientPlugin(container)` |
+
+## Litestar 3
+
+Litestar 3 is not released yet: on 2026-10-10 the latest release on PyPI is 2.24.0, of 2026-06-11, and
+there is no 3.0 pre-release. Two things about it are known, and nuke-di changes nothing until it ships:
+
+- **Inferred dependencies go.** Litestar 2.24 warns about a dependency matched by its name alone:
+  `Inferred dependencies will stop working in Litestar 3.0`. The annotation nuke-di writes,
+  `Annotated[UserService, Dependency(), SkipValidationMarker()]`, is what `NamedDependency[...]` and
+  `SkipValidation[...]` stand for, the explicit form, and Litestar 2.24 warns about none of it.
+- **Injection by type is planned.** The [v3 announcement](https://litestar.dev/blog/v3-announcement)
+  of 2026-07-26 plans `TypeDependency[SomeService]` next to `NamedDependency`, with the provider keyed by
+  the type, `dependencies={SomeService: provide_some_service}`, and names this DI overhaul as the feature
+  that still keeps 3.0 from its beta.
+
+With providers keyed by type, `ClientPlugin` could provide every client under its class instead of
+its argument name, and the rows of the table above about names and instances would go. Whether it does
+is decided when 3.0 and its API are out, by revisiting ADR-0004. Handlers do not change either way: they
+declare `users: UserService`, and only the plugin decides how Litestar is told about it.
+
+## Strawberry GraphQL
+
+Strawberry's Litestar controller builds the GraphQL context with a Litestar dependency, so a context
+getter takes clients like any other dependency, and resolvers read them from `info.context`:
+
+```bash
+pip install "nuke-di[litestar]" strawberry-graphql
+```
+
+```python
+# app/litestar_graphql.py
+import strawberry
+from litestar import Litestar
+from strawberry.litestar import BaseContext, make_graphql_controller
+
+from app.clients import UserService
+from nuke_di.litestar import ClientPlugin
+
+
+class Context(BaseContext, kw_only=True):
+    users: UserService
+
+
+async def get_context(users: UserService) -> Context:
+    return Context(users=users)
+
+
+@strawberry.type
+class Query:
+    @strawberry.field
+    async def greeting(self, info: strawberry.Info[Context], user_id: int) -> str:
+        return await info.context.users.greet(user_id)
+
+
+schema = strawberry.Schema(query=Query)
+GraphQLController = make_graphql_controller(schema, path="/graphql", context_getter=get_context)
+app = Litestar([GraphQLController], plugins=[ClientPlugin()])
+```
+
+```console
+$ uvicorn app.litestar_graphql:app
+INFO:     Started server process [56803]
+INFO:     Waiting for application startup.
+database: connected
+INFO - 2026-10-10 18:40:33,849 - nuke_di.core - core - Connected 2 clients in 0.00s (slowest: Database 0.00s, UserService 0.00s)
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:53760 - "POST /graphql HTTP/1.1" 200 OK
+^C
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+database: disconnected
+INFO:     Application shutdown complete.
+INFO:     Finished server process [56803]
+```
+
+```console
+$ curl localhost:8000/graphql -H 'Content-Type: application/json' -d '{"query": "{ greeting(userId: 42) }"}'
+{"data":{"greeting":"Hello, user-42!"}}
+```
+
+```python
+# tests/test_litestar_graphql.py
+from litestar.testing import TestClient
+
+from app.clients import Database
+from app.litestar_graphql import app
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+def test_query() -> None:
+    with DI.override(Database, FakeDatabase()), TestClient(app) as client:
+        response = client.post("/graphql", json={"query": "{ greeting(userId: 1) }"})
+
+    assert response.json() == {"data": {"greeting": "Hello, alice!"}}
+```
+
+```console
+$ pytest -q -W ignore::DeprecationWarning tests/test_litestar_graphql.py
+.                                                                        [100%]
+1 passed in 0.37s
+```
+
+The rules:
+
+- **The context getter is a function.** Strawberry's Litestar `BaseContext` is a msgspec `Struct`;
+  given as `context_getter=Context` itself, it fails every request with a `msgspec.ValidationError`.
+- **Subscriptions** run on the websocket handler of the same controller, which `ClientPlugin` sees
+  too, and get the context from the same getter.
+- **The deprecation warnings are Strawberry's.** On Litestar 2.24 the controller of Strawberry 0.332
+  declares its own dependencies, `custom_context`, `context`, `context_ws`, `root_value` and `response`,
+  by name alone, and Litestar warns about each, which is why the test runs with `-W ignore::DeprecationWarning`. The argument `users` of
+  `get_context` raises none.
+- Nothing else is needed: Litestar hands the dependencies of the controller to `ClientPlugin` as they
+  are. On FastAPI the router takes `route_class=ClientRoute`, see [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md#strawberry-graphql).
+
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md -->
 
 # FastStream
@@ -2297,6 +2812,193 @@ $ pytest -q tests/test_worker.py
 A message handled without the app's lifespan, e.g. through `TestNatsBroker(broker)` without `TestApp`,
 raises `RuntimeError: UserService is not connected: start the app with its lifespan`. A subscriber
 added after the app has started raises `RuntimeError: UserService was not started with the app`.
+
+## Publishing from a client
+
+A client that publishes, an outbox or a notifier, takes the app's broker in `__init__` and leaves its
+lifecycle to FastStream:
+
+```python
+# app/notify.py
+from faststream import FastStream
+from faststream.nats import NatsBroker
+
+from app.clients import UserService
+from nuke_di import Client
+from nuke_di.faststream import setup
+
+broker = NatsBroker("nats://localhost:4222")
+app = FastStream(broker)
+setup(app)
+
+
+class Notifications(Client):
+    # The app's broker: FastStream starts it after the clients connect and stops it before they
+    # disconnect, so connect() and disconnect() leave it alone
+    def __init__(self, nats: NatsBroker = broker) -> None:
+        self._nats = nats
+
+    async def send(self, text: str) -> None:
+        await self._nats.publish(text, "notifications")
+
+
+@broker.subscriber("greetings")
+async def greet(user_id: int, users: UserService, notifications: Notifications) -> None:
+    await notifications.send(await users.greet(user_id))
+
+
+@broker.subscriber("notifications")
+async def show(text: str) -> None:
+    print(f"notification: {text}")
+```
+
+```console
+$ faststream run app.notify:app
+database: connected
+2026-10-10 18:39:08,837 INFO     - FastStream app starting...
+2026-10-10 18:39:08,842 INFO     - greetings     |            - `Greet` waiting for messages
+2026-10-10 18:39:08,843 INFO     - notifications |            - `Show` waiting for messages
+2026-10-10 18:39:08,843 INFO     - FastStream app started successfully! To exit, press CTRL+C
+2026-10-10 18:39:11,811 INFO     - greetings     | 7c3cf44a-9 - Received
+2026-10-10 18:39:11,811 INFO     - greetings     | 7c3cf44a-9 - Processed
+2026-10-10 18:39:11,812 INFO     - notifications | 5ddab782-7 - Received
+notification: Hello, user-42!
+2026-10-10 18:39:11,812 INFO     - notifications | 5ddab782-7 - Processed
+^C
+2026-10-10 18:39:12,908 INFO     - FastStream app shutting down...
+2026-10-10 18:39:12,909 INFO     - FastStream app shut down gracefully.
+database: disconnected
+```
+
+The message was published with the `publish.py` above. In a test, the test broker routes what the
+client publishes like any other message, or the client is replaced:
+
+```python
+# tests/test_notify.py
+from faststream import TestApp
+from faststream.nats import TestNatsBroker
+
+from app.clients import Database
+from app.notify import Notifications, app, broker, show
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+class FakeNotifications(Notifications):
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+
+    async def send(self, text: str) -> None:
+        self.sent.append(text)
+
+
+async def test_greet_publishes() -> None:
+    with DI.override(Database, FakeDatabase()):
+        async with TestNatsBroker(broker) as test_broker, TestApp(app):
+            await test_broker.publish(1, "greetings")
+
+            show.mock.assert_called_once_with("Hello, alice!")
+
+
+async def test_greet_with_fake_notifications() -> None:
+    fake = FakeNotifications()
+    with DI.override(Notifications, fake):
+        async with TestNatsBroker(broker) as test_broker, TestApp(app):
+            await test_broker.publish(42, "greetings")
+
+    assert fake.sent == ["Hello, user-42!"]
+```
+
+```console
+$ pytest -q tests/test_notify.py
+..                                                                       [100%]
+2 passed in 0.19s
+```
+
+The rules:
+
+- **The broker is the app's.** FastStream starts it after the clients connect and stops it before they
+  disconnect, so this client does not create its broker in `connect()` as a client of a third-party object
+  otherwise does ([ADR-0005](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0005-third-party-objects-as-client-classes.md)): FastStream owns it.
+  A client publishes from its methods, while the app runs.
+- **Not from `connect()` or `disconnect()`.** On a real broker, a `publish()` in `connect()` raises
+  `faststream.exceptions.IncorrectState`, since the broker is not started yet, and the app fails to start
+  with `RuntimeError: nuke-di clients failed to start: Notifications.connect() raised IncorrectState`. In
+  `disconnect()` it raises the same, since the broker is stopped already, but nuke-di only logs a failed
+  `disconnect()` and the app exits normally. Under `TestNatsBroker` the first raises
+  ``SetupError: You should setup `HandlerItem` at first.`` and the second passes silently, so the tests do
+  not catch a publish in `disconnect()`.
+- **The broker is a default argument**, not a client: nuke-di fills the arguments typed as clients and
+  leaves the others to their defaults. A unit test can build `Notifications(nats=AsyncMock())`.
+- **Under `TestNatsBroker`** the same broker object is patched, so the client publishes in memory and
+  `show.mock` sees the message; `override(Notifications, ...)` replaces the client for every subscriber
+  that takes it.
+- **A process without a FastStream app**, e.g. a `@job` that sends messages, owns its connection: there
+  the broker is created in the client's `connect()` and stopped in its `disconnect()`, as `Nats` in
+  [examples/faststream_nats/publish.py](https://github.com/troyan-dy/nuke-di/blob/master/examples/faststream_nats/publish.py).
+- **Several brokers**, `FastStream(first, second)`, work the same way: `setup(app)` fills the
+  subscribers of each of them, and a client takes the broker it publishes to as its default.
+
+## One app at a time, in tests
+
+FastStream builds a subscriber again on every start, so nuke-di rewrites a subscriber function once,
+whatever the container (`per_container=False` in [Writing an integration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/integrations.md)), and every
+app that starts fills it from its own container. Tests that start apps one after another can therefore
+give each one a container of its own, on the module-level broker:
+
+```python
+# tests/test_containers.py
+from faststream import FastStream, TestApp
+from faststream.nats import TestNatsBroker
+
+from app.clients import Database
+from app.notify import broker, show
+from nuke_di import Dependencies
+from nuke_di.faststream import setup
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+def make_app(container: Dependencies) -> FastStream:
+    # A new app on the module-level broker, whose subscribers are declared on import
+    app = FastStream(broker)
+    setup(app, container)
+    return app
+
+
+async def test_greet(di: Dependencies) -> None:
+    with di.override(Database, FakeDatabase()):
+        async with TestNatsBroker(broker) as test_broker, TestApp(make_app(di)):
+            await test_broker.publish(1, "greetings")
+
+            show.mock.assert_called_once_with("Hello, alice!")
+```
+
+```console
+$ pytest -q tests/test_containers.py
+.                                                                        [100%]
+1 passed in 0.15s
+```
+
+What to do about it:
+
+- **Run the tests that start an app one after another**, which is what pytest does. pytest-xdist runs
+  them in processes of their own, which share nothing.
+- **Do not start two apps on the same subscriber functions at once**, e.g. a `TestApp` inside another
+  one. The second fails to start with `RuntimeError: nuke-di clients
+  failed to start: UserService is filled for another app that is running; apps that share a handler
+  function run one at a time`, rather than hand the first app's clients to the second.
+- **`DI.override()` on the module-level app or a container per test** are both fine; choose by what
+  the rest of the tests use.
+- Unlike this, a FastAPI request gets the clients of the app it came to, so FastAPI apps on different
+  containers serve the same functions at once, see [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md#an-app-per-test-container).
 
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md -->
 
@@ -5128,7 +5830,7 @@ Two files at the root of the repository, generated from the English pages:
 | File | Contents |
 |------|----------|
 | [`llms.txt`](https://github.com/troyan-dy/nuke-di/blob/master/llms.txt) | An index in the [llms.txt](https://llmstxt.org) format: what `nuke-di` is and does not do, a link to every page |
-| [`llms-full.txt`](https://github.com/troyan-dy/nuke-di/blob/master/llms-full.txt) | The README and the whole guide in one file, about 45k tokens |
+| [`llms-full.txt`](https://github.com/troyan-dy/nuke-di/blob/master/llms-full.txt) | The README and the whole guide in one file, about 52k tokens |
 
 Give an agent the raw URL, `https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt`,
 and it reads the whole manual with one fetch.

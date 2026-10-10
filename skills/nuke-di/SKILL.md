@@ -116,6 +116,15 @@ per handler.
 - FastAPI: `from nuke_di.fastapi import setup`; `setup(app)` right after `app = FastAPI()`, before the routes.
 - Litestar: `from nuke_di.litestar import ClientPlugin`; `Litestar(handlers, plugins=[ClientPlugin()])`.
 - FastStream: `from nuke_di.faststream import setup`; `setup(app)` after `app = FastStream(broker)`.
+- Several FastAPI routes sharing request data and clients: a plain class whose `__init__` takes both, used
+  as `Annotated[Account, Depends()]`; not a `Client` subclass, which FastAPI would build per request
+  unconnected. An app factory `make_app(container)` calls `setup(app, container)` and creates its
+  `ClientRouter(container=container)` inside; apps on different containers can share route functions.
+- Publishing from a FastStream handler: a `Client` that takes the app's broker as a default argument,
+  `def __init__(self, nats: NatsBroker = broker)`, and leaves `connect()` / `disconnect()` to FastStream.
+- Strawberry GraphQL: resolvers read clients from `info.context`, a context class or getter that takes the
+  clients; on FastAPI `GraphQLRouter(schema, context_getter=Context, route_class=ClientRoute)`, on Litestar
+  `make_graphql_controller(..., context_getter=get_context)`.
 - MCP SDK (`mcp` 2.x): `from nuke_di.mcp import setup`; `setup(server)` right after
   `server = MCPServer(...)`, before the tools. Tools and their `Resolve(...)` resolvers take clients;
   resources and prompts do not.

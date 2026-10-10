@@ -6,6 +6,28 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.18.3] - 2026-10-10
+
+### Documentation
+
+- Recipes for the framework integrations in the guide, in every language, each with its code, the command and
+  what it printed:
+  - FastAPI, class-based views (#74): routes share a class whose `__init__` takes request data and clients,
+    used as `Annotated[Account, Depends()]`; why not a `Client` there, and why fastapi-utils' `@cbv` is not
+    needed.
+  - FastAPI, an app per test container (#74): `make_app(container)` with its own `ClientRouter`, a test per
+    container on the `di` fixture, `uvicorn --factory`, and `app.dependency_overrides` next to `override()`.
+  - FastStream, publishing from a client (#76): a `Client` that takes the app's broker as a default argument and
+    leaves its lifecycle to FastStream, tested through `TestNatsBroker` and with `override()`; and what one app
+    at a time (`per_container=False`) means for tests on a module-level broker.
+  - Litestar (#75): the differences from FastAPI in one table, and Litestar 3: not released, injection by type
+    announced, the annotations nuke-di writes already the explicit form that 2.24 does not warn about. ADR-0004
+    records the revisit.
+  - Strawberry GraphQL (#105): resolvers read clients from `info.context`. On FastAPI the context is a class
+    that takes the clients, given to `GraphQLRouter` with `route_class=ClientRoute`; on Litestar a context
+    getter function, through `ClientPlugin`; queries and subscriptions.
+- `skills/nuke-di/SKILL.md` names the three recipes; `llms-full.txt` grows to about 52k tokens.
+
 ## [1.18.2] - 2026-10-10
 
 ### Fixed
@@ -822,7 +844,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.2...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.3...HEAD
+[1.18.3]: https://github.com/troyan-dy/nuke-di/compare/v1.18.2...v1.18.3
 [1.18.2]: https://github.com/troyan-dy/nuke-di/compare/v1.18.1...v1.18.2
 [1.18.1]: https://github.com/troyan-dy/nuke-di/compare/v1.18.0...v1.18.1
 [1.18.0]: https://github.com/troyan-dy/nuke-di/compare/v1.17.0...v1.18.0

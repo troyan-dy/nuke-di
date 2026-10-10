@@ -120,3 +120,194 @@ Un mensaje procesado sin el lifespan de la app, por ejemplo a través de `TestNa
 `TestApp`, lanza `RuntimeError: UserService is not connected: start the app with its lifespan`. Un
 subscriber añadido después de que la app haya arrancado lanza
 `RuntimeError: UserService was not started with the app`.
+
+## <a id="publishing-from-a-client"></a>Publicar desde un cliente
+
+Un cliente que publica, un outbox o un notificador, recibe el broker de la app en `__init__` y deja su
+ciclo de vida a FastStream:
+
+```python
+# app/notify.py
+from faststream import FastStream
+from faststream.nats import NatsBroker
+
+from app.clients import UserService
+from nuke_di import Client
+from nuke_di.faststream import setup
+
+broker = NatsBroker("nats://localhost:4222")
+app = FastStream(broker)
+setup(app)
+
+
+class Notifications(Client):
+    # The app's broker: FastStream starts it after the clients connect and stops it before they
+    # disconnect, so connect() and disconnect() leave it alone
+    def __init__(self, nats: NatsBroker = broker) -> None:
+        self._nats = nats
+
+    async def send(self, text: str) -> None:
+        await self._nats.publish(text, "notifications")
+
+
+@broker.subscriber("greetings")
+async def greet(user_id: int, users: UserService, notifications: Notifications) -> None:
+    await notifications.send(await users.greet(user_id))
+
+
+@broker.subscriber("notifications")
+async def show(text: str) -> None:
+    print(f"notification: {text}")
+```
+
+```console
+$ faststream run app.notify:app
+database: connected
+2026-10-10 18:39:08,837 INFO     - FastStream app starting...
+2026-10-10 18:39:08,842 INFO     - greetings     |            - `Greet` waiting for messages
+2026-10-10 18:39:08,843 INFO     - notifications |            - `Show` waiting for messages
+2026-10-10 18:39:08,843 INFO     - FastStream app started successfully! To exit, press CTRL+C
+2026-10-10 18:39:11,811 INFO     - greetings     | 7c3cf44a-9 - Received
+2026-10-10 18:39:11,811 INFO     - greetings     | 7c3cf44a-9 - Processed
+2026-10-10 18:39:11,812 INFO     - notifications | 5ddab782-7 - Received
+notification: Hello, user-42!
+2026-10-10 18:39:11,812 INFO     - notifications | 5ddab782-7 - Processed
+^C
+2026-10-10 18:39:12,908 INFO     - FastStream app shutting down...
+2026-10-10 18:39:12,909 INFO     - FastStream app shut down gracefully.
+database: disconnected
+```
+
+El mensaje se publicó con el `publish.py` de arriba. En una prueba, el broker de pruebas enruta lo que
+publica el cliente como cualquier otro mensaje, o se reemplaza el cliente:
+
+```python
+# tests/test_notify.py
+from faststream import TestApp
+from faststream.nats import TestNatsBroker
+
+from app.clients import Database
+from app.notify import Notifications, app, broker, show
+from nuke_di import DI
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+class FakeNotifications(Notifications):
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+
+    async def send(self, text: str) -> None:
+        self.sent.append(text)
+
+
+async def test_greet_publishes() -> None:
+    with DI.override(Database, FakeDatabase()):
+        async with TestNatsBroker(broker) as test_broker, TestApp(app):
+            await test_broker.publish(1, "greetings")
+
+            show.mock.assert_called_once_with("Hello, alice!")
+
+
+async def test_greet_with_fake_notifications() -> None:
+    fake = FakeNotifications()
+    with DI.override(Notifications, fake):
+        async with TestNatsBroker(broker) as test_broker, TestApp(app):
+            await test_broker.publish(42, "greetings")
+
+    assert fake.sent == ["Hello, user-42!"]
+```
+
+```console
+$ pytest -q tests/test_notify.py
+..                                                                       [100%]
+2 passed in 0.19s
+```
+
+Las reglas:
+
+- **El broker es de la app.** FastStream lo arranca después de que se conectan los clientes y lo detiene
+  antes de que se desconecten, así que este cliente no crea su broker en `connect()` como lo hace en otros
+  casos un cliente de un objeto de terceros
+  ([ADR-0005](../../adr/0005-third-party-objects-as-client-classes.md)): es de FastStream. Un cliente
+  publica desde sus métodos, mientras la app corre.
+- **Ni desde `connect()` ni desde `disconnect()`.** Con un broker real, un `publish()` en `connect()` lanza
+  `faststream.exceptions.IncorrectState`, ya que el broker todavía no ha arrancado, y la app no arranca con
+  `RuntimeError: nuke-di clients failed to start: Notifications.connect() raised IncorrectState`. En
+  `disconnect()` lanza lo mismo, ya que el broker ya se detuvo, pero nuke-di solo registra en el log un
+  `disconnect()` fallido y la app termina con normalidad. Bajo `TestNatsBroker` el primero lanza
+  ``SetupError: You should setup `HandlerItem` at first.`` y el segundo pasa en silencio, así que las
+  pruebas no detectan un publish en `disconnect()`.
+- **El broker es un argumento con valor por defecto**, no un cliente: nuke-di rellena los argumentos
+  tipados como clientes y deja los demás con sus valores por defecto. Una prueba unitaria puede construir
+  `Notifications(nats=AsyncMock())`.
+- **Bajo `TestNatsBroker`** se parchea el mismo objeto broker, así que el cliente publica en memoria y
+  `show.mock` ve el mensaje; `override(Notifications, ...)` reemplaza el cliente para cada subscriber que
+  lo recibe.
+- **Un proceso sin app de FastStream**, por ejemplo un `@job` que envía mensajes, es dueño de su conexión:
+  ahí el broker se crea en el `connect()` del cliente y se detiene en su `disconnect()`, como `Nats` en
+  [examples/faststream_nats/publish.py](../../../examples/faststream_nats/publish.py).
+- **Varios brokers**, `FastStream(first, second)`, funcionan igual: `setup(app)` rellena los subscribers de
+  cada uno, y un cliente recibe como valor por defecto el broker al que publica.
+
+## <a id="one-app-at-a-time-in-tests"></a>Una app a la vez, en las pruebas
+
+FastStream vuelve a construir un subscriber en cada arranque, así que nuke-di reescribe una función
+subscriber una sola vez, sea cual sea el contenedor (`per_container=False` en
+[Escribir una integración](integrations.md)), y cada app que arranca la rellena desde su propio contenedor.
+Por eso, las pruebas que arrancan apps una tras otra pueden darle a cada una un contenedor propio, sobre el
+broker a nivel de módulo:
+
+```python
+# tests/test_containers.py
+from faststream import FastStream, TestApp
+from faststream.nats import TestNatsBroker
+
+from app.clients import Database
+from app.notify import broker, show
+from nuke_di import Dependencies
+from nuke_di.faststream import setup
+
+
+class FakeDatabase(Database):
+    async def fetch_user(self, user_id: int) -> str:
+        return "alice"
+
+
+def make_app(container: Dependencies) -> FastStream:
+    # A new app on the module-level broker, whose subscribers are declared on import
+    app = FastStream(broker)
+    setup(app, container)
+    return app
+
+
+async def test_greet(di: Dependencies) -> None:
+    with di.override(Database, FakeDatabase()):
+        async with TestNatsBroker(broker) as test_broker, TestApp(make_app(di)):
+            await test_broker.publish(1, "greetings")
+
+            show.mock.assert_called_once_with("Hello, alice!")
+```
+
+```console
+$ pytest -q tests/test_containers.py
+.                                                                        [100%]
+1 passed in 0.15s
+```
+
+Qué hacer al respecto:
+
+- **Ejecuta una tras otra las pruebas que arrancan una app**, que es lo que hace pytest. pytest-xdist las
+  ejecuta en procesos propios, que no comparten nada.
+- **No arranques a la vez dos apps sobre las mismas funciones subscriber**, por ejemplo un `TestApp` dentro
+  de otro. La segunda no logra arrancar y lanza `RuntimeError: nuke-di clients
+  failed to start: UserService is filled for another app that is running; apps that share a handler
+  function run one at a time`, en lugar de pasarle a la segunda los clientes de la primera.
+- **`DI.override()` sobre la app a nivel de módulo o un contenedor por prueba**: ambos sirven; elige según lo
+  que use el resto de las pruebas.
+- A diferencia de esto, una petición de FastAPI recibe los clientes de la app a la que llegó, así que las
+  apps de FastAPI sobre contenedores distintos sirven las mismas funciones a la vez; consulta
+  [FastAPI](fastapi.md#an-app-per-test-container).

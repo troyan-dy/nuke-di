@@ -2309,7 +2309,7 @@ wheels = [
 
 [[package]]
 name = "nuke-di"
-version = "1.18.2"
+version = "1.18.3"
 source = { editable = "." }
 
 [package.optional-dependencies]
