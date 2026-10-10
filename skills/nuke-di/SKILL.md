@@ -1,6 +1,6 @@
 ---
 name: nuke-di
-description: Use when writing, changing, reviewing or testing Python code that uses nuke-di (import nuke_di) - Client classes, DI.resolve / DI.inject, @job, @worker, nuke_di.fastapi / litestar / faststream / mcp / fastmcp / aiogram / taskiq, mock() / override(), the di / global_di pytest fixtures. Gives the whole model and the recipes, and keeps out the designs nuke-di rejects - provider functions, interface binding, per-request scopes and retries in connect().
+description: Use when writing, changing, reviewing or testing Python code that uses nuke-di (import nuke_di) - Client classes, DI.resolve / DI.inject, @job, @worker, nuke_di.fastapi / litestar / faststream / mcp / fastmcp / aiogram / taskiq / asgi, mock() / override(), the di / global_di pytest fixtures. Gives the whole model and the recipes, and keeps out the designs nuke-di rejects - provider functions, interface binding, per-request scopes and retries in connect().
 ---
 
 # nuke-di
@@ -127,6 +127,12 @@ per handler.
   the worker connects the clients, a process that only kicks tasks connects none. A client argument of a
   task takes `= TaskiqDepends()` as its default, so type checkers accept `.kiq()` without it.
   Run `taskiq worker --max-fails 1`, so a failed connect exits the process instead of looping.
+
+A framework without dependency injection (Starlette, Quart, aiohttp, a plain ASGI app) lists the
+clients its handlers take: `from nuke_di.asgi import lifespan`; `clients = lifespan(DI, UserService)`;
+`Starlette(routes, lifespan=clients)`, and a handler calls `clients.get(UserService)`. Quart enters
+`clients(self)` in `startup()` of a `Quart` subclass, around every serving hook (see the guide page
+asgi.md); aiohttp 3.14 takes `app.cleanup_ctx.append(clients)`.
 
 **Per-request state** (a transaction, a unit of work, a request id) is not a client: open it in
 the handler through a method of a long-lived client, e.g. `async with db.transaction() as tx:`.

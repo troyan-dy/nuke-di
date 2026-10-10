@@ -9,6 +9,9 @@ the framework's own dependency injection, and the container connects when the ap
 it stops. The [FastAPI](fastapi.md), [Litestar](litestar.md), [FastStream](faststream.md), [MCP](mcp.md),
 [aiogram](aiogram.md) and [taskiq](taskiq.md) integrations are built on `nuke_di.integration`, and an integration
 with another framework needs nothing from nuke-di beyond it and the public API.
+A framework with no dependency injection of its own, such as Starlette or Quart, needs no integration:
+[`nuke_di.asgi.lifespan()`](asgi.md), built on the same kit, connects the clients, and the handlers ask it
+for them.
 
 | Name | What it does |
 |---|---|

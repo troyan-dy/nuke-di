@@ -393,7 +393,7 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
   `Shutdown`, the grace period, background tasks, exit codes, hooks, Kubernetes
 - Frameworks: [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md),
   [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), [MCP servers](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md) on the SDK and on FastMCP, [aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md),
-  [taskiq](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/taskiq.md), and
+  [taskiq](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/taskiq.md), [Starlette, Quart and any ASGI app](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/asgi.md), and
   [writing an integration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/integrations.md) for another framework with `nuke_di.integration`
 - [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md): `mock()`, `override()`, the pytest fixtures, checking the wiring
 - [Configuration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/configuration.md): timeouts, concurrency and the grace period

@@ -10,6 +10,9 @@ y se desconecta cuando se detiene. Las integraciones de [FastAPI](fastapi.md), [
 [FastStream](faststream.md), [MCP](mcp.md), [aiogram](aiogram.md) y [taskiq](taskiq.md) están construidas sobre
 `nuke_di.integration`, y una integración con otro framework no necesita de nuke-di nada más que eso y la API
 pública.
+Un framework sin inyección de dependencias propia, como Starlette o Quart, no necesita integración:
+[`nuke_di.asgi.lifespan()`](asgi.md), construido sobre el mismo kit, conecta los clientes, y los handlers
+se los piden a él.
 
 | Nombre | Qué hace |
 |---|---|

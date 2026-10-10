@@ -6,6 +6,38 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-10-10
+
+### Added
+
+- `nuke_di.asgi.lifespan(container, *clients)` for an app whose framework has no dependency injection: Starlette,
+  Quart, aiohttp, a plain ASGI app, or a FastAPI app that keeps its signatures (#72). `clients = lifespan(DI,
+  UserService, Database)` is the app's lifespan, `Starlette(lifespan=clients)`: on startup it resolves the
+  listed clients and connects them with their dependencies, on shutdown it sets `Shutdown`, stops the
+  `BackgroundTasks` and disconnects, and a failed connect fails the startup with a `RuntimeError`, all through
+  `nuke_di.integration.running()`. A handler takes a client with `clients.get(UserService)`, typed for mypy and
+  pyright; a client the list lacks, or a handler run without the lifespan, raises a `RuntimeError` that says
+  what to do. `clients(app)` is an async context manager, so the app's own lifespan runs inside it, a
+  `Quart` subclass enters it around `startup()` and `shutdown()`, and aiohttp 3.14 takes it in `cleanup_ctx`
+  as it is. No framework is
+  imported and no extra is needed. `tests/test_asgi.py` runs `nuke_di.integration.testing.check()` on a
+  Starlette app.
+
+### Changed
+
+- `examples/starlette_app` uses `lifespan()` instead of a hand-written `Wiring` class that bound every handler
+  with `inject()`.
+
+### Documentation
+
+- A guide page, `docs/guide/asgi.md`, "Starlette, Quart and any ASGI app": Starlette, the app's own lifespan,
+  testing, Quart, aiohttp and a plain ASGI app, each run with its real output, and the errors; in every
+  language, linked from the README and from "Writing an integration". `docs/specs/asgi.md` records why
+  handlers take clients from `get()` rather than from `request.state`, and why Quart connects around
+  `startup()` / `shutdown()` rather than in serving hooks.
+- The Agent Skill, the `AGENTS.md` block of `docs/guide/agents.md`, `context7.json`, the plugin manifests and
+  `llms.txt` / `llms-full.txt` name the new module; `llms-full.txt` grows to about 38k tokens.
+
 ## [1.17.0] - 2026-10-10
 
 ### Added
@@ -37,6 +69,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   that share the rewrite. A spec, `docs/specs/taskiq.md`, and an example, `examples/taskiq_app`.
 - taskiq is named with the other integrations in the README, the integrations page, the Agent Skill, `llms.txt`,
   `context7.json` and the plugin manifests; `llms-full.txt` grows to about 35k tokens.
+
 ## [1.16.0] - 2026-10-10
 
 ### Added
@@ -71,6 +104,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 - aiogram is named with the other integrations in the README, the integrations page, the Agent Skill, `llms.txt`,
   `context7.json` and the plugin manifests; `llms-full.txt` grows to about 32k tokens.
+
 ## [1.15.0] - 2026-10-10
 
 ### Added
@@ -734,7 +768,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.17.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.0...HEAD
+[1.18.0]: https://github.com/troyan-dy/nuke-di/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/troyan-dy/nuke-di/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/troyan-dy/nuke-di/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/troyan-dy/nuke-di/compare/v1.14.3...v1.15.0

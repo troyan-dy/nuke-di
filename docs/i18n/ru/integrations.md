@@ -9,6 +9,9 @@
 при его остановке. Интеграции с [FastAPI](fastapi.md), [Litestar](litestar.md), [FastStream](faststream.md),
 [MCP](mcp.md), [aiogram](aiogram.md) и [taskiq](taskiq.md) построены на `nuke_di.integration`, и интеграции
 с другим фреймворком не нужно от nuke-di ничего, кроме него и публичного API.
+Фреймворку без собственного внедрения зависимостей, такому как Starlette или Quart, интеграция не нужна:
+[`nuke_di.asgi.lifespan()`](asgi.md), построенный на том же наборе, подключает клиенты, а обработчики
+берут их у него.
 
 | Имя | Что делает |
 |---|---|

@@ -51,7 +51,8 @@ curl -fsSL https://raw.githubusercontent.com/troyan-dy/nuke-di/master/skills/nuk
 
 This project uses nuke-di. A dependency is a `nuke_di.Client` subclass whose `__init__` takes its own
 dependencies as type-hinted arguments; I/O goes in `async def connect()` / `disconnect()`, never in `__init__`.
-Functions, `@job` / `@worker` entrypoints, FastAPI / Litestar / FastStream / aiogram handlers, MCP tools and taskiq tasks take clients by type hint.
+Functions, `@job` / `@worker` entrypoints, FastAPI / Litestar / FastStream / aiogram handlers, MCP tools and taskiq tasks take clients by type hint;
+a Starlette or Quart app lists them in `clients = nuke_di.asgi.lifespan(DI, ...)` and calls `clients.get(...)`.
 
 Do not write what nuke-di rejects:
 - provider or factory functions: wrap a third-party object in a Client that creates it in connect();
@@ -71,7 +72,7 @@ Manual: https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt
 | 文件 | 内容 |
 |------|------|
 | [`llms.txt`](../../../llms.txt) | [llms.txt](https://llmstxt.org) 格式的索引：`nuke-di` 是什么、不做什么，以及指向每个页面的链接 |
-| [`llms-full.txt`](../../../llms-full.txt) | README 和整个指南合成一个文件，约 35k token |
+| [`llms-full.txt`](../../../llms-full.txt) | README 和整个指南合成一个文件，约 38k token |
 
 把原始文件的 URL `https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms-full.txt` 交给智能体，
 它一次请求就能读完整份手册。

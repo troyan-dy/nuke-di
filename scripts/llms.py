@@ -26,6 +26,7 @@ GUIDE = [
     "mcp",
     "aiogram",
     "taskiq",
+    "asgi",
     "integrations",
     "testing",
     "configuration",

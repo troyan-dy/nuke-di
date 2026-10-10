@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "1.17.0"
+version = "1.18.0"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
@@ -31,6 +31,9 @@ keywords = [
   "fastmcp",
   "model-context-protocol",
   "taskiq",
+  "starlette",
+  "quart",
+  "asgi",
   "pytest",
   "microservices",
   "kubernetes",

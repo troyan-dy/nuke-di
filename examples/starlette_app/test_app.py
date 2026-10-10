@@ -31,8 +31,14 @@ def test_me(client: TestClient) -> None:
 
 
 def test_restarts_with_fresh_clients(global_di: Dependencies, capsys: pytest.CaptureFixture[str]) -> None:
-    # The handlers are bound again on every startup, so a second start gets connected clients
+    # The clients are resolved again on every startup, so a second start gets connected ones
     for _ in range(2):
         with TestClient(app) as client:
             assert client.get("/users/1").text == "Hello, alice!"
     assert capsys.readouterr().out.count("database: connected") == 2
+
+
+def test_without_the_lifespan() -> None:
+    # TestClient(app) outside `with` sends a request without starting the app
+    with pytest.raises(RuntimeError, match="UserService is not connected"):
+        TestClient(app).get("/users/1")
