@@ -151,20 +151,21 @@ explica cada escenario, registra la línea base en Python 3.11–3.14 y contiene
 su método.
 
 Con conexiones reales el coste es la espera, y lo que decide un arranque es cuándo empieza cada `connect()`.
-dishka y wireup conectan un cliente tras otro, así que su arranque es la suma de todos los `connect()`;
+dishka y wireup conectan un cliente tras otro dentro de un `get()`, así que su arranque es la suma de todos
+los `connect()` salvo que la aplicación reúna sus ramas a mano;
 dependency-injector arranca tan en concurrencia como `nuke-di` cuando cada cliente es un `Resource` escrito a
 mano, y se detiene por capas; injector no tiene ciclo de vida asíncrono:
 
 ```console
 $ uv run python benchmarks/compare.py --only connect --summary
-nuke-di 1.14.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 4aae0d2 · N = 10, 100, 1000 · 20 repeats
-nuke-di 1.14.1 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 8d0700b · N = 10, 100, 1000 · 20 repeats
+nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 
 | Lower is better                                     | nuke-di     | dishka         | wireup         | dependency-injector | injector |
 |-----------------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
-| Startup: 8 clients, connect() of 1–60 ms            | **69.6 ms** | 150 ms (2.2×)  | 152 ms (2.2×)  | 70.0 ms (1.0×)      | —        |
-| Shutdown: the same 8 clients                        | **17.6 ms** | 28.0 ms (1.6×) | 28.1 ms (1.6×) | 23.9 ms (1.4×)      | —        |
-| Startup: 10 independent clients, connect() of 50 ms | **51.3 ms** | 512 ms (10.0×) | 513 ms (10.0×) | 51.6 ms (1.0×)      | —        |
+| Startup: 8 clients, connect() of 1–60 ms            | **70.8 ms** | 156 ms (2.2×)  | 156 ms (2.2×)  | 71.1 ms (1.0×)      | —        |
+| Shutdown: the same 8 clients                        | **18.7 ms** | 30.1 ms (1.6×) | 29.8 ms (1.6×) | 26.0 ms (1.4×)      | —        |
+| Startup: 10 independent clients, connect() of 50 ms | **52.3 ms** | 520 ms (10.0×) | 522 ms (10.0×) | 52.5 ms (1.0×)      | —        |
 ```
 
 Ninguna de las tres conecta nada al crear su contenedor: si la aplicación no obtiene la raíz al arrancar,

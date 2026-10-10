@@ -136,19 +136,19 @@ dependency-injector 的 Cython `get()` 领先约 50 ns，这个差距任何应�
 增加 13–18 µs。[docs/benchmarks.md](../benchmarks.md) 解释每个场景，记录 Python 3.11–3.14 上的基线，并给出完整的对比及其方法。
 
 面对真实的连接，代价在于等待，决定启动时间的是每个 `connect()` 何时开始。
-dishka 和 wireup 逐个连接客户端，所以它们的启动时间是所有 `connect()` 之和；dependency-injector 在每个客户端都手写成
+dishka 和 wireup 在一次 `get()` 中逐个连接客户端，所以除非应用手动并发获取各个分支，它们的启动时间就是所有 `connect()` 之和；dependency-injector 在每个客户端都手写成
 `Resource` 时，启动与 `nuke-di` 一样并发，但关闭是分层进行的；injector 没有异步生命周期：
 
 ```console
 $ uv run python benchmarks/compare.py --only connect --summary
-nuke-di 1.14.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 4aae0d2 · N = 10, 100, 1000 · 20 repeats
-nuke-di 1.14.1 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
+nuke-di 1.14.2 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 8d0700b · N = 10, 100, 1000 · 20 repeats
+nuke-di 1.14.2 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 
 | Lower is better                                     | nuke-di     | dishka         | wireup         | dependency-injector | injector |
 |-----------------------------------------------------|------------:|---------------:|---------------:|--------------------:|---------:|
-| Startup: 8 clients, connect() of 1–60 ms            | **69.6 ms** | 150 ms (2.2×)  | 152 ms (2.2×)  | 70.0 ms (1.0×)      | —        |
-| Shutdown: the same 8 clients                        | **17.6 ms** | 28.0 ms (1.6×) | 28.1 ms (1.6×) | 23.9 ms (1.4×)      | —        |
-| Startup: 10 independent clients, connect() of 50 ms | **51.3 ms** | 512 ms (10.0×) | 513 ms (10.0×) | 51.6 ms (1.0×)      | —        |
+| Startup: 8 clients, connect() of 1–60 ms            | **70.8 ms** | 156 ms (2.2×)  | 156 ms (2.2×)  | 71.1 ms (1.0×)      | —        |
+| Shutdown: the same 8 clients                        | **18.7 ms** | 30.1 ms (1.6×) | 29.8 ms (1.6×) | 26.0 ms (1.4×)      | —        |
+| Startup: 10 independent clients, connect() of 50 ms | **52.3 ms** | 520 ms (10.0×) | 522 ms (10.0×) | 52.5 ms (1.0×)      | —        |
 ```
 
 这三个库在创建容器时都不会建立任何连接：除非应用在启动时获取根对象，否则第一个请求会等待这些连接，并随它们一起失败。

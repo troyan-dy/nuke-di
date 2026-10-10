@@ -8,17 +8,22 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [1.14.2] - 2026-10-10
 
+### Added
+
+- `benchmarks/compare.py --only connect`: the comparison with other DI libraries with slow connections. Clients
+  whose `connect()` takes 1–60 ms are started and stopped through the async lifecycle of each library. For the 8
+  clients of the application tree, `nuke-di` starts in 70.8 ms (68 ms along the longest chain), dishka and wireup
+  in 156 ms, since they connect one client at a time within a `get()`, and dependency-injector in 71.1 ms with a
+  `Resource` per client, which stops in layers: 26.0 ms against 18.7 ms. Ten independent clients of 50 ms start
+  in 52 ms in `nuke-di` and dependency-injector and in 520–522 ms in dishka and wireup. wireup connects
+  concurrently what the application gathers by hand (86.9 ms), dishka does not. None of the three connects
+  anything when the container is created, so without a `get()` at startup the first request pays the
+  connections; `tests/test_benchmarks.py` checks it.
+
 ### Documentation
 
-- The comparison with other DI libraries measures slow connections: `benchmarks/compare.py --only connect`
-  starts and stops clients whose `connect()` takes 1–60 ms through the async lifecycle of each library. For the
-  8 clients of the application tree, `nuke-di` starts in 69.6 ms (68 ms along the longest chain), dishka and
-  wireup in 150–152 ms, since they connect one client at a time, and dependency-injector in 70.0 ms with a
-  `Resource` per client, which stops in layers: 23.9 ms against 17.6 ms. Ten independent clients of 50 ms start in
-  51 ms in `nuke-di` and dependency-injector and in 512–513 ms in dishka and wireup. None of the three connects
-  anything when the container is created, so without a `get()` at startup the first request pays the
-  connections. A section of `docs/benchmarks.md` and a paragraph of the README Performance section, in every
-  language.
+- A section of `docs/benchmarks.md` on slow connections and a paragraph of the README Performance section, in
+  every language.
 
 ## [1.14.1] - 2026-10-09
 
