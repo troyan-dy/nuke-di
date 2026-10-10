@@ -2,13 +2,17 @@
 The benchmark suite of benchmarks/ keeps running: CI runs it the same way, as a smoke test.
 """
 
+import importlib
 import json
 import platform
 import subprocess
 import sys
+from functools import partial
 from pathlib import Path
 
 import pytest
+
+from nuke_di import Client, Dependencies
 
 ROOT = Path(__file__).resolve().parent.parent
 RUN = ROOT / "benchmarks" / "run.py"
@@ -138,6 +142,45 @@ def test_compares_slow_connections(tmp_path: Path) -> None:
     assert figures["dishka", startup, wide]["median"] > 0.45
     assert figures["wireup", startup, wide]["median"] > 0.45
     assert figures["injector", startup, wide]["error"] == "no async lifecycle"
+    # wireup connects concurrently what the application gets concurrently by hand, dishka still one at a time
+    gathered = "startup, the root's arguments gathered by hand"
+    assert figures["wireup", gathered, wide]["median"] < 0.2
+    assert figures["dishka", gathered, wide]["median"] > 0.45
+
+
+async def test_the_other_containers_connect_on_the_first_get(monkeypatch: pytest.MonkeyPatch) -> None:
+    # What docs/benchmarks.md says of laziness: dishka, wireup and dependency-injector connect nothing when the
+    # container is created, only when a client is first asked for; nuke-di connects in `connect()`
+    pytest.importorskip("dishka")
+    monkeypatch.syspath_prepend(str(ROOT / "benchmarks"))
+    compare = importlib.import_module("compare")
+    connected: list[str] = []
+
+    class Database(Client):
+        async def connect(self) -> None:
+            connected.append("connect")
+
+    dishka_provider = compare.Provider(scope=compare.Scope.APP)
+    dishka_provider.provide(compare.lifecycle(Database))
+    dishka = compare.make_async_container(dishka_provider)
+    wireup = compare.wireup.create_async_container(injectables=[compare.wireup.injectable(compare.lifecycle(Database))])
+    dependency_injector = compare.containers.DynamicContainer()
+    dependency_injector.database = compare.providers.Resource(compare.lifecycle(Database))
+    deps = Dependencies()
+    deps.resolve(Database)
+
+    for get in (partial(dishka.get, Database), partial(wireup.get, Database), dependency_injector.database):
+        assert connected == []
+        await get()
+        assert connected == ["connect"]
+        connected.clear()
+    await dishka.close()
+    await wireup.close()
+    await dependency_injector.shutdown_resources()
+
+    await deps.connect()
+    assert connected == ["connect"]
+    await deps.disconnect()
 
 
 def test_rejects_an_unknown_scenario() -> None:
