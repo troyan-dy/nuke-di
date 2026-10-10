@@ -17,3 +17,7 @@ A Litestar route handler declares a client by its type, `async def get_user(user
 - A `NotSingletonClient` is one instance per argument name, not per argument.
 - Websocket listeners take no clients: Litestar parses their signature when they are declared. Handlers registered after the app is created are not seen.
 - When Litestar 3 ships injection by type, the providers can move to it and the annotation rewrite can go.
+
+## Revisited on 2026-10-10 (#75)
+
+Litestar 3 is not released: 2.24.0 is the latest release, with no 3.0 pre-release. Its announcement (litestar.dev, 2026-07-26) plans `TypeDependency[T]` next to `NamedDependency[T]`, with providers keyed by the type, and Litestar 2.24 warns that dependencies inferred by name alone "will stop working in Litestar 3.0". The annotation this integration writes is the explicit form, `Dependency()` being the marker of `NamedDependency`, and 2.24 warns about none of it, so nothing changes before 3.0. The decision is taken again when its API is final: providers keyed by the client class would drop the app-wide name space and the per-name `NotSingletonClient`. A provider per `(handler, argument)` under a synthetic name, which would make a `NotSingletonClient` one per argument in Litestar 2 already, is not pursued: `NotSingletonClient` is slated for removal ([ADR-0006](0006-clients-live-as-long-as-the-container.md)). The differences from FastAPI are listed for users in `docs/guide/litestar.md`.
