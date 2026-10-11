@@ -1,7 +1,5 @@
 # Coding agents
 
-**English** · [Русский](../i18n/ru/agents.md) · [简体中文](../i18n/zh-CN/agents.md) · [Español](../i18n/es/agents.md) · [Português (Brasil)](../i18n/pt-BR/agents.md) · [日本語](../i18n/ja/agents.md) · [Polski](../i18n/pl/agents.md)
-
 ← [Documentation](../../README.md#documentation)
 
 A coding agent (Claude Code, Codex, Cursor, Copilot, Gemini CLI) that has not read about `nuke-di`
@@ -83,7 +81,7 @@ and it reads the whole manual with one fetch.
 
 [Context7](https://context7.com) serves the documentation of a library to an agent through its MCP
 server. `context7.json` at the root of the repository tells it what to index: the README, the guide
-and the examples, without the translations. With the server installed, ask for it by name:
+and the examples. With the server installed, ask for it by name:
 "use context7 for nuke-di".
 
 ## The graph as JSON

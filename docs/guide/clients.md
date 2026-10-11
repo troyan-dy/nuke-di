@@ -1,7 +1,5 @@
 # Clients
 
-**English** · [Русский](../i18n/ru/clients.md) · [简体中文](../i18n/zh-CN/clients.md) · [Español](../i18n/es/clients.md) · [Português (Brasil)](../i18n/pt-BR/clients.md) · [日本語](../i18n/ja/clients.md) · [Polski](../i18n/pl/clients.md)
-
 ← [Documentation](../../README.md#documentation)
 
 ## Client and NotSingletonClient

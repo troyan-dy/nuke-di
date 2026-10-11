@@ -6,6 +6,16 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.18.4] - 2026-10-11
+
+### Documentation
+
+- The documentation is in English only: the translations of the README and the guide into Russian, Simplified
+  Chinese, Spanish, Brazilian Portuguese, Japanese and Polish (`docs/i18n/`) are removed, with the language
+  switchers at the top of every page. The source package no longer ships them.
+- `tests/test_readme_translations.py` becomes `tests/test_docs.py`: it keeps checking that every link of the
+  README and the guide lands on a file and a heading that exist.
+
 ## [1.18.3] - 2026-10-10
 
 ### Documentation
@@ -844,7 +854,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.3...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.4...HEAD
+[1.18.4]: https://github.com/troyan-dy/nuke-di/compare/v1.18.3...v1.18.4
 [1.18.3]: https://github.com/troyan-dy/nuke-di/compare/v1.18.2...v1.18.3
 [1.18.2]: https://github.com/troyan-dy/nuke-di/compare/v1.18.1...v1.18.2
 [1.18.1]: https://github.com/troyan-dy/nuke-di/compare/v1.18.0...v1.18.1

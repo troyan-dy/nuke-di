@@ -1,7 +1,5 @@
 # Errors
 
-**English** · [Русский](../i18n/ru/errors.md) · [简体中文](../i18n/zh-CN/errors.md) · [Español](../i18n/es/errors.md) · [Português (Brasil)](../i18n/pt-BR/errors.md) · [日本語](../i18n/ja/errors.md) · [Polski](../i18n/pl/errors.md)
-
 ← [Documentation](../../README.md#documentation)
 
 | Exception                   | Raised when                                               |

@@ -1,7 +1,5 @@
 # aiogram
 
-**English** · [Русский](../i18n/ru/aiogram.md) · [简体中文](../i18n/zh-CN/aiogram.md) · [Español](../i18n/es/aiogram.md) · [Português (Brasil)](../i18n/pt-BR/aiogram.md) · [日本語](../i18n/ja/aiogram.md) · [Polski](../i18n/pl/aiogram.md)
-
 ← [Documentation](../../README.md#documentation)
 
 An aiogram handler takes a client by its type hint, next to the message. Nothing marks the handler: no

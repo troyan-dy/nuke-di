@@ -1,7 +1,5 @@
 # FastAPI
 
-**English** · [Русский](../i18n/ru/fastapi.md) · [简体中文](../i18n/zh-CN/fastapi.md) · [Español](../i18n/es/fastapi.md) · [Português (Brasil)](../i18n/pt-BR/fastapi.md) · [日本語](../i18n/ja/fastapi.md) · [Polski](../i18n/pl/fastapi.md)
-
 ← [Documentation](../../README.md#documentation)
 
 A FastAPI path operation takes a client the way a job does, by its type hint. Nothing else is

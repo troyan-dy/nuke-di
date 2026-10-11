@@ -1,6 +1,6 @@
 # nuke-di: the full documentation
 
-The README and every page of the guide, generated from the English pages by scripts/llms.py.
+The README and every page of the guide, generated from the pages by scripts/llms.py.
 Index: https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms.txt
 
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/README.md -->
@@ -414,8 +414,6 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md -->
 
 # Clients
-
-
 
 ## Client and NotSingletonClient
 
@@ -1029,8 +1027,6 @@ Found 2 errors in 1 file (checked 1 source file)
 
 # The container
 
-
-
 `Dependencies` is the container. `DI` is a ready-to-use global instance; create your own
 when you need isolation, e.g. in tests.
 
@@ -1100,8 +1096,6 @@ instances: 1 clients: 2
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md -->
 
 # Workers and jobs
-
-
 
 An async function becomes the main program of a process with one decorator:
 
@@ -1779,8 +1773,6 @@ kubectl run sync-backfill --rm -it --restart=Never --image=registry.example.com/
 
 # FastAPI
 
-
-
 A FastAPI path operation takes a client the way a job does, by its type hint. Nothing else is
 written per handler: no `Depends`, no `inject()`.
 
@@ -2430,8 +2422,6 @@ The rules:
 
 # Litestar
 
-
-
 A Litestar route handler takes a client by its type hint too, through a plugin:
 
 ```bash
@@ -2695,8 +2685,6 @@ The rules:
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md -->
 
 # FastStream
-
-
 
 A FastStream subscriber takes a client by its type hint, next to the message:
 
@@ -3003,8 +2991,6 @@ What to do about it:
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md -->
 
 # MCP servers
-
-
 
 An MCP tool takes a client by its type hint, the way it takes the request `Context`, and the client is left out
 of the input schema the LLM sees. The clients connect when the server starts and disconnect when it stops. Two
@@ -3324,8 +3310,6 @@ connected, which is why `FakeDatabase` has its books from `__init__`.
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md -->
 
 # aiogram
-
-
 
 An aiogram handler takes a client by its type hint, next to the message. Nothing marks the handler: no
 `@inject`, no `FromDishka[...]`.
@@ -3696,8 +3680,6 @@ $ echo $?
 
 # taskiq
 
-
-
 A taskiq task takes a client by its type hint, next to the arguments it is kicked with:
 
 ```bash
@@ -3939,8 +3921,6 @@ task declared after the worker started fails with `RuntimeError: UserService was
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/asgi.md -->
 
 # Starlette, Quart and any ASGI app
-
-
 
 A framework without dependency injection, such as Starlette or Quart, cannot fill a handler's arguments by
 type hint. `nuke_di.asgi.lifespan()` covers the rest: it is the app's lifespan, which connects the clients
@@ -4389,8 +4369,6 @@ ERROR:    Application startup failed. Exiting.
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/servers-in-workers.md -->
 
 # Servers inside a worker
-
-
 
 grpc.aio, aiohttp, websockets, APScheduler, Textual and Temporal have no dependency injection of their own, so
 nuke-di has no module for them, and needs none: the server runs inside a [`@worker`](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md#your-first-worker),
@@ -5254,8 +5232,6 @@ The first run downloads the test server.
 
 # Writing an integration
 
-
-
 An integration with a framework does two things: the framework's handlers take clients by type hint, through
 the framework's own dependency injection, and the container connects when the app starts and disconnects when
 it stops. The [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md), [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), [MCP](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md),
@@ -5470,8 +5446,6 @@ the error into the response only with `debug=True`.
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md -->
 
 # Testing
-
-
 
 **A client through a container.** Register mocks before the tree is resolved; every consumer
 then receives the mock:
@@ -5710,8 +5684,6 @@ async def test_consumer_stops_on_shutdown() -> None:
 
 # Configuration
 
-
-
 | Environment variable         | Default | Description                                        |
 |------------------------------|---------|----------------------------------------------------|
 | `CONNECT_TIMEOUT_SECONDS`    | `30`    | Timeout for a single client's `connect()`, seconds |
@@ -5736,8 +5708,6 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 
 # Errors
 
-
-
 | Exception                   | Raised when                                               |
 |-----------------------------|-----------------------------------------------------------|
 | `InitializeDependencyError` | A client's `__init__` raised                              |
@@ -5757,8 +5727,6 @@ different behavior; the original exception is available as `__cause__`.
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/agents.md -->
 
 # Coding agents
-
-
 
 A coding agent (Claude Code, Codex, Cursor, Copilot, Gemini CLI) that has not read about `nuke-di`
 writes it in the shape of other DI libraries: provider functions, `bind(Protocol, Impl)`, request
@@ -5839,7 +5807,7 @@ and it reads the whole manual with one fetch.
 
 [Context7](https://context7.com) serves the documentation of a library to an agent through its MCP
 server. `context7.json` at the root of the repository tells it what to index: the README, the guide
-and the examples, without the translations. With the server installed, ask for it by name:
+and the examples. With the server installed, ask for it by name:
 "use context7 for nuke-di".
 
 ## The graph as JSON
@@ -5945,8 +5913,6 @@ The [mypy plugin](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/cl
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/development.md -->
 
 # Development
-
-
 
 ```bash
 make install   # uv sync --locked

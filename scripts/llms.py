@@ -1,5 +1,5 @@
 """
-The documentation for coding agents, generated from the English pages: llms.txt (https://llmstxt.org), an index
+The documentation for coding agents, generated from the pages: llms.txt (https://llmstxt.org), an index
 of the README and the guide, and llms-full.txt, the README and the guide in one file.
 
     python scripts/llms.py          write llms.txt and llms-full.txt
@@ -71,15 +71,16 @@ def _absolute(target: str, source: str) -> str:
 
 def _without_navigation(source: str, text: str) -> list[str]:
     """
-    The lines of a page without what only a reader on GitHub needs: the badges and the language switcher of the
-    README, the language switcher and the way back to the README of a guide page.
+    The lines of a page without what only a reader on GitHub needs: the badges of the README and the way back to
+    the README of a guide page.
     """
     lines = text.splitlines()
     if source == "README.md":
-        # The title, then the badges, the language switcher and the blank lines around them up to the pitch
-        start = next(number for number, line in enumerate(lines) if number > 0 and line and line[0] not in "[*")
+        # The title, then the badges and the blank lines around them up to the pitch
+        start = next(number for number, line in enumerate(lines) if number > 0 and line and line[0] != "[")
         return [lines[0], "", *lines[start:]]
-    return [line for line in lines if not line.startswith(("**English** · ", "← [Documentation]"))]
+    # The title, then the way back to the README and the blank line under it (tests/test_docs.py keeps them there)
+    return [*lines[:2], *lines[4:]]
 
 
 def full_page(source: str) -> str:
@@ -101,7 +102,7 @@ def full_page(source: str) -> str:
 def full() -> str:
     header = (
         "# nuke-di: the full documentation\n\n"
-        "The README and every page of the guide, generated from the English pages by scripts/llms.py.\n"
+        "The README and every page of the guide, generated from the pages by scripts/llms.py.\n"
         f"Index: {RAW_URL}llms.txt\n"
     )
     sections = [f"<!-- Source: {BLOB_URL}{source} -->\n\n{full_page(source)}" for source in pages()]

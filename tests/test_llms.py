@@ -1,6 +1,6 @@
 """
 What a coding agent reads stays in step with the docs: llms.txt and llms-full.txt are what scripts/llms.py makes of
-the English pages, the Agent Skill links to files and headings that exist, and the plugin manifests name the skill.
+the pages, the Agent Skill links to files and headings that exist, and the plugin manifests name the skill.
 """
 
 import importlib.util
@@ -11,7 +11,7 @@ from types import ModuleType
 
 import pytest
 
-from tests.test_readme_translations import anchors, split
+from tests.test_docs import anchors, split
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILL = ROOT / "skills" / "nuke-di" / "SKILL.md"
@@ -68,7 +68,6 @@ def test_full_text_has_no_relative_links() -> None:
 def test_full_text_drops_the_navigation() -> None:
     text = (ROOT / "llms-full.txt").read_text(encoding="utf-8")
 
-    assert "**English** · " not in text
     assert "← [Documentation]" not in text
     assert "img.shields.io" not in text
 
@@ -114,6 +113,6 @@ def test_plugin_marketplace_serves_the_skill() -> None:
 def test_context7_indexes_existing_folders() -> None:
     config = json.loads((ROOT / "context7.json").read_text(encoding="utf-8"))
 
-    for folder in config["folders"] + config["excludeFolders"]:
+    for folder in config["folders"]:
         assert (ROOT / folder).is_dir(), folder
     assert len(config["description"]) <= 500
