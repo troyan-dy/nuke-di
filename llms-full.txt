@@ -1,6 +1,6 @@
 # nuke-di: the full documentation
 
-The README and every page of the guide, generated from the English pages by scripts/llms.py.
+The README and every page of the guide, generated from the pages by scripts/llms.py.
 Index: https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms.txt
 
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/README.md -->

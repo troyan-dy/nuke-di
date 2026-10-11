@@ -81,8 +81,17 @@ def test_guide_exists() -> None:
     assert "testing" in PAGES
 
 
+@pytest.mark.parametrize("page", PAGES)
+def test_guide_page_header(page: str) -> None:
+    # The title, then the way back to the README, which scripts/llms.py drops by its place
+    lines = document(page).splitlines()
+
+    assert lines[0].startswith("# ")
+    assert lines[1:4] == ["", "← [Documentation](../../README.md#documentation)", ""]
+
+
 @pytest.mark.parametrize("page", DOCUMENTS)
-def test_english_internal_links_resolve(page: str | None) -> None:
+def test_internal_links_resolve(page: str | None) -> None:
     prose, _ = split(document(page))
 
     assert set(internal_links(prose)) - set(anchors(document(page))) == set()

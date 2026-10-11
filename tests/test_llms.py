@@ -1,6 +1,6 @@
 """
 What a coding agent reads stays in step with the docs: llms.txt and llms-full.txt are what scripts/llms.py makes of
-the English pages, the Agent Skill links to files and headings that exist, and the plugin manifests name the skill.
+the pages, the Agent Skill links to files and headings that exist, and the plugin manifests name the skill.
 """
 
 import importlib.util
@@ -68,7 +68,6 @@ def test_full_text_has_no_relative_links() -> None:
 def test_full_text_drops_the_navigation() -> None:
     text = (ROOT / "llms-full.txt").read_text(encoding="utf-8")
 
-    assert "**English** · " not in text
     assert "← [Documentation]" not in text
     assert "img.shields.io" not in text
 

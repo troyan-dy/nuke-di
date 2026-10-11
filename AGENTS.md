@@ -20,7 +20,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 
 The documentation is written in English only: there are no translations, and none are added. Every link in the README and the guide lands on a file and a heading that exist (`tests/test_docs.py`).
 
-`llms.txt` and `llms-full.txt` are generated from the English README and guide: after changing either, run `uv run python scripts/llms.py` (`tests/test_llms.py` fails otherwise). `skills/nuke-di/SKILL.md` is the page a coding agent reads before writing code with nuke-di: a change to the model, a recipe or a rejected design goes there too, and into the other places that list the rejected designs for agents: the `AGENTS.md` block of `docs/guide/agents.md`, the `rules` of `context7.json`, `INTRO` of `scripts/llms.py` and `shapes()` of `benchmarks/agents/evaluate.py`, which measures whether the skill helps.
+`llms.txt` and `llms-full.txt` are generated from the README and the guide: after changing either, run `uv run python scripts/llms.py` (`tests/test_llms.py` fails otherwise). `skills/nuke-di/SKILL.md` is the page a coding agent reads before writing code with nuke-di: a change to the model, a recipe or a rejected design goes there too, and into the other places that list the rejected designs for agents: the `AGENTS.md` block of `docs/guide/agents.md`, the `rules` of `context7.json`, `INTRO` of `scripts/llms.py` and `shapes()` of `benchmarks/agents/evaluate.py`, which measures whether the skill helps.
 
 ## Design principles
 

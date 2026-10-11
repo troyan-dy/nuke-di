@@ -1,5 +1,5 @@
 """
-The documentation for coding agents, generated from the English pages: llms.txt (https://llmstxt.org), an index
+The documentation for coding agents, generated from the pages: llms.txt (https://llmstxt.org), an index
 of the README and the guide, and llms-full.txt, the README and the guide in one file.
 
     python scripts/llms.py          write llms.txt and llms-full.txt
@@ -79,10 +79,8 @@ def _without_navigation(source: str, text: str) -> list[str]:
         # The title, then the badges and the blank lines around them up to the pitch
         start = next(number for number, line in enumerate(lines) if number > 0 and line and line[0] != "[")
         return [lines[0], "", *lines[start:]]
-    # The title, then the way back to the README and the blank line under it
-    if len(lines) > 3 and lines[2].startswith("← [Documentation]") and not lines[3]:
-        return [*lines[:2], *lines[4:]]
-    return lines
+    # The title, then the way back to the README and the blank line under it (tests/test_docs.py keeps them there)
+    return [*lines[:2], *lines[4:]]
 
 
 def full_page(source: str) -> str:
@@ -104,7 +102,7 @@ def full_page(source: str) -> str:
 def full() -> str:
     header = (
         "# nuke-di: the full documentation\n\n"
-        "The README and every page of the guide, generated from the English pages by scripts/llms.py.\n"
+        "The README and every page of the guide, generated from the pages by scripts/llms.py.\n"
         f"Index: {RAW_URL}llms.txt\n"
     )
     sections = [f"<!-- Source: {BLOB_URL}{source} -->\n\n{full_page(source)}" for source in pages()]
