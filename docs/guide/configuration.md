@@ -1,7 +1,5 @@
 # Configuration
 
-**English** · [Русский](../i18n/ru/configuration.md) · [简体中文](../i18n/zh-CN/configuration.md) · [Español](../i18n/es/configuration.md) · [Português (Brasil)](../i18n/pt-BR/configuration.md) · [日本語](../i18n/ja/configuration.md) · [Polski](../i18n/pl/configuration.md)
-
 ← [Documentation](../../README.md#documentation)
 
 | Environment variable         | Default | Description                                        |

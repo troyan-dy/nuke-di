@@ -1,7 +1,5 @@
 # Starlette, Quart and any ASGI app
 
-**English** · [Русский](../i18n/ru/asgi.md) · [简体中文](../i18n/zh-CN/asgi.md) · [Español](../i18n/es/asgi.md) · [Português (Brasil)](../i18n/pt-BR/asgi.md) · [日本語](../i18n/ja/asgi.md) · [Polski](../i18n/pl/asgi.md)
-
 ← [Documentation](../../README.md#documentation)
 
 A framework without dependency injection, such as Starlette or Quart, cannot fill a handler's arguments by

@@ -1,7 +1,5 @@
 # Testing
 
-**English** · [Русский](../i18n/ru/testing.md) · [简体中文](../i18n/zh-CN/testing.md) · [Español](../i18n/es/testing.md) · [Português (Brasil)](../i18n/pt-BR/testing.md) · [日本語](../i18n/ja/testing.md) · [Polski](../i18n/pl/testing.md)
-
 ← [Documentation](../../README.md#documentation)
 
 **A client through a container.** Register mocks before the tree is resolved; every consumer

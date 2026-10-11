@@ -1,7 +1,5 @@
 # Workers and jobs
 
-**English** · [Русский](../i18n/ru/workers-and-jobs.md) · [简体中文](../i18n/zh-CN/workers-and-jobs.md) · [Español](../i18n/es/workers-and-jobs.md) · [Português (Brasil)](../i18n/pt-BR/workers-and-jobs.md) · [日本語](../i18n/ja/workers-and-jobs.md) · [Polski](../i18n/pl/workers-and-jobs.md)
-
 ← [Documentation](../../README.md#documentation)
 
 An async function becomes the main program of a process with one decorator:

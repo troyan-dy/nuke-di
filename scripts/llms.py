@@ -71,15 +71,18 @@ def _absolute(target: str, source: str) -> str:
 
 def _without_navigation(source: str, text: str) -> list[str]:
     """
-    The lines of a page without what only a reader on GitHub needs: the badges and the language switcher of the
-    README, the language switcher and the way back to the README of a guide page.
+    The lines of a page without what only a reader on GitHub needs: the badges of the README and the way back to
+    the README of a guide page.
     """
     lines = text.splitlines()
     if source == "README.md":
-        # The title, then the badges, the language switcher and the blank lines around them up to the pitch
-        start = next(number for number, line in enumerate(lines) if number > 0 and line and line[0] not in "[*")
+        # The title, then the badges and the blank lines around them up to the pitch
+        start = next(number for number, line in enumerate(lines) if number > 0 and line and line[0] != "[")
         return [lines[0], "", *lines[start:]]
-    return [line for line in lines if not line.startswith(("**English** · ", "← [Documentation]"))]
+    # The title, then the way back to the README and the blank line under it
+    if len(lines) > 3 and lines[2].startswith("← [Documentation]") and not lines[3]:
+        return [*lines[:2], *lines[4:]]
+    return lines
 
 
 def full_page(source: str) -> str:

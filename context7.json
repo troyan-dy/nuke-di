@@ -6,9 +6,6 @@
     "docs/guide",
     "examples"
   ],
-  "excludeFolders": [
-    "docs/i18n"
-  ],
   "excludeFiles": [
     "AGENTS.md",
     "CHANGELOG.md",

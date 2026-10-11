@@ -1,7 +1,5 @@
 # FastStream
 
-**English** · [Русский](../i18n/ru/faststream.md) · [简体中文](../i18n/zh-CN/faststream.md) · [Español](../i18n/es/faststream.md) · [Português (Brasil)](../i18n/pt-BR/faststream.md) · [日本語](../i18n/ja/faststream.md) · [Polski](../i18n/pl/faststream.md)
-
 ← [Documentation](../../README.md#documentation)
 
 A FastStream subscriber takes a client by its type hint, next to the message:

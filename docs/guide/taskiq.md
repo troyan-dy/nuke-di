@@ -1,7 +1,5 @@
 # taskiq
 
-**English** · [Русский](../i18n/ru/taskiq.md) · [简体中文](../i18n/zh-CN/taskiq.md) · [Español](../i18n/es/taskiq.md) · [Português (Brasil)](../i18n/pt-BR/taskiq.md) · [日本語](../i18n/ja/taskiq.md) · [Polski](../i18n/pl/taskiq.md)
-
 ← [Documentation](../../README.md#documentation)
 
 A taskiq task takes a client by its type hint, next to the arguments it is kicked with:

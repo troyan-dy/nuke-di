@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_readme_translations import document, split
+from tests.test_docs import document, split
 
 pytest.importorskip("mypy")
 

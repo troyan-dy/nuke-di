@@ -1,7 +1,5 @@
 # Writing an integration
 
-**English** · [Русский](../i18n/ru/integrations.md) · [简体中文](../i18n/zh-CN/integrations.md) · [Español](../i18n/es/integrations.md) · [Português (Brasil)](../i18n/pt-BR/integrations.md) · [日本語](../i18n/ja/integrations.md) · [Polski](../i18n/pl/integrations.md)
-
 ← [Documentation](../../README.md#documentation)
 
 An integration with a framework does two things: the framework's handlers take clients by type hint, through

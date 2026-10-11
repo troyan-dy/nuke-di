@@ -1,7 +1,5 @@
 # Servers inside a worker
 
-**English** · [Русский](../i18n/ru/servers-in-workers.md) · [简体中文](../i18n/zh-CN/servers-in-workers.md) · [Español](../i18n/es/servers-in-workers.md) · [Português (Brasil)](../i18n/pt-BR/servers-in-workers.md) · [日本語](../i18n/ja/servers-in-workers.md) · [Polski](../i18n/pl/servers-in-workers.md)
-
 ← [Documentation](../../README.md#documentation)
 
 grpc.aio, aiohttp, websockets, APScheduler, Textual and Temporal have no dependency injection of their own, so

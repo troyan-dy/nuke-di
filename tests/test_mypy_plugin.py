@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from nuke_di import Dependencies, InvalidSignatureError
-from tests.test_readme_translations import document, split
+from tests.test_docs import document, split
 
 api = pytest.importorskip("mypy.api")
 

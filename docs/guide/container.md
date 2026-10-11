@@ -1,7 +1,5 @@
 # The container
 
-**English** · [Русский](../i18n/ru/container.md) · [简体中文](../i18n/zh-CN/container.md) · [Español](../i18n/es/container.md) · [Português (Brasil)](../i18n/pt-BR/container.md) · [日本語](../i18n/ja/container.md) · [Polski](../i18n/pl/container.md)
-
 ← [Documentation](../../README.md#documentation)
 
 `Dependencies` is the container. `DI` is a ready-to-use global instance; create your own

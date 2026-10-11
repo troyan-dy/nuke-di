@@ -1,7 +1,5 @@
 # Development
 
-**English** · [Русский](../i18n/ru/development.md) · [简体中文](../i18n/zh-CN/development.md) · [Español](../i18n/es/development.md) · [Português (Brasil)](../i18n/pt-BR/development.md) · [日本語](../i18n/ja/development.md) · [Polski](../i18n/pl/development.md)
-
 ← [Documentation](../../README.md#documentation)
 
 ```bash

@@ -1,7 +1,5 @@
 # MCP servers
 
-**English** · [Русский](../i18n/ru/mcp.md) · [简体中文](../i18n/zh-CN/mcp.md) · [Español](../i18n/es/mcp.md) · [Português (Brasil)](../i18n/pt-BR/mcp.md) · [日本語](../i18n/ja/mcp.md) · [Polski](../i18n/pl/mcp.md)
-
 ← [Documentation](../../README.md#documentation)
 
 An MCP tool takes a client by its type hint, the way it takes the request `Context`, and the client is left out

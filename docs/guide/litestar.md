@@ -1,7 +1,5 @@
 # Litestar
 
-**English** · [Русский](../i18n/ru/litestar.md) · [简体中文](../i18n/zh-CN/litestar.md) · [Español](../i18n/es/litestar.md) · [Português (Brasil)](../i18n/pt-BR/litestar.md) · [日本語](../i18n/ja/litestar.md) · [Polski](../i18n/pl/litestar.md)
-
 ← [Documentation](../../README.md#documentation)
 
 A Litestar route handler takes a client by its type hint too, through a plugin:
