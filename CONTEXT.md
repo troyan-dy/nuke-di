@@ -28,12 +28,16 @@ _Avoid_: Layer, level, DAG schedule
 The most `connect()` or `disconnect()` calls of one container running at once; unlimited by default. A client waiting for its own dependencies does not count against it.
 _Avoid_: Parallelism, workers
 
+**Disconnect deadline**:
+One budget for a container's whole disconnect, and for the rollback of a failed connect, whatever the depth of the tree; each client's `disconnect()` is still bounded by its own timeout. A client still disconnecting when it runs out is timed out, and the clients not started by then are skipped (ADR-0012).
+_Avoid_: Shutdown timeout, shutdown deadline
+
 **Graph**:
 Every client the container has resolved so far, with who depends on whom. A snapshot: a flush empties it, apart from the Replacements of open Override blocks. Resolution of one root builds that root's tree; the container holds the graph, because singletons are shared between trees.
 _Avoid_: Tree (for the whole container), DAG, node, edge
 
 **Client timing**:
-How long one client's `connect()` and `disconnect()` took in the last connect of its container, and how each ended: ok, failed, timed out or cancelled. The container only measures; exporting timings is left to hooks.
+How long one client's `connect()` and `disconnect()` took in the last connect of its container, and how each ended: ok, failed, timed out or cancelled. A phase that never started, such as a disconnect skipped after the disconnect deadline, has no outcome. The container only measures; exporting timings is left to hooks.
 _Avoid_: Stat, span (a metric or a span is what a hook exports from timings)
 
 **Integration**:

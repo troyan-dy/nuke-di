@@ -143,3 +143,41 @@ def test_disconnect_timeout_default(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_negative_disconnect_timeout() -> None:
     with pytest.raises(ValueError, match="disconnect_timeout"):
         DependenciesSettings(disconnect_timeout=-1)
+
+
+def test_disconnect_deadline_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISCONNECT_DEADLINE_SECONDS", "2.5")
+
+    assert DependenciesSettings().disconnect_deadline == 2.5
+
+
+def test_disconnect_deadline_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DISCONNECT_DEADLINE_SECONDS", raising=False)
+
+    assert DependenciesSettings().disconnect_deadline == 20
+
+
+def test_negative_disconnect_deadline() -> None:
+    with pytest.raises(ValueError, match="disconnect_deadline"):
+        DependenciesSettings(disconnect_deadline=-1)
+
+
+def test_zero_disconnect_deadline() -> None:
+    assert DependenciesSettings(disconnect_deadline=0).disconnect_deadline == 0
+
+
+def test_infinite_disconnect_deadline_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISCONNECT_DEADLINE_SECONDS", "inf")
+
+    assert DependenciesSettings().disconnect_deadline == float("inf")
+
+
+def test_nan_disconnect_timeout() -> None:
+    # NaN would pass a `< 0` check and lift the bound without a word
+    with pytest.raises(ValueError, match="disconnect_timeout"):
+        DependenciesSettings(disconnect_timeout=float("nan"))
+
+
+def test_nan_disconnect_deadline() -> None:
+    with pytest.raises(ValueError, match="disconnect_deadline"):
+        DependenciesSettings(disconnect_deadline=float("nan"))

@@ -23,7 +23,7 @@ and the class whose methods are its handlers is a `Client`.
   gRPC and APScheduler recipes abort them in a `finally`; for aiohttp, websockets and Temporal the bound is the
   only guard.
 - **The whole stop has a budget.** A process stops in up to
-  `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies`
+  `SHUTDOWN_GRACE_SECONDS + DISCONNECT_DEADLINE_SECONDS`
   ([grace period](workers-and-jobs.md#grace-period)); give the pod a `terminationGracePeriodSeconds` above it
   ([Kubernetes](workers-and-jobs.md#running-in-kubernetes)).
 

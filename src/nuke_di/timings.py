@@ -10,7 +10,8 @@ class ClientTiming:
     How one client's connect() and disconnect() went in the last connect of its container.
 
     A phase that never started has no duration and no outcome: e.g. a client still waiting for its dependencies when
-    another client failed, or one cancelled while waiting for CONNECT_CONCURRENCY.
+    another client failed, one cancelled while waiting for CONNECT_CONCURRENCY, or one whose turn to disconnect came
+    after DISCONNECT_DEADLINE_SECONDS ran out.
     """
 
     name: str

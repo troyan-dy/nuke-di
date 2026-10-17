@@ -129,9 +129,10 @@ $ uv run pytest -q service_layout
 
 One ConfigMap feeds all three, so they agree on `SERVICE_DB` and the timeouts. Each Deployment's
 `terminationGracePeriodSeconds: 30` covers its worst case,
-`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies`: for the
-worker `10 + 5 × 3 = 25` (`Outbox` → `Database` → `Settings`), for the API uvicorn's
-`--timeout-graceful-shutdown 5` plus `5 × 4` (`Orders` → `Outbox` → `Database` → `Settings`). SQLite on a shared volume keeps the example
+`SHUTDOWN_GRACE_SECONDS + DISCONNECT_DEADLINE_SECONDS`, whatever the chain of dependencies: for the
+worker `10 + 15 = 25` (`Outbox` → `Database` → `Settings`), for the API uvicorn's
+`--timeout-graceful-shutdown 5` plus `15` (`Orders` → `Outbox` → `Database` → `Settings`), with
+`DISCONNECT_TIMEOUT_SECONDS` 5 still bounding each client's `disconnect()`. SQLite on a shared volume keeps the example
 self-contained; a real service points `Database` at Postgres and drops the volume.
 
 ## What to look at

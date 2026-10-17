@@ -402,10 +402,11 @@ queue: disconnected
 A signal that arrives while the clients are still connecting stops the startup, and the
 clients that already connected are disconnected.
 
-In the worst case a process stops in
-`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies`. With
-the defaults, a chain of two clients takes the whole Kubernetes default `terminationGracePeriodSeconds` of 30 seconds,
-so lower the timeouts or raise the grace period for deeper trees.
+In the worst case a process stops in `SHUTDOWN_GRACE_SECONDS + DISCONNECT_DEADLINE_SECONDS`,
+whatever the depth of the tree: `DISCONNECT_TIMEOUT_SECONDS` bounds each client's `disconnect()`
+and `DISCONNECT_DEADLINE_SECONDS` the whole disconnect. With the defaults, 10 + 20 equals the
+Kubernetes default `terminationGracePeriodSeconds` of 30 seconds, so leave the pod a margin above
+it or lower one of the two.
 
 ## Background tasks
 
@@ -658,7 +659,7 @@ spec:
     metadata:
       labels: {app: consumer}
     spec:
-      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × longest chain
+      terminationGracePeriodSeconds: 40  # > SHUTDOWN_GRACE_SECONDS + DISCONNECT_DEADLINE_SECONDS
       containers:
         - name: consumer
           image: registry.example.com/app:1.0

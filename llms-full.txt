@@ -493,7 +493,10 @@ class Redis(Client):
 
 Each `connect()` is bounded by `CONNECT_TIMEOUT_SECONDS` (default `30`) and each
 `disconnect()` by `DISCONNECT_TIMEOUT_SECONDS` (default `10`). A failing or hanging
-`disconnect()` is logged, and the other clients still shut down.
+`disconnect()` is logged, and the other clients still shut down. The whole disconnect, whatever
+the depth of the tree, is bounded by `DISCONNECT_DEADLINE_SECONDS` (default `20`): a client
+still disconnecting when it runs out is cut off, and the clients that have not started
+disconnecting by then are skipped, with one log record that names them.
 
 ## Dataclass clients
 
@@ -704,11 +707,12 @@ list as [`Run.clients`](https://github.com/troyan-dy/nuke-di/blob/master/docs/gu
 | `name`               | The class name of the client |
 | `connect`            | Seconds spent in `connect()`, not counting the wait for `CONNECT_CONCURRENCY`; `None` if `connect()` never ran |
 | `connect_outcome`    | `"ok"`, `"failed"`, `"timed_out"`, `"cancelled"`, or `None` if `connect()` never started |
-| `disconnect`, `disconnect_outcome` | The same for `disconnect()`; `None` until the client disconnects |
+| `disconnect`, `disconnect_outcome` | The same for `disconnect()`; `None` until the client disconnects, and for good if it was skipped after `DISCONNECT_DEADLINE_SECONDS` |
 
 When a client fails to connect, the clients still connecting end up `"cancelled"`, the
 clients still waiting for their dependencies keep `None`, and the clients that had connected
-are rolled back, so they get a `disconnect_outcome`. The library only measures: exporting the
+are rolled back, so they get a `disconnect_outcome`. A client skipped after
+`DISCONNECT_DEADLINE_SECONDS` keeps `None` for `disconnect` and `disconnect_outcome`. The library only measures: exporting the
 timings as metrics or spans is up to your code.
 
 ## The graph
@@ -1497,10 +1501,11 @@ queue: disconnected
 A signal that arrives while the clients are still connecting stops the startup, and the
 clients that already connected are disconnected.
 
-In the worst case a process stops in
-`SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies`. With
-the defaults, a chain of two clients takes the whole Kubernetes default `terminationGracePeriodSeconds` of 30 seconds,
-so lower the timeouts or raise the grace period for deeper trees.
+In the worst case a process stops in `SHUTDOWN_GRACE_SECONDS + DISCONNECT_DEADLINE_SECONDS`,
+whatever the depth of the tree: `DISCONNECT_TIMEOUT_SECONDS` bounds each client's `disconnect()`
+and `DISCONNECT_DEADLINE_SECONDS` the whole disconnect. With the defaults, 10 + 20 equals the
+Kubernetes default `terminationGracePeriodSeconds` of 30 seconds, so leave the pod a margin above
+it or lower one of the two.
 
 ## Background tasks
 
@@ -1753,7 +1758,7 @@ spec:
     metadata:
       labels: {app: consumer}
     spec:
-      terminationGracePeriodSeconds: 30  # >= SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × longest chain
+      terminationGracePeriodSeconds: 40  # > SHUTDOWN_GRACE_SECONDS + DISCONNECT_DEADLINE_SECONDS
       containers:
         - name: consumer
           image: registry.example.com/app:1.0
@@ -3857,9 +3862,10 @@ The rules:
   before `setup()`, and disconnect after `broker.shutdown()` has run the `WORKER_SHUTDOWN` handlers, the
   middlewares and the result backend; on an `InMemoryBroker`, after the tasks still running have finished.
   `Shutdown` and `BackgroundTasks` behave as in [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md). `taskiq worker` gives
-  `broker.shutdown()` `--shutdown-timeout` seconds, 5 by default, and each `disconnect()` may take
-  `DISCONNECT_TIMEOUT_SECONDS`, 10 by default: set `--shutdown-timeout` above the longest chain of
-  disconnects, or a slow one is cut off midway.
+  `broker.shutdown()` `--shutdown-timeout` seconds, 5 by default, and the whole disconnect may take
+  `DISCONNECT_DEADLINE_SECONDS`, 20 by default: set `--shutdown-timeout` above the time of your
+  `WORKER_SHUTDOWN` handlers plus `DISCONNECT_DEADLINE_SECONDS`, or lower the deadline, or a slow
+  disconnect is cut off midway.
 - **A failed start.** A failed `connect()` fails `broker.startup()` with a `RuntimeError`, and the worker
   process dies. taskiq's process manager restarts it for ever by default (`--max-fails -1`), so the
   orchestrator never sees a crash and the dead dependency is tried again every second. Run the worker with
@@ -4391,7 +4397,7 @@ and the class whose methods are its handlers is a `Client`.
   gRPC and APScheduler recipes abort them in a `finally`; for aiohttp, websockets and Temporal the bound is the
   only guard.
 - **The whole stop has a budget.** A process stops in up to
-  `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies`
+  `SHUTDOWN_GRACE_SECONDS + DISCONNECT_DEADLINE_SECONDS`
   ([grace period](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md#grace-period)); give the pod a `terminationGracePeriodSeconds` above it
   ([Kubernetes](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md#running-in-kubernetes)).
 
@@ -5689,6 +5695,7 @@ async def test_consumer_stops_on_shutdown() -> None:
 | `CONNECT_TIMEOUT_SECONDS`    | `30`    | Timeout for a single client's `connect()`, seconds |
 | `CONNECT_CONCURRENCY`        | `0`     | How many clients may connect or disconnect at once across the container; `0` means no limit |
 | `DISCONNECT_TIMEOUT_SECONDS` | `10`    | Timeout for a single client's `disconnect()`, seconds |
+| `DISCONNECT_DEADLINE_SECONDS` | `20`   | Budget of a whole `disconnect()`, and of the rollback of a failed `connect()`, seconds: the clients still disconnecting when it runs out are cut off and `"timed_out"`, the ones not started yet are skipped; `inf` disables it |
 | `SHUTDOWN_GRACE_SECONDS`     | `10`    | How long a worker or a job may keep running after SIGTERM / SIGINT before it is cancelled, seconds; read when the process starts |
 
 ```bash
@@ -5701,7 +5708,11 @@ them explicitly:
 ```python
 from nuke_di import Dependencies, DependenciesSettings
 
-deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_timeout=5, connect_concurrency=4))
+deps = Dependencies(
+    settings=DependenciesSettings(
+        connect_timeout=5, disconnect_timeout=5, disconnect_deadline=15, connect_concurrency=4
+    )
+)
 ```
 
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/errors.md -->

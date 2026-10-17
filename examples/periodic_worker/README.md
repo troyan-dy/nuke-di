@@ -45,7 +45,8 @@ $ wait %1; echo $?
 
 `SHUTDOWN_GRACE_SECONDS` (10 by default) is how long a cleanup already running may go on after the
 signal before it is cancelled; the wait between two cleanups ends at once whatever its value. Keep
-`terminationGracePeriodSeconds` of the Deployment above it.
+`terminationGracePeriodSeconds` of the Deployment above `SHUTDOWN_GRACE_SECONDS` +
+`DISCONNECT_DEADLINE_SECONDS` ([grace period](../../docs/guide/workers-and-jobs.md#grace-period)).
 
 ## Test
 

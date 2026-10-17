@@ -9,6 +9,7 @@ data:
   SERVICE_DB: /data/orders.db
   OUTBOX_POLL_SECONDS: "1"
   DISCONNECT_TIMEOUT_SECONDS: "5"
+  DISCONNECT_DEADLINE_SECONDS: "15"
   SHUTDOWN_GRACE_SECONDS: "10"
 ---
 apiVersion: v1
@@ -33,7 +34,7 @@ spec:
       labels: {app: service-layout-api}
     spec:
       # uvicorn drains requests for up to 5s, then the lifespan disconnects a chain of 4 clients
-      # (Orders, Outbox, Database, Settings): 5 + DISCONNECT_TIMEOUT_SECONDS 5 x 4 = 25 <= 30
+      # (Orders, Outbox, Database, Settings) within DISCONNECT_DEADLINE_SECONDS: 5 + 15 = 20 < 30
       terminationGracePeriodSeconds: 30
       containers:
         - name: api
@@ -65,7 +66,7 @@ spec:
       labels: {app: service-layout-outbox}
     spec:
       # SIGTERM sets Shutdown: the worker finishes its batch within SHUTDOWN_GRACE_SECONDS 10, then a chain
-      # of 3 clients (Outbox, Database, Settings) disconnects: 10 + 5 x 3 = 25 <= 30
+      # of 3 clients (Outbox, Database, Settings) disconnects within DISCONNECT_DEADLINE_SECONDS: 10 + 15 = 25 < 30
       terminationGracePeriodSeconds: 30
       containers:
         - name: outbox
