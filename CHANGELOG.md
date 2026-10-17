@@ -6,6 +6,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.18.5] - 2026-10-18
+
+### Changed
+
+- The repository is set up for [ralphex](https://github.com/umputun/ralphex), which executes a plan from
+  `docs/plans/` task by task in fresh Claude Code sessions: `.ralphex/` holds its project config (the external
+  codex review is off) and the commented-out default prompts and review agents. Nothing changes in the package.
+
 ## [1.18.4] - 2026-10-11
 
 ### Documentation
@@ -854,7 +862,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.4...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.5...HEAD
+[1.18.5]: https://github.com/troyan-dy/nuke-di/compare/v1.18.4...v1.18.5
 [1.18.4]: https://github.com/troyan-dy/nuke-di/compare/v1.18.3...v1.18.4
 [1.18.3]: https://github.com/troyan-dy/nuke-di/compare/v1.18.2...v1.18.3
 [1.18.2]: https://github.com/troyan-dy/nuke-di/compare/v1.18.1...v1.18.2
