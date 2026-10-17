@@ -91,31 +91,34 @@
 - [x] run `make test` - must pass before task 2
 
 ### Task 2: Bound every client's disconnect() by the shared deadline
-- [ ] write failing tests (in `tests/test_connect_order.py`, next to the `HangsOnDisconnect` tests, reusing
+- [x] write failing tests (in `tests/test_connect_order.py`, next to the `HangsOnDisconnect` tests, reusing
       `probe`/`Tracked` where it fits):
   - a chain of three clients that each hang in `disconnect()`, `disconnect_timeout=0.2`, `disconnect_deadline=0.3`:
     `disconnect()` returns in well under `0.6` s (assert `< 0.5`); the top client is `timed_out` by its own timeout,
     the middle one `timed_out` by the deadline, the bottom one never starts (`disconnect_outcome is None`, its
     `disconnect()` never ran)
+    - ⚠️ Task 2 asserts only that the bottom's `disconnect()` never ran: until Task 3 skips it, `_within()` with a
+      bound `<= 0` records it `timed_out`; the `None` assertion is added in Task 3
   - one hanging client with `disconnect_timeout=10`, `disconnect_deadline=0.05`: `timed_out`, and the log says
     `"<Name> did not disconnect before DISCONNECT_DEADLINE_SECONDS ran out (0.05s)"` (exact wording decided here and
     reused in the docs), not the `DISCONNECT_TIMEOUT_SECONDS` message
   - the deadline not reached: every client `ok`, no deadline record in the log (happy path unchanged)
   - `test_timed_out_disconnect_still_releases_its_dependencies` still passes: within the deadline a timed-out client
     still releases its dependencies
-- [ ] in `_disconnect_clients()` (`src/nuke_di/core.py`) compute the deadline once,
+- [x] in `_disconnect_clients()` (`src/nuke_di/core.py`) compute the deadline once,
       `asyncio.get_running_loop().time() + self.settings.disconnect_deadline`, and pass it to `_disconnect_client`
       through the existing `partial(...)`
-- [ ] in `_disconnect_client()`, after taking the `limiter` slot, compute
+- [x] in `_disconnect_client()`, after taking the `limiter` slot, compute
       `remaining = deadline - loop.time()` and await `_within(min(self.settings.disconnect_timeout, remaining), ...)`;
       remember which bound was the smaller one so the `TimeoutError` handler logs either the existing
       `DISCONNECT_TIMEOUT_SECONDS` message or the new deadline message (same `logger.exception` level and `_fields`)
-- [ ] keep the outcome recording in `_measure` as it is (`timed_out` on `TimeoutError`); no per-client cost beyond the
+- [x] keep the outcome recording in `_measure` as it is (`timed_out` on `TimeoutError`); no per-client cost beyond the
       one subtraction and `min()`
-- [ ] run `make test` - must pass before task 3
+- [x] run `make test` - must pass before task 3
 
 ### Task 3: Skip the clients that did not start before the deadline
 - [ ] write failing tests:
+  - ➕ in `test_deadline_bounds_a_chain_of_hung_disconnects`, assert `HangingBottom`'s `disconnect_outcome is None`
   - in the three-client chain of Task 2, the log has one record listing the skipped client(s):
     `"Skipped disconnecting 1 client after DISCONNECT_DEADLINE_SECONDS (0.3s): Bottom"` (pluralised with `_count`)
   - `disconnect_deadline=0`: no client's `disconnect()` runs, every `disconnect_outcome is None`, one skip record

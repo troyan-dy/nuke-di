@@ -270,6 +270,8 @@ class Dependencies:
                 consumers[dependency].append(consumer)
         # Clients whose disconnect() ended, for the progress in the records
         disconnected: list[NotSingletonClient] = []
+        # One budget for the whole disconnect, whatever the depth of the tree
+        deadline = asyncio.get_running_loop().time() + self.settings.disconnect_deadline
 
         try:
             # Only a cancellation of disconnect() itself ends it early: _disconnect_client logs and swallows what a
@@ -278,7 +280,11 @@ class Dependencies:
                 clients,
                 consumers,
                 partial(
-                    self._disconnect_client, limiter=self._limiter(), disconnected=disconnected, total=len(clients)
+                    self._disconnect_client,
+                    limiter=self._limiter(),
+                    disconnected=disconnected,
+                    total=len(clients),
+                    deadline=deadline,
                 ),
             )
         finally:
@@ -286,13 +292,24 @@ class Dependencies:
             self.flush()
 
     async def _disconnect_client(
-        self, client: NotSingletonClient, *, limiter: Limiter, disconnected: list[NotSingletonClient], total: int
+        self,
+        client: NotSingletonClient,
+        *,
+        limiter: Limiter,
+        disconnected: list[NotSingletonClient],
+        total: int,
+        deadline: float,
     ) -> None:
         timing = self._timings[id(client)]
         name = timing.name
         debug = logger.isEnabledFor(logging.DEBUG)
+        timeout = self.settings.disconnect_timeout
+        # Whether the deadline of the whole disconnect, not the client's own timeout, is the bound that expires
+        cut_off = False
         try:
             async with limiter:
+                remaining = deadline - asyncio.get_running_loop().time()
+                cut_off = remaining < timeout
                 if debug:
                     logger.debug(
                         "Disconnecting client %s (%d/%d disconnected)",
@@ -303,7 +320,7 @@ class Dependencies:
                     )
                 try:
                     with _measure(timing, "disconnect"):
-                        await _within(self.settings.disconnect_timeout, client.disconnect())
+                        await _within(remaining if cut_off else timeout, client.disconnect())
                 finally:
                     disconnected.append(client)
             if debug:
@@ -322,12 +339,20 @@ class Dependencies:
                 raise
             logger.exception("%s.disconnect() raised CancelledError", name, extra=_fields(timing, timing.disconnect))
         except TimeoutError:
-            logger.exception(
-                "%s did not disconnect within %gs (DISCONNECT_TIMEOUT_SECONDS)",
-                name,
-                self.settings.disconnect_timeout,
-                extra=_fields(timing, timing.disconnect),
-            )
+            if cut_off:
+                logger.exception(
+                    "%s did not disconnect before DISCONNECT_DEADLINE_SECONDS ran out (%gs)",
+                    name,
+                    self.settings.disconnect_deadline,
+                    extra=_fields(timing, timing.disconnect),
+                )
+            else:
+                logger.exception(
+                    "%s did not disconnect within %gs (DISCONNECT_TIMEOUT_SECONDS)",
+                    name,
+                    timeout,
+                    extra=_fields(timing, timing.disconnect),
+                )
         except Exception as exc:
             # The client failed, but the rest still have to be stopped
             logger.exception(
