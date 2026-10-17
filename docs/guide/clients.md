@@ -80,7 +80,10 @@ class Redis(Client):
 
 Each `connect()` is bounded by `CONNECT_TIMEOUT_SECONDS` (default `30`) and each
 `disconnect()` by `DISCONNECT_TIMEOUT_SECONDS` (default `10`). A failing or hanging
-`disconnect()` is logged, and the other clients still shut down.
+`disconnect()` is logged, and the other clients still shut down. The whole disconnect, whatever
+the depth of the tree, is bounded by `DISCONNECT_DEADLINE_SECONDS` (default `20`): a client
+still disconnecting when it runs out is cut off, and the clients that have not started
+disconnecting by then are skipped, with one log record that names them.
 
 ## Dataclass clients
 
@@ -295,7 +298,8 @@ list as [`Run.clients`](workers-and-jobs.md#startup-metrics-and-structured-logs)
 
 When a client fails to connect, the clients still connecting end up `"cancelled"`, the
 clients still waiting for their dependencies keep `None`, and the clients that had connected
-are rolled back, so they get a `disconnect_outcome`. The library only measures: exporting the
+are rolled back, so they get a `disconnect_outcome`. A client skipped after
+`DISCONNECT_DEADLINE_SECONDS` keeps `None` for `disconnect`. The library only measures: exporting the
 timings as metrics or spans is up to your code.
 
 ## The graph

@@ -179,9 +179,9 @@ The rules:
   before `setup()`, and disconnect after `broker.shutdown()` has run the `WORKER_SHUTDOWN` handlers, the
   middlewares and the result backend; on an `InMemoryBroker`, after the tasks still running have finished.
   `Shutdown` and `BackgroundTasks` behave as in [FastAPI](fastapi.md). `taskiq worker` gives
-  `broker.shutdown()` `--shutdown-timeout` seconds, 5 by default, and each `disconnect()` may take
-  `DISCONNECT_TIMEOUT_SECONDS`, 10 by default: set `--shutdown-timeout` above the longest chain of
-  disconnects, or a slow one is cut off midway.
+  `broker.shutdown()` `--shutdown-timeout` seconds, 5 by default, and the whole disconnect may take
+  `DISCONNECT_DEADLINE_SECONDS`, 20 by default: set `--shutdown-timeout` above it, or a slow
+  disconnect is cut off midway.
 - **A failed start.** A failed `connect()` fails `broker.startup()` with a `RuntimeError`, and the worker
   process dies. taskiq's process manager restarts it for ever by default (`--max-fails -1`), so the
   orchestrator never sees a crash and the dead dependency is tried again every second. Run the worker with

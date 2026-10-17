@@ -148,27 +148,27 @@
 - [x] run `make cov` and check the new code paths in `core.py` and `options.py` are covered
 
 ### Task 5: [Final] Update documentation, changelog and version
-- [ ] `docs/guide/configuration.md`: add the `DISCONNECT_DEADLINE_SECONDS` row (`20`, the budget of a whole
+- [x] `docs/guide/configuration.md`: add the `DISCONNECT_DEADLINE_SECONDS` row (`20`, the budget of a whole
       `disconnect()`, seconds: the clients still disconnecting when it runs out are cut off, the ones not started are
       skipped) and `disconnect_deadline=` to the explicit settings example
-- [ ] `docs/guide/clients.md` (~L81): each `disconnect()` by `DISCONNECT_TIMEOUT_SECONDS` and the whole disconnect by
+- [x] `docs/guide/clients.md` (~L81): each `disconnect()` by `DISCONNECT_TIMEOUT_SECONDS` and the whole disconnect by
       `DISCONNECT_DEADLINE_SECONDS`; in the timings section, a client skipped after the deadline keeps `None`
-- [ ] replace `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies` with
+- [x] replace `SHUTDOWN_GRACE_SECONDS + DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies` with
       `SHUTDOWN_GRACE_SECONDS + DISCONNECT_DEADLINE_SECONDS` in `docs/guide/workers-and-jobs.md` (grace period and
       the Kubernetes manifest comment), `docs/guide/servers-in-workers.md`; reword `docs/guide/taskiq.md`
       (`--shutdown-timeout` above `DISCONNECT_DEADLINE_SECONDS`); say that 10 + 20 equals the Kubernetes default of 30,
       so leave the pod a margin above it or lower one of the two
-- [ ] `examples/service_layout/k8s.yaml` and `examples/service_layout/README.md`: recompute the budgets with the
+- [x] `examples/service_layout/k8s.yaml` and `examples/service_layout/README.md`: recompute the budgets with the
       deadline (set `DISCONNECT_DEADLINE_SECONDS` in the ConfigMap so `10 + deadline` and `5 + deadline` stay below 30)
-- [ ] add `docs/adr/0012-disconnect-bounded-by-one-deadline.md`: why a second setting instead of redefining
+- [x] add `docs/adr/0012-disconnect-bounded-by-one-deadline.md`: why a second setting instead of redefining
       `DISCONNECT_TIMEOUT_SECONDS` (one hung client must not consume the budget of the clients after it; no breaking
       change), why the shared deadline is checked per client instead of one `asyncio.timeout` around the DAG
       (a `CancelledError` from the TaskGroup would be indistinguishable from an outside cancellation and record
       `cancelled`), why skipped clients keep `None` instead of a new `Outcome` value
-- [ ] `CHANGELOG.md`: a `## [1.19.0] - <date>` section, **Added** for `DISCONNECT_DEADLINE_SECONDS` /
+- [x] `CHANGELOG.md`: a `## [1.19.0] - <date>` section, **Added** for `DISCONNECT_DEADLINE_SECONDS` /
       `disconnect_deadline`, **Changed** for the default bound of 20 s (a tree whose chain of hung disconnects took
       longer is now cut off), with the compare link at the bottom; `uv version --bump minor`; `make check-version`
-- [ ] run `uv run python scripts/llms.py` to regenerate `llms.txt` / `llms-full.txt`, then `make test`
+- [x] run `uv run python scripts/llms.py` to regenerate `llms.txt` / `llms-full.txt`, then `make test`
       (`tests/test_docs.py`, `tests/test_llms.py`)
 
 *Note: ralphex automatically moves completed plans to `docs/plans/completed/`*

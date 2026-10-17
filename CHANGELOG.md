@@ -6,6 +6,24 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-10-18
+
+### Added
+
+- `DISCONNECT_DEADLINE_SECONDS` / `DependenciesSettings.disconnect_deadline` (#31): one budget for the whole
+  `disconnect()` and for the rollback of a failed `connect()`, whatever the depth of the tree, so a process stops
+  in `SHUTDOWN_GRACE_SECONDS + DISCONNECT_DEADLINE_SECONDS`. A client still disconnecting when it runs out is
+  `"timed_out"`, logged with `did not disconnect before DISCONNECT_DEADLINE_SECONDS ran out`; the clients that have
+  not started by then are skipped, keep `None` in their `ClientTiming` and are named in one ERROR record.
+  `DISCONNECT_TIMEOUT_SECONDS` still bounds each client's `disconnect()`; `inf` disables the deadline.
+  [ADR-0012](docs/adr/0012-disconnect-bounded-by-one-deadline.md).
+
+### Changed
+
+- The whole disconnect is bounded by 20 seconds by default: a tree whose chain of hung disconnects took longer,
+  up to `DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies`, is now cut off. Set
+  `DISCONNECT_DEADLINE_SECONDS=inf` to keep the previous behaviour.
+
 ## [1.18.5] - 2026-10-18
 
 ### Changed
@@ -862,7 +880,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.18.5...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.19.0...HEAD
+[1.19.0]: https://github.com/troyan-dy/nuke-di/compare/v1.18.5...v1.19.0
 [1.18.5]: https://github.com/troyan-dy/nuke-di/compare/v1.18.4...v1.18.5
 [1.18.4]: https://github.com/troyan-dy/nuke-di/compare/v1.18.3...v1.18.4
 [1.18.3]: https://github.com/troyan-dy/nuke-di/compare/v1.18.2...v1.18.3
