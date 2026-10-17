@@ -272,6 +272,8 @@ class Dependencies:
         disconnected: list[NotSingletonClient] = []
         # One budget for the whole disconnect, whatever the depth of the tree
         deadline = asyncio.get_running_loop().time() + self.settings.disconnect_deadline
+        # Clients whose turn came after the deadline, in disconnect order
+        skipped: list[NotSingletonClient] = []
 
         try:
             # Only a cancellation of disconnect() itself ends it early: _disconnect_client logs and swallows what a
@@ -285,8 +287,17 @@ class Dependencies:
                     disconnected=disconnected,
                     total=len(clients),
                     deadline=deadline,
+                    skipped=skipped,
                 ),
             )
+            if skipped:
+                logger.error(
+                    "Skipped disconnecting %s after DISCONNECT_DEADLINE_SECONDS (%gs): %s",
+                    _count(len(skipped), "client"),
+                    self.settings.disconnect_deadline,
+                    ", ".join(self._timings[id(client)].name for client in skipped),
+                    extra=fields(),
+                )
         finally:
             # Cancelled or not, the container keeps no half-disconnected client for the next connect() to reuse
             self.flush()
@@ -299,6 +310,7 @@ class Dependencies:
         disconnected: list[NotSingletonClient],
         total: int,
         deadline: float,
+        skipped: list[NotSingletonClient],
     ) -> None:
         timing = self._timings[id(client)]
         name = timing.name
@@ -309,6 +321,10 @@ class Dependencies:
         try:
             async with limiter:
                 remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    # Never started: its timing keeps None, and returning releases its dependencies to be skipped too
+                    skipped.append(client)
+                    return
                 cut_off = remaining < timeout
                 if debug:
                     logger.debug(

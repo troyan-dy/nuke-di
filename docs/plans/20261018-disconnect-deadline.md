@@ -117,7 +117,7 @@
 - [x] run `make test` - must pass before task 3
 
 ### Task 3: Skip the clients that did not start before the deadline
-- [ ] write failing tests:
+- [x] write failing tests:
   - ➕ in `test_deadline_bounds_a_chain_of_hung_disconnects`, assert `HangingBottom`'s `disconnect_outcome is None`
   - in the three-client chain of Task 2, the log has one record listing the skipped client(s):
     `"Skipped disconnecting 1 client after DISCONNECT_DEADLINE_SECONDS (0.3s): Bottom"` (pluralised with `_count`)
@@ -129,14 +129,14 @@
     fails to connect, `disconnect_deadline=0.05`: `connect()` raises `ConnectError` within a short bound and the
     hanging client is `timed_out`
   - a cancellation of `disconnect()` from outside still propagates (existing tests keep passing)
-- [ ] in `_disconnect_client()`, after taking the slot, if `remaining <= 0` record the client as skipped (append to a
+- [x] in `_disconnect_client()`, after taking the slot, if `remaining <= 0` record the client as skipped (append to a
       `skipped` list passed in like `disconnected`) and return normally without entering `_measure`, so its timing
       keeps `None` and its own dependencies are released and skipped in turn
-- [ ] after `_in_dependency_order()` returns in `_disconnect_clients()`, if `skipped` is not empty log one ERROR record
+- [x] after `_in_dependency_order()` returns in `_disconnect_clients()`, if `skipped` is not empty log one ERROR record
       with the count and the names in disconnect order (`extra=fields()`); the `DEBUG` progress records stay as they are
-- [ ] update the `ClientTiming` docstring in `src/nuke_di/timings.py`: a client skipped after the disconnect deadline
+- [x] update the `ClientTiming` docstring in `src/nuke_di/timings.py`: a client skipped after the disconnect deadline
       keeps `None` for `disconnect`
-- [ ] run `make test` - must pass before task 4
+- [x] run `make test` - must pass before task 4
 
 ### Task 4: Verify acceptance criteria
 - [ ] verify all requirements from Overview are implemented: default `20`, env var, validation, shared deadline for
