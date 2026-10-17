@@ -7,6 +7,9 @@ DEFAULT_CONNECT_TIMEOUT = 30.0
 DISCONNECT_TIMEOUT_ENV = "DISCONNECT_TIMEOUT_SECONDS"
 DEFAULT_DISCONNECT_TIMEOUT = 10.0
 
+DISCONNECT_DEADLINE_ENV = "DISCONNECT_DEADLINE_SECONDS"
+DEFAULT_DISCONNECT_DEADLINE = 20.0
+
 CONNECT_CONCURRENCY_ENV = "CONNECT_CONCURRENCY"
 DEFAULT_CONNECT_CONCURRENCY = 0
 
@@ -17,6 +20,10 @@ def _connect_timeout_from_env() -> float:
 
 def _disconnect_timeout_from_env() -> float:
     return float(os.environ.get(DISCONNECT_TIMEOUT_ENV, DEFAULT_DISCONNECT_TIMEOUT))
+
+
+def _disconnect_deadline_from_env() -> float:
+    return float(os.environ.get(DISCONNECT_DEADLINE_ENV, DEFAULT_DISCONNECT_DEADLINE))
 
 
 def _connect_concurrency_from_env() -> int:
@@ -38,11 +45,15 @@ class Option:
 class DependenciesSettings:
     connect_timeout: float = field(default_factory=_connect_timeout_from_env)
     disconnect_timeout: float = field(default_factory=_disconnect_timeout_from_env)
+    # The budget of a whole disconnect(), seconds
+    disconnect_deadline: float = field(default_factory=_disconnect_deadline_from_env)
     # How many clients may connect or disconnect at once; 0 means no limit
     connect_concurrency: int = field(default_factory=_connect_concurrency_from_env)
 
     def __post_init__(self) -> None:
         if self.disconnect_timeout < 0:
             raise ValueError(f"disconnect_timeout must be >= 0, got {self.disconnect_timeout}")
+        if self.disconnect_deadline < 0:
+            raise ValueError(f"disconnect_deadline must be >= 0, got {self.disconnect_deadline}")
         if self.connect_concurrency < 0:
             raise ValueError(f"connect_concurrency must be >= 0, got {self.connect_concurrency}")

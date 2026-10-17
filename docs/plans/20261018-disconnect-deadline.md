@@ -79,16 +79,16 @@
 ## Implementation Steps
 
 ### Task 1: Add the `disconnect_deadline` setting
-- [ ] write failing tests in `tests/test_errors.py`: `DISCONNECT_DEADLINE_SECONDS=2.5` in the environment gives
+- [x] write failing tests in `tests/test_errors.py`: `DISCONNECT_DEADLINE_SECONDS=2.5` in the environment gives
       `DependenciesSettings().disconnect_deadline == 2.5`; unset gives `20`; `DependenciesSettings(disconnect_deadline=-1)`
       raises `ValueError` matching `disconnect_deadline`; `0` is accepted
-- [ ] in `src/nuke_di/options.py` add `DISCONNECT_DEADLINE_ENV = "DISCONNECT_DEADLINE_SECONDS"`,
+- [x] in `src/nuke_di/options.py` add `DISCONNECT_DEADLINE_ENV = "DISCONNECT_DEADLINE_SECONDS"`,
       `DEFAULT_DISCONNECT_DEADLINE = 20.0`, `_disconnect_deadline_from_env()` and the field
       `disconnect_deadline: float` right after `disconnect_timeout`, with a one-line comment (the budget of a whole
       `disconnect()`, seconds)
-- [ ] validate `disconnect_deadline >= 0` in `__post_init__`, same wording as `disconnect_timeout`
-- [ ] add `"DISCONNECT_DEADLINE_SECONDS"` to `CONFIGURATION` in `tests/test_examples.py`
-- [ ] run `make test` - must pass before task 2
+- [x] validate `disconnect_deadline >= 0` in `__post_init__`, same wording as `disconnect_timeout`
+- [x] add `"DISCONNECT_DEADLINE_SECONDS"` to `CONFIGURATION` in `tests/test_examples.py`
+- [x] run `make test` - must pass before task 2
 
 ### Task 2: Bound every client's disconnect() by the shared deadline
 - [ ] write failing tests (in `tests/test_connect_order.py`, next to the `HangsOnDisconnect` tests, reusing
