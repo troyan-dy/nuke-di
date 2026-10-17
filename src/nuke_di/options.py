@@ -51,9 +51,10 @@ class DependenciesSettings:
     connect_concurrency: int = field(default_factory=_connect_concurrency_from_env)
 
     def __post_init__(self) -> None:
-        if self.disconnect_timeout < 0:
+        # Written so that NaN fails too: every comparison with it is False
+        if not self.disconnect_timeout >= 0:
             raise ValueError(f"disconnect_timeout must be >= 0, got {self.disconnect_timeout}")
-        if self.disconnect_deadline < 0:
+        if not self.disconnect_deadline >= 0:
             raise ValueError(f"disconnect_deadline must be >= 0, got {self.disconnect_deadline}")
         if self.connect_concurrency < 0:
             raise ValueError(f"connect_concurrency must be >= 0, got {self.connect_concurrency}")

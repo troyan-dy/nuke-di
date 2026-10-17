@@ -618,6 +618,39 @@ async def test_cancellation_before_the_deadline_still_propagates(caplog: pytest.
     assert dep.connected is False
 
 
+class OutlivesItsTimeout(Tracked):
+    async def disconnect(self) -> None:
+        await probe.run("disconnect:OutlivesItsTimeout")
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            # Swallows the cancellation of its timeout and goes on, until disconnect() itself is cancelled
+            await asyncio.sleep(10)
+
+
+async def test_cancellation_after_the_deadline_still_reports_the_skipped_clients(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    dep = Dependencies(settings=DependenciesSettings(disconnect_timeout=10, disconnect_deadline=0.05))
+    dep.resolve(OutlivesItsTimeout)
+    dep.resolve(HangingMiddle)
+    await dep.connect()
+
+    with caplog.at_level(logging.ERROR, logger="nuke_di.core"):
+        task = asyncio.create_task(dep.disconnect())
+        await asyncio.sleep(0.2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    timings = {timing.name: timing for timing in dep.timings}
+    assert timings["HangingMiddle"].disconnect_outcome == "timed_out"
+    assert timings["HangingBottom"].disconnect_outcome is None
+    assert timings["OutlivesItsTimeout"].disconnect_outcome == "cancelled"
+    assert "Skipped disconnecting 1 client after DISCONNECT_DEADLINE_SECONDS (0.05s): HangingBottom" in caplog.text
+    assert dep.connected is False
+
+
 class SlowToStop(Tracked):
     """
     Resolved second, disconnects slowest: Postgres waiting for its first consumer only would stop under it.

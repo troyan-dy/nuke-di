@@ -290,6 +290,8 @@ class Dependencies:
                     skipped=skipped,
                 ),
             )
+        finally:
+            # A cancellation after the deadline still reports the clients it skipped
             if skipped:
                 logger.error(
                     "Skipped disconnecting %s after DISCONNECT_DEADLINE_SECONDS (%gs): %s",
@@ -298,7 +300,6 @@ class Dependencies:
                     ", ".join(self._timings[id(client)].name for client in skipped),
                     extra=fields(),
                 )
-        finally:
             # Cancelled or not, the container keeps no half-disconnected client for the next connect() to reuse
             self.flush()
 

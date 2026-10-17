@@ -23,6 +23,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - The whole disconnect is bounded by 20 seconds by default: a tree whose chain of hung disconnects took longer,
   up to `DISCONNECT_TIMEOUT_SECONDS × the longest chain of dependencies`, is now cut off. Set
   `DISCONNECT_DEADLINE_SECONDS=inf` to keep the previous behaviour.
+- `DISCONNECT_TIMEOUT_SECONDS=nan` is rejected with a `ValueError`, as a negative value is, instead of lifting the
+  timeout without a word; so is `DISCONNECT_DEADLINE_SECONDS=nan`.
 
 ## [1.18.5] - 2026-10-18
 

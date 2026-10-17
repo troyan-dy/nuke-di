@@ -170,3 +170,14 @@ def test_infinite_disconnect_deadline_from_env(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("DISCONNECT_DEADLINE_SECONDS", "inf")
 
     assert DependenciesSettings().disconnect_deadline == float("inf")
+
+
+def test_nan_disconnect_timeout() -> None:
+    # NaN would pass a `< 0` check and lift the bound without a word
+    with pytest.raises(ValueError, match="disconnect_timeout"):
+        DependenciesSettings(disconnect_timeout=float("nan"))
+
+
+def test_nan_disconnect_deadline() -> None:
+    with pytest.raises(ValueError, match="disconnect_deadline"):
+        DependenciesSettings(disconnect_deadline=float("nan"))

@@ -294,12 +294,12 @@ list as [`Run.clients`](workers-and-jobs.md#startup-metrics-and-structured-logs)
 | `name`               | The class name of the client |
 | `connect`            | Seconds spent in `connect()`, not counting the wait for `CONNECT_CONCURRENCY`; `None` if `connect()` never ran |
 | `connect_outcome`    | `"ok"`, `"failed"`, `"timed_out"`, `"cancelled"`, or `None` if `connect()` never started |
-| `disconnect`, `disconnect_outcome` | The same for `disconnect()`; `None` until the client disconnects |
+| `disconnect`, `disconnect_outcome` | The same for `disconnect()`; `None` until the client disconnects, and for good if it was skipped after `DISCONNECT_DEADLINE_SECONDS` |
 
 When a client fails to connect, the clients still connecting end up `"cancelled"`, the
 clients still waiting for their dependencies keep `None`, and the clients that had connected
 are rolled back, so they get a `disconnect_outcome`. A client skipped after
-`DISCONNECT_DEADLINE_SECONDS` keeps `None` for `disconnect`. The library only measures: exporting the
+`DISCONNECT_DEADLINE_SECONDS` keeps `None` for `disconnect` and `disconnect_outcome`. The library only measures: exporting the
 timings as metrics or spans is up to your code.
 
 ## The graph

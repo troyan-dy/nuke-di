@@ -180,7 +180,8 @@ The rules:
   middlewares and the result backend; on an `InMemoryBroker`, after the tasks still running have finished.
   `Shutdown` and `BackgroundTasks` behave as in [FastAPI](fastapi.md). `taskiq worker` gives
   `broker.shutdown()` `--shutdown-timeout` seconds, 5 by default, and the whole disconnect may take
-  `DISCONNECT_DEADLINE_SECONDS`, 20 by default: set `--shutdown-timeout` above it, or a slow
+  `DISCONNECT_DEADLINE_SECONDS`, 20 by default: set `--shutdown-timeout` above the time of your
+  `WORKER_SHUTDOWN` handlers plus `DISCONNECT_DEADLINE_SECONDS`, or lower the deadline, or a slow
   disconnect is cut off midway.
 - **A failed start.** A failed `connect()` fails `broker.startup()` with a `RuntimeError`, and the worker
   process dies. taskiq's process manager restarts it for ever by default (`--max-fails -1`), so the
