@@ -164,3 +164,9 @@ def test_negative_disconnect_deadline() -> None:
 
 def test_zero_disconnect_deadline() -> None:
     assert DependenciesSettings(disconnect_deadline=0).disconnect_deadline == 0
+
+
+def test_infinite_disconnect_deadline_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISCONNECT_DEADLINE_SECONDS", "inf")
+
+    assert DependenciesSettings().disconnect_deadline == float("inf")

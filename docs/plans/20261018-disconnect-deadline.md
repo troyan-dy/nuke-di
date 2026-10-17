@@ -139,13 +139,13 @@
 - [x] run `make test` - must pass before task 4
 
 ### Task 4: Verify acceptance criteria
-- [ ] verify all requirements from Overview are implemented: default `20`, env var, validation, shared deadline for
+- [x] verify all requirements from Overview are implemented: default `20`, env var, validation, shared deadline for
       `disconnect()` and the rollback, `timed_out` for the running clients, `None` plus one log record for the skipped
-- [ ] verify edge cases: `0`, `inf` (`DISCONNECT_DEADLINE_SECONDS=inf` disables the bound), deadline larger than
+- [x] verify edge cases: `0`, `inf` (`DISCONNECT_DEADLINE_SECONDS=inf` disables the bound), deadline larger than
       `timeout × chain`, `CONNECT_CONCURRENCY` waiting, outside cancellation, reconnect after an expired deadline
-- [ ] run the full suite `make test` and `make examples`
-- [ ] run `make lint` (ruff, ruff format, mypy, pyright) - all issues must be fixed
-- [ ] run `make cov` and check the new code paths in `core.py` and `options.py` are covered
+- [x] run the full suite `make test` and `make examples`
+- [x] run `make lint` (ruff, ruff format, mypy, pyright) - all issues must be fixed
+- [x] run `make cov` and check the new code paths in `core.py` and `options.py` are covered
 
 ### Task 5: [Final] Update documentation, changelog and version
 - [ ] `docs/guide/configuration.md`: add the `DISCONNECT_DEADLINE_SECONDS` row (`20`, the budget of a whole
