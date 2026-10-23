@@ -8,6 +8,7 @@ signature is the command line: `--help`, validation and exit codes come from the
 |------------------|--------------------------------------------------------------------------------|
 | `clients.py`     | `Sqlite`, which wraps `sqlite3.connect` in `connect()` / `disconnect()`, and the `Orders` repository; the first run fills an empty table with 8 demo orders |
 | `export.py`      | The `export` job: `--since` (a date), `--limit` (int), `--format` (an Enum), `--output` (`Path \| None`), `--dry-run` (bool) |
+| `report.py`      | The `Format` Enum and `render()`, which writes the orders as CSV or JSON        |
 | `nightly.sh`     | What a scheduler runs: the job, then a `case` on its exit code                 |
 | `test_export.py` | The job called directly with a fake `Orders`, and through `di.inject` with the real clients |
 

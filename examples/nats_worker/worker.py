@@ -11,13 +11,13 @@ from nats_worker.clients import SUBJECT, Nats, Order, Orders
 QUEUE_GROUP = "nats_worker"
 
 
-async def handle(msg: Msg, orders: Orders) -> None:
+async def process_order(msg: Msg, orders: Orders) -> None:
     try:
         order = Order.model_validate_json(msg.data)
     except ValidationError:
         print(f"worker: skipped an invalid message {msg.data!r}")
         return
-    print(f"worker: order {order.id}: {order.quantity} x {order.item}")
+    print(f"worker: order {order.id}: {order.quantity} x {order.product}")
     await asyncio.sleep(0.5)  # the actual work
     await orders.save(order)
     print(f"worker: order {order.id} saved")
@@ -26,7 +26,7 @@ async def handle(msg: Msg, orders: Orders) -> None:
 @worker
 async def consume(nats: Nats, orders: Orders, shutdown: Shutdown) -> None:
     """Handle the orders published on nats_worker.orders until SIGTERM or SIGINT."""
-    handler = functools.partial(handle, orders=orders)
+    handler = functools.partial(process_order, orders=orders)
     subscription = await nats.connection.subscribe(SUBJECT, queue=QUEUE_GROUP, cb=handler)
     print(f"worker: listening on {SUBJECT}, queue group {QUEUE_GROUP}")
     await shutdown.wait()

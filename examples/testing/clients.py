@@ -17,7 +17,7 @@ class Database(Client):
         self._ids = itertools.count(1)
 
     async def connect(self) -> None:
-        for user in [User("alice@example.com", confirmed=True), User("bob@example.com"), User("carol@example.com")]:
+        for user in (User("alice@example.com", confirmed=True), User("bob@example.com"), User("carol@example.com")):
             self._users[next(self._ids)] = user
         print("database: connected")
 
@@ -30,7 +30,8 @@ class Database(Client):
         return user_id
 
     async def unconfirmed(self, limit: int) -> list[str]:
-        return [user.email for user in self._users.values() if not user.confirmed][:limit]
+        emails = [user.email for user in self._users.values() if not user.confirmed]
+        return emails[:limit]
 
 
 class Mailer(Client):

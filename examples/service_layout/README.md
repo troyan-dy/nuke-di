@@ -7,6 +7,7 @@ the broker, and a nightly job deletes the rows that were sent long ago.
 ```text
 service_layout/
 ├── clients.py          Settings, Database (sqlite3), Broker, and the repositories Outbox and Orders
+├── models.py           Order and OutboxRow, what the repositories hand out
 ├── api.py              FastAPI: POST /orders, GET /orders/{id}, GET /health
 ├── workers/outbox.py   @worker relay: pending outbox rows -> Broker, then marked sent
 ├── jobs/cleanup.py     @job cleanup --older-than-days N: deletes old sent rows
@@ -55,12 +56,12 @@ INFO:     Finished server process [65012]
 The requests:
 
 ```console
-$ curl -s localhost:8000/orders -H 'Content-Type: application/json' -d '{"item": "book", "quantity": 2}'
-{"id":1,"item":"book","quantity":2}
-$ curl -s localhost:8000/orders -H 'Content-Type: application/json' -d '{"item": "pen", "quantity": 10}'
-{"id":2,"item":"pen","quantity":10}
+$ curl -s localhost:8000/orders -H 'Content-Type: application/json' -d '{"product": "book", "quantity": 2}'
+{"id":1,"product":"book","quantity":2}
+$ curl -s localhost:8000/orders -H 'Content-Type: application/json' -d '{"product": "pen", "quantity": 10}'
+{"id":2,"product":"pen","quantity":10}
 $ curl -s localhost:8000/orders/1
-{"id":1,"item":"book","quantity":2}
+{"id":1,"product":"book","quantity":2}
 $ curl -s localhost:8000/orders/3
 {"detail":"order 3 not found"}
 ```

@@ -27,13 +27,14 @@ class PyPI(Client):
         self._http: httpx.AsyncClient | None = None
 
     async def connect(self) -> None:
+        url = self._settings.pypi_url
         self._http = httpx.AsyncClient(
-            base_url=self._settings.pypi_url,
+            base_url=url,
             timeout=httpx.Timeout(self._settings.timeout),  # no request waits forever
             headers={"User-Agent": "nuke-di-examples"},
             transport=self._transport,
         )
-        print(f"pypi: connected to {self._settings.pypi_url}")
+        print(f"pypi: connected to {url}")
 
     async def disconnect(self) -> None:
         if self._http is not None:

@@ -1,12 +1,15 @@
 import sys
+from types import MappingProxyType
 
 from nuke_di import Client
 
 # A server on stdio talks MCP over its stdout, so everything else goes to stderr
-BOOKS = {
-    "fantasy": ["A Wizard of Earthsea", "The Hobbit", "The Name of the Wind"],
-    "poetry": ["Leaves of Grass"],
-}
+BOOKS = MappingProxyType(
+    {
+        "fantasy": ("A Wizard of Earthsea", "The Hobbit", "The Name of the Wind"),
+        "poetry": ("Leaves of Grass",),
+    }
+)
 
 
 class Database(Client):

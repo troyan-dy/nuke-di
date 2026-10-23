@@ -12,8 +12,9 @@ logging.getLogger("asyncio").setLevel(logging.WARNING)  # keep only the records 
 async def main() -> None:
     deps = Dependencies()
     injected = deps.inject(place_order)
+    user_id = 42
     async with deps:  # the DEBUG log names every client as it starts, with how many have connected
-        print("placed order", await injected(42))
+        print("placed order", await injected(user_id))
 
 
 if __name__ == "__main__":

@@ -29,17 +29,17 @@ async def mailer() -> AsyncIterator[Any]:
 
 async def test_send_report(mailer: Any) -> None:
     task = await send_report.kiq(7)
-    result = await task.wait_result()
+    task_result = await task.wait_result()
 
-    assert result.return_value == "tester"
+    assert task_result.return_value == "tester"
     mailer.send.assert_awaited_once_with("tester", "your weekly report")
 
 
 async def test_unknown_user_fails_the_task(mailer: Any) -> None:
     task = await send_report.kiq(1)
-    result = await task.wait_result()
+    task_result = await task.wait_result()
 
-    assert isinstance(result.error, LookupError)
+    assert isinstance(task_result.error, LookupError)
     mailer.send.assert_not_awaited()
 
 
@@ -57,10 +57,10 @@ async def test_admin_is_notified_after_the_reports(mailer: Any) -> None:
 async def test_task_without_the_worker_is_not_connected() -> None:
     # No broker.startup(): an InMemoryBroker runs the task anyway, and the client is missing
     task = await send_report.kiq(7)
-    result = await task.wait_result()
+    task_result = await task.wait_result()
 
-    assert isinstance(result.error, RuntimeError)
-    assert "Reports is not connected" in str(result.error)
+    assert isinstance(task_result.error, RuntimeError)
+    assert "Reports is not connected" in str(task_result.error)
 
 
 async def test_task_called_directly() -> None:

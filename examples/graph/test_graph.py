@@ -1,6 +1,7 @@
 import pathlib
+from collections.abc import Mapping
 
-from nuke_di import Dependencies
+from nuke_di import Dependencies, Node
 
 from graph.api import place_order
 
@@ -8,7 +9,7 @@ from graph.api import place_order
 def test_dependencies(di: Dependencies) -> None:
     di.inject(place_order)
 
-    needs = {node.name: [dependency.name for dependency in node.dependencies.values()] for node in di.graph().nodes}
+    needs = {node.name: names_of(node.dependencies) for node in di.graph().nodes}
 
     assert needs == {
         "Postgres": [],
@@ -20,6 +21,10 @@ def test_dependencies(di: Dependencies) -> None:
         "Notifications": ["UserRepository", "Kafka"],
         "Checkout": ["OrderService", "Notifications"],
     }
+
+
+def names_of(dependencies: Mapping[str, Node]) -> list[str]:
+    return [dependency.name for dependency in dependencies.values()]
 
 
 def test_repositories_share_one_postgres(di: Dependencies) -> None:
@@ -34,4 +39,5 @@ def test_readme_diagram_is_current(di: Dependencies) -> None:
     di.inject(place_order)
     readme = (pathlib.Path(__file__).parent / "README.md").read_text()
 
-    assert f"```mermaid\n{di.graph().to_mermaid()}```" in readme
+    mermaid = di.graph().to_mermaid()
+    assert f"```mermaid\n{mermaid}```" in readme

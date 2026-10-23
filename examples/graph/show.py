@@ -10,7 +10,8 @@ def main() -> None:
 
     # In resolution order: a client comes after its dependencies
     for node in graph.nodes:
-        needs = ", ".join(dependency.name for dependency in node.dependencies.values()) or "-"
+        names = [dependency.name for dependency in node.dependencies.values()]
+        needs = ", ".join(names) or "-"
         print(f"{node.name:<16} needs {needs}")
     print()
     print(graph.to_mermaid(), end="")

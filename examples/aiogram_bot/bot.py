@@ -15,8 +15,10 @@ router = Router(name="users")
 
 @router.message(CommandStart())
 async def start(message: Message, users: UserService) -> None:
-    assert message.from_user is not None
-    await message.answer(await users.greet(message.from_user.id, message.from_user.first_name))
+    sender = message.from_user
+    assert sender is not None
+    greeting = await users.greet(sender.id, sender.first_name)
+    await message.answer(greeting)
 
 
 @router.message(Command("stats"))
@@ -32,7 +34,8 @@ setup(dp)  # clients connect before the startup handlers, disconnect after the s
 @dp.startup()
 async def announce(bot: Bot, users: UserService) -> None:
     # A startup handler takes clients too, connected already
-    print(f"startup: bot {bot.id}, {await users.stats()}")
+    stats = await users.stats()
+    print(f"startup: bot {bot.id}, {stats}")
 
 
 async def main() -> None:

@@ -10,7 +10,7 @@ SUBJECT = "nats_worker.orders"
 
 class Order(BaseModel):
     id: int
-    item: str
+    product: str
     quantity: int
 
 

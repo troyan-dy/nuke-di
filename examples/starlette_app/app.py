@@ -1,5 +1,6 @@
 from nuke_di import DI
 from nuke_di.asgi import lifespan
+from starlette import status
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
@@ -15,14 +16,15 @@ async def greet_user(request: Request) -> Response:
     user_id: int = request.path_params["user_id"]
     greeting = await clients.get(UserService).greet(user_id)
     if greeting is None:
-        return PlainTextResponse(f"user {user_id} not found", status_code=404)
+        return PlainTextResponse(f"user {user_id} not found", status_code=status.HTTP_404_NOT_FOUND)
     return PlainTextResponse(greeting)
 
 
 async def me(request: Request) -> Response:
-    name = await clients.get(Database).fetch_user(int(request.headers.get("X-User-Id", "0")))
+    user_id = int(request.headers.get("X-User-Id", "0"))
+    name = await clients.get(Database).fetch_user(user_id)
     if name is None:
-        return PlainTextResponse("unknown X-User-Id", status_code=401)
+        return PlainTextResponse("unknown X-User-Id", status_code=status.HTTP_401_UNAUTHORIZED)
     return PlainTextResponse(f"You are {name}")
 
 

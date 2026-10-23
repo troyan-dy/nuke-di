@@ -14,8 +14,8 @@ async def main() -> None:
         print(f"{type(exc).__name__}: {exc}")
         print(f"__cause__: {exc.__cause__!r}")
     print("connected:", deps.connected)
-    for t in deps.timings:
-        print(f"{t.name:<8} connect {t.connect_outcome}  disconnect {t.disconnect_outcome}")
+    for timing in deps.timings:
+        print(f"{timing.name:<8} connect {timing.connect_outcome}  disconnect {timing.disconnect_outcome}")
 
 
 if __name__ == "__main__":

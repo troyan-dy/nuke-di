@@ -12,7 +12,8 @@ async def enqueue(
     kind: Annotated[str, Option(help="The kind of the tasks")] = "email",
 ) -> None:
     """Add tasks to the queue."""
-    for n in range(1, count + 1):
-        task_id = await queue.put(kind, f"{kind}-{n}")
-        print(f"enqueue: added task {task_id} ({kind}-{n})")
-    print(f"enqueue: {await queue.pending()} tasks pending")
+    for number in range(1, count + 1):
+        task_id = await queue.put(kind, f"{kind}-{number}")
+        print(f"enqueue: added task {task_id} ({kind}-{number})")
+    pending = await queue.pending()
+    print(f"enqueue: {pending} tasks pending")
