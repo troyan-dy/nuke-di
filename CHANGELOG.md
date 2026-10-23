@@ -23,17 +23,21 @@ the mypy and pytest plugins behave as in 1.19.0; the names below changed to sati
 - `nuke_di.run.run_entrypoint(func, *, kind, name, hooks, container, settings, params, error)` is
   `run_entrypoint(request, *, parameter_values, error)`, where `request` is a new `nuke_di.run.RunRequest(func,
   kind, name, hooks, container, settings)`. `nuke_di.run.SIGNALS` is gone.
-- `nuke_di.entrypoint.EntrypointDecorator` is a class instead of a `Protocol`.
-- `nuke_di.utils` is `nuke_di.naming`; `isa`, `isclient` and `isnotsingleton` live in `nuke_di.types`. The names
-  `nuke_di.core` imported for its own use (the errors, `Node`, `Client`, `isclient`, `logger`, ...) are no longer
-  importable from it: import them from `nuke_di`.
-- The TypeVars are named by role: `ReturnT`, `ClientT` (was `CT`), `ClassT` (was `C`), `FuncT` (was `F`).
+- `nuke_di.utils` is `nuke_di.naming`; `isa`, `isclient` and `isnotsingleton` live in `nuke_di.types`.
+- A name a module imported for its own use, outside its `__all__`, is no longer importable from it: e.g.
+  `nuke_di.core.Node`, `nuke_di.run.Shutdown`, `nuke_di.integration.Dependencies`, `nuke_di.fastapi.bind`. Import
+  them from `nuke_di` or `nuke_di.integration`, which export them.
+- The constants of the mypy plugin (`NUKE_DI`, `INDIRECT_DEPS_HOOK`, `CLIENT`, `CONTAINER`, `DATACLASS`,
+  `DECORATOR`, `ENTRYPOINTS`, `METADATA`) live in `nuke_di.mypy.names`; `nuke_di.mypy` exports `NukeDIPlugin`,
+  `plugin` and `__version__`, a digest of the plugin's modules, so mypy's cache is cleared when any of them changes.
+- The TypeVars are named by role: `ReturnT` (was `R`), `ClientT` (was `CT`), `ClassT` (was `C`), `FuncT` (was `F`).
 - The container's machinery moved from `nuke_di.core` into the private package `nuke_di._container`;
   `nuke_di.aiogram`, `fastapi`, `fastmcp`, `litestar`, `mypy`, `integration` and `integration.testing` are
   packages with the same import paths, so the `__module__` of their classes is a submodule now. The logger names
   are unchanged (`nuke_di.core`, `nuke_di.run`, ...); the `module` and `funcName` of the container's records,
-  apart from the startup summary, name the `_container` module that logs them. `plugins = nuke_di.mypy` keeps
-  working.
+  apart from the startup summary, name the `_container` module that logs them, and the records of a Run about
+  signals and the shutdown grace come from `nuke_di._runner` (`module` `_runner`, the grace warning's `funcName`
+  `wait_grace`). `plugins = nuke_di.mypy` keeps working.
 - `Dependencies._abandon()` is gone: the pytest plugin marks the container disconnected and flushes it itself.
 
 ### Added
