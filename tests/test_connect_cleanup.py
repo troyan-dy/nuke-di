@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from nuke_di import Client, ConnectError, Dependencies
+from tests.sequences import single
 
 
 class Recorder:
@@ -24,11 +25,11 @@ class Recorded(Client):
 
 
 class Postgres(Recorded):
-    pass
+    """A recorded client without dependencies."""
 
 
 class Redis(Recorded):
-    pass
+    """A second recorded client without dependencies."""
 
 
 class Broken(Recorded):
@@ -129,8 +130,8 @@ async def test_failure_resets_container() -> None:
         await dep.connect()
 
     assert dep.connected is False
-    assert dep.connect_clients == []
-    assert dep.clients == {}
+    assert not dep.connect_clients
+    assert not dep.clients
 
 
 async def test_cancellation_disconnects_connected_clients() -> None:
@@ -147,7 +148,7 @@ async def test_cancellation_disconnects_connected_clients() -> None:
 
     assert sorted(recorder.disconnected) == ["Postgres", "Redis"]
     assert dep.connected is False
-    assert dep.connect_clients == []
+    assert not dep.connect_clients
 
 
 async def test_cancelled_disconnect_waits_for_the_clients_disconnecting_and_flushes() -> None:
@@ -167,8 +168,7 @@ async def test_cancelled_disconnect_waits_for_the_clients_disconnecting_and_flus
     # was not reached
     assert recorder.disconnected == ["Sibling", "Interrupted: cancelled"]
     assert dep.connected is False
-    assert dep.connect_clients == []
-    assert dep.clients == {}
+    assert (dep.connect_clients, dep.clients) == ([], {})
 
     # The next connect() starts from a fresh graph, not from the half-disconnected clients
     dep.resolve(Redis)
@@ -192,8 +192,8 @@ async def test_cancelled_rollback_flushes() -> None:
 
     assert recorder.disconnected == ["Interrupted: cancelled"]
     assert dep.connected is False
-    assert dep.connect_clients == []
-    assert dep.clients == {}
+    assert not dep.connect_clients
+    assert not dep.clients
 
 
 async def test_client_cancelling_itself_does_not_stop_disconnect() -> None:
@@ -207,7 +207,7 @@ async def test_client_cancelling_itself_does_not_stop_disconnect() -> None:
 
     assert recorder.disconnected == ["Sibling", "Postgres"]
     assert dep.connected is False
-    assert dep.connect_clients == []
-    assert dep.clients == {}
-    [timing] = [timing for timing in dep.timings if timing.name == "SelfCancelling"]
+    assert not dep.connect_clients
+    assert not dep.clients
+    timing = single(other for other in dep.timings if other.name == "SelfCancelling")
     assert timing.disconnect_outcome == "cancelled"

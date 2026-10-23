@@ -3,14 +3,15 @@ from unittest.mock import AsyncMock
 import pytest
 
 from nuke_di import Client, Dependencies, Graph, Node, NotSingletonClient
+from nuke_di import __all__ as public_names
 
 
 class Postgres(Client):
-    pass
+    """A client without dependencies."""
 
 
 class Redis(Client):
-    pass
+    """A second client without dependencies."""
 
 
 class Payments(Client):
@@ -26,7 +27,7 @@ class Checkout(Client):
 
 
 class Session(NotSingletonClient):
-    pass
+    """A client every consumer gets its own instance of."""
 
 
 class Orders(Client):
@@ -51,7 +52,8 @@ def test_graph_lists_the_resolved_clients_in_resolution_order() -> None:
     deps = Dependencies()
     deps.resolve(Checkout)
 
-    assert [node.name for node in deps.graph().nodes] == ["Postgres", "Redis", "Payments", "Checkout"]
+    names = [node.name for node in deps.graph().nodes]
+    assert names == ["Postgres", "Redis", "Payments", "Checkout"]
 
 
 def test_node_knows_its_class_and_singleton() -> None:
@@ -179,14 +181,13 @@ def test_mermaid_of_an_empty_graph_is_the_header_alone() -> None:
 
 @pytest.mark.parametrize("name", ["Graph", "Node"])
 def test_graph_types_are_exported(name: str) -> None:
-    import nuke_di
-
-    assert name in nuke_di.__all__
+    assert name in public_names
 
 
 class Both(Client):
     def __init__(self, pg: Postgres, redis: Redis) -> None:
-        self.pg, self.redis = pg, redis
+        self.pg = pg
+        self.redis = redis
 
 
 def test_one_object_replacing_two_classes_gives_two_nodes() -> None:
@@ -256,12 +257,13 @@ def test_a_client_appended_to_connect_clients_by_hand_has_no_dependencies() -> N
 
 
 def test_mermaid_ids_stay_unique_next_to_a_class_named_like_a_numbered_instance() -> None:
-    class Session_2(Client):  # noqa: N801 - the point is the clash with the numbering
-        pass
+    class Session_2(Client):  # noqa: N801, WPS114 - the point is the clash with the numbering
+        """A class named like the second instance of Session."""
 
     class Audit(Client):
         def __init__(self, session: Session, other: Session_2) -> None:
-            self.session, self.other = session, other
+            self.session = session
+            self.other = other
 
     deps = Dependencies()
     deps.resolve(Orders)
