@@ -135,7 +135,8 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "N", "B", "A", "UP", "ASYNC", "S", "RUF"]
 ignore = ["S101"]
-# wemake-python-styleguide runs under flake8 (setup.cfg): RUF100 keeps its `# noqa: WPS...` comments
+# wemake-python-styleguide runs under flake8 (setup.cfg): without this, RUF102 flags its `# noqa: WPS...` codes as
+# invalid and `ruff --fix` removes them
 external = ["WPS"]
 
 [tool.ruff.lint.flake8-bugbear]
