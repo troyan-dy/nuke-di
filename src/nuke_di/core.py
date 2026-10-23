@@ -119,13 +119,6 @@ class Dependencies:
             for client_class, replacement in self._overrides:
                 self._register_replacement(client_class, replacement)
 
-    def _abandon(self) -> None:
-        """
-        Forget every client without disconnecting it, for a caller that has no event loop left to do it.
-        """
-        self.connected = False
-        self.flush()
-
     async def connect(self) -> None:
         with self._lock:
             if self.connected is True:

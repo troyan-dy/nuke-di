@@ -38,6 +38,7 @@ def _release(deps: Dependencies, reason: str) -> None:
 
     # Disconnecting needs the event loop of the test, which may be closed by now,
     # so the clients are forgotten instead and the next test starts clean
-    deps._abandon()
+    deps.connected = False
+    deps.flush()
     # The traceback would only show this plugin, the message says everything
     pytest.fail(f"{reason}; its clients were not disconnected, use `async with` or call disconnect()", pytrace=False)
