@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from nuke_di import DI, Client, InvalidSignatureError, Run, UsageError, job, worker
-from nuke_di.entrypoint import entrypoint_name, entrypoint_prog
+from nuke_di._program import entrypoint_name, entrypoint_prog
 
 DECORATORS = (job, worker)
 

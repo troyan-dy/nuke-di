@@ -1,10 +1,10 @@
 import asyncio
 import inspect
 import sys
-from collections.abc import Callable, Sequence
-from pathlib import Path
-from typing import Any, TypeVar, overload
+from collections.abc import Sequence
+from typing import Any, Protocol, TypeVar, cast, overload
 
+from nuke_di._program import MAIN, entrypoint_name, entrypoint_prog
 from nuke_di._runner import _AsyncFunction
 from nuke_di.core import DI
 from nuke_di.errors import UsageError
@@ -12,11 +12,8 @@ from nuke_di.run import Kind, RunHook, RunRequest, RunSettings, run_entrypoint
 
 FuncT = TypeVar("FuncT", bound=_AsyncFunction)
 
-# The name of the module Python runs as the program
-_MAIN = "__main__"
 
-
-class EntrypointDecorator:
+class EntrypointDecorator(Protocol):
     """
     What `job(hooks=...)` and `worker(hooks=...)` return: a decorator that keeps the type of the function.
 
@@ -24,16 +21,7 @@ class EntrypointDecorator:
     checks.
     """
 
-    def __init__(self, kind: Kind, hooks: Sequence[RunHook]) -> None:
-        self.kind: Kind = kind
-        self.hooks = hooks
-
-    def __call__(self, func: FuncT, /) -> FuncT:
-        if not inspect.iscoroutinefunction(func):
-            raise TypeError(f'{self.kind} "{func.__qualname__}" must be declared with "async def"')
-        if func.__module__ == _MAIN:
-            sys.exit(execute(func, kind=self.kind, hooks=self.hooks))
-        return func
+    def __call__(self, func: FuncT, /) -> FuncT: ...
 
 
 @overload
@@ -51,8 +39,7 @@ def job(func: FuncT | None = None, /, *, hooks: Sequence[RunHook] = ()) -> FuncT
     When the module is run as `__main__`, the job runs right here and the process exits;
     code below the decorated function never runs. On a normal import `func` is returned unchanged.
     """
-    decorator = EntrypointDecorator("job", hooks)
-    return decorator if func is None else decorator(func)
+    return _entrypoint("job", func, hooks)
 
 
 @overload
@@ -70,8 +57,20 @@ def worker(func: FuncT | None = None, /, *, hooks: Sequence[RunHook] = ()) -> Fu
     When the module is run as `__main__`, the worker runs right here and the process exits;
     code below the decorated function never runs. On a normal import `func` is returned unchanged.
     """
-    decorator = EntrypointDecorator("worker", hooks)
-    return decorator if func is None else decorator(func)
+    return _entrypoint("worker", func, hooks)
+
+
+def _entrypoint(kind: Kind, func: FuncT | None, hooks: Sequence[RunHook]) -> FuncT | EntrypointDecorator:
+    def decorator(entrypoint: FuncT) -> FuncT:
+        if not inspect.iscoroutinefunction(entrypoint):
+            raise TypeError(f'{kind} "{entrypoint.__qualname__}" must be declared with "async def"')
+        if entrypoint.__module__ == MAIN:
+            sys.exit(execute(entrypoint, kind=kind, hooks=hooks))
+        return entrypoint
+
+    # `decorator` takes the FuncT of this call; returned without a function, it takes the FuncT of the call it is
+    # applied in
+    return cast(EntrypointDecorator, decorator) if func is None else decorator(func)
 
 
 def execute(func: _AsyncFunction, *, kind: Kind, hooks: Sequence[RunHook]) -> int:
@@ -116,27 +115,3 @@ def _parse_command_line(func: _AsyncFunction, argv: list[str]) -> dict[str, Any]
         # Only parsing raises it, so the parser exists here; the Run still fails
         sys.stderr.write(f"{exc.usage}{parser.prog}: error: {exc}\n")
         raise
-
-
-def entrypoint_name(func: Callable[..., Any]) -> str:
-    module = func.__module__
-    if module == _MAIN:
-        main = sys.modules[_MAIN]
-        # `python -m app.jobs.sync` keeps the importable name in the spec, `python app/jobs/sync.py` has none
-        spec = main.__spec__
-        if spec is None:
-            module = Path(main.__file__ or "").stem
-        else:
-            module = spec.name
-    return f"{module}.{func.__qualname__}"
-
-
-def entrypoint_prog() -> str | None:
-    """
-    The command shown in `--help`: `python -m <module>`, or the argparse default for a file run by path.
-    """
-    spec = sys.modules[_MAIN].__spec__
-    if spec is None:
-        return None
-    module = spec.name.removesuffix(".__main__")
-    return f"python -m {module}"
