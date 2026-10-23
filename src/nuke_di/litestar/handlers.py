@@ -93,7 +93,13 @@ class _Clients:
                 # matched by name without a marker since 2.23
                 function.__annotations__[name] = Annotated[(client, *_MARKERS)]
 
-    def _add_client(self, call: Any, name: str, client: type[NotSingletonClient], provided: dict[str, Any]) -> None:
+    def _add_client(
+        self,
+        call: Any,
+        name: str,
+        client: type[NotSingletonClient],
+        provided: dict[str, Any],
+    ) -> None:
         if name in RESERVED_KWARGS:
             raise TypeError(
                 f'Argument "{name}" of {sname(call)} is {sname(client)}, but Litestar reserves the name "{name}": '

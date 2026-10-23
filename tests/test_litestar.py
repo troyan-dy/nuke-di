@@ -17,7 +17,8 @@ from litestar.types import Receive, Scope, Send
 
 from nuke_di import DI, BackgroundTasks, Client, Dependencies, NotSingletonClient, Shutdown
 from nuke_di.integration.testing import check
-from nuke_di.litestar import _LITESTAR, ClientPlugin
+from nuke_di.litestar import ClientPlugin
+from nuke_di.litestar.plugin import _LITESTAR
 
 if TYPE_CHECKING:
     from decimal import Decimal

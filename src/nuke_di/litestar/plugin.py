@@ -34,14 +34,9 @@ class ClientPlugin(InitPlugin):
         self.container = container
 
     def on_app_init(self, app_config: AppConfig) -> AppConfig:
-        if any(isinstance(lifespan, _Lifespan) for lifespan in app_config.lifespan):
+        if any(isinstance(existing, _Lifespan) for existing in app_config.lifespan):
             raise TypeError("ClientPlugin was already added to this app")
-        clients = _Clients(app_config.dependencies)
-        for handler in _route_handlers(app_config):
-            clients.add_handler(handler)
-
-        found = clients.found.items()
-        bindings = {name: Binding(client_class, self.container, _LITESTAR) for name, client_class in found}
+        bindings = _bind_handlers(app_config, self.container)
         _provide(app_config, bindings)
         lifespan = _Lifespan(self.container, list(bindings.values()))
         # The outermost lifespan, so the app's own lifespans and startup hooks see connected clients
@@ -80,6 +75,17 @@ def _route_handlers(app_config: AppConfig) -> Iterator[BaseRouteHandler]:
             yield from route.route_handlers
         else:
             yield route.route_handler
+
+
+def _bind_handlers(app_config: AppConfig, container: Dependencies) -> dict[str, Binding]:
+    """
+    The client arguments of every handler the app is created with, by name.
+    """
+    clients = _Clients(app_config.dependencies)
+    for handler in _route_handlers(app_config):
+        clients.add_handler(handler)
+    found = clients.found.items()
+    return {name: Binding(client_class, container, _LITESTAR) for name, client_class in found}
 
 
 def _provide(app_config: AppConfig, bindings: dict[str, Binding]) -> None:
