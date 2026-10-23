@@ -21,14 +21,12 @@ from nuke_di.errors import (
 )
 from nuke_di.graph import Graph, Node
 from nuke_di.logs import fields
+from nuke_di.naming import qualname, sname
 from nuke_di.options import DependenciesSettings
 from nuke_di.timings import ClientTiming, Outcome
-from nuke_di.types import Client, NotSingletonClient
-from nuke_di.utils import isa, qualname, sname
+from nuke_di.types import NotSingletonClient, isclient, isnotsingleton
 
 logger = logging.getLogger(__name__)
-isclient = isa(Client)
-isnotsingleton = isa(NotSingletonClient)
 
 CT = TypeVar("CT", bound=NotSingletonClient)
 R = TypeVar("R")

@@ -1,5 +1,5 @@
 from nuke_di import Client
-from nuke_di.utils import qualname, sname
+from nuke_di.naming import qualname, sname
 
 
 class Outer:

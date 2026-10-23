@@ -18,7 +18,7 @@ from mcp.server.mcpserver.exceptions import InvalidSignature
 
 from nuke_di.core import DI, Dependencies
 from nuke_di.integration import Binding, DependsFramework, client_of, unique, wrap_lifespan
-from nuke_di.utils import sname
+from nuke_di.naming import sname
 
 __all__ = ("setup",)
 

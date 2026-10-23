@@ -1,5 +1,3 @@
-import inspect
-from collections.abc import Callable
 from typing import Any
 
 
@@ -16,7 +14,3 @@ def qualname(cls: type) -> str:
     to a function drops the function, which is not a namespace a reader looks the class up in.
     """
     return cls.__qualname__.rsplit("<locals>.", 1)[-1]
-
-
-def isa(*types: type) -> Callable[[Any], bool]:
-    return lambda o: inspect.isclass(o) and issubclass(o, types)

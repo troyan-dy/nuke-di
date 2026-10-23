@@ -9,10 +9,10 @@ See docs/specs/asgi.md and docs/guide/asgi.md.
 from contextlib import AbstractAsyncContextManager
 from typing import TypeVar, cast
 
-from nuke_di.core import Dependencies, isnotsingleton
+from nuke_di.core import Dependencies
 from nuke_di.integration import Binding, Framework, running
-from nuke_di.types import NotSingletonClient
-from nuke_di.utils import sname
+from nuke_di.naming import sname
+from nuke_di.types import NotSingletonClient, isnotsingleton
 
 __all__ = ("Lifespan", "lifespan")
 

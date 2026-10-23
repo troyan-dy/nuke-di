@@ -18,9 +18,9 @@ from dataclasses import dataclass
 from typing import Annotated, Any, cast, get_args, get_origin, get_type_hints
 
 from nuke_di.clients import BackgroundTasks, Shutdown
-from nuke_di.core import Dependencies, isnotsingleton
-from nuke_di.types import NotSingletonClient
-from nuke_di.utils import sname
+from nuke_di.core import Dependencies
+from nuke_di.naming import sname
+from nuke_di.types import NotSingletonClient, isnotsingleton
 
 __all__ = ("Binding", "DependsFramework", "Framework", "bind", "client_of", "running", "unique", "wrap_lifespan")
 

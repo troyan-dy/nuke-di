@@ -20,8 +20,8 @@ from litestar.routes import HTTPRoute
 
 from nuke_di.core import DI, Dependencies
 from nuke_di.integration import Binding, Framework, client_of, running
+from nuke_di.naming import sname
 from nuke_di.types import NotSingletonClient
-from nuke_di.utils import sname
 
 __all__ = ("ClientPlugin",)
 

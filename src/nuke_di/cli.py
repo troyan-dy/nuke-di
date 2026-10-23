@@ -7,10 +7,10 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Annotated, Any, NoReturn, Union, get_args, get_origin, get_type_hints
 
-from nuke_di.core import isnotsingleton
 from nuke_di.errors import InvalidSignatureError, UsageError
+from nuke_di.naming import sname
 from nuke_di.options import Option
-from nuke_di.utils import sname
+from nuke_di.types import isnotsingleton
 
 Converter = Callable[[str], Any]
 

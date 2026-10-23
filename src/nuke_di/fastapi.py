@@ -14,7 +14,7 @@ from starlette.requests import HTTPConnection
 
 from nuke_di.core import DI, Dependencies
 from nuke_di.integration import Binding, DependsFramework, bind, unique, wrap_lifespan
-from nuke_di.utils import sname
+from nuke_di.naming import sname
 
 __all__ = ("ClientRoute", "ClientRouter", "setup")
 

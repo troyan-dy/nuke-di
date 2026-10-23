@@ -1,7 +1,8 @@
+import inspect
 from collections.abc import Callable
 from typing import Any
 
-from nuke_di.utils import sname
+from nuke_di.naming import sname
 
 
 class NotSingletonClient:
@@ -51,6 +52,14 @@ class Client(NotSingletonClient):
 
     It is cached on resolution, so every consumer receives the same instance.
     """
+
+
+def isa(*types: type) -> Callable[[Any], bool]:
+    return lambda candidate: inspect.isclass(candidate) and issubclass(candidate, types)
+
+
+isclient = isa(Client)
+isnotsingleton = isa(NotSingletonClient)
 
 
 def _not_a_pydantic_type(cls: type) -> str:

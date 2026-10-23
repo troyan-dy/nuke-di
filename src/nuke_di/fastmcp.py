@@ -19,7 +19,7 @@ from fastmcp.dependencies import Dependency, Depends
 
 from nuke_di.core import DI, Dependencies
 from nuke_di.integration import Binding, Framework, client_of, running, unique
-from nuke_di.utils import sname
+from nuke_di.naming import sname
 
 __all__ = ("setup",)
 

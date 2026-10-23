@@ -4,8 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
+from nuke_di.naming import sname
 from nuke_di.types import NotSingletonClient
-from nuke_di.utils import sname
 
 
 @dataclass(frozen=True, eq=False)
