@@ -1,5 +1,5 @@
 import sys
-from typing import Any
+from typing import Any, TypeAlias
 from unittest.mock import AsyncMock, call
 
 import pytest
@@ -32,53 +32,65 @@ class NewPublicClient(PublicClient):
     disconnect: Any = AsyncMock()
 
 
+def awaits(cli: PublicClient, new_cli: NewPublicClient) -> dict[str, list[Any]]:
+    """
+    The awaits of every connect and disconnect mock of the two trees, keyed by the mock's place.
+    """
+    return {
+        "cli.connect": cli.connect.await_args_list,
+        "cli.disconnect": cli.disconnect.await_args_list,
+        "new_cli.connect": new_cli.connect.await_args_list,
+        "new_cli.disconnect": new_cli.disconnect.await_args_list,
+        "cli.inner.connect": cli.inner.connect.await_args_list,
+        "cli.inner.disconnect": cli.inner.disconnect.await_args_list,
+    }
+
+
 async def test_connecting() -> None:
     dep = Dependencies()
     cli = dep.resolve(PublicClient)
     new_cli = dep.resolve(NewPublicClient)
 
-    assert isinstance(cli, PublicClient)
-    assert isinstance(new_cli, NewPublicClient)
+    assert isinstance(cli, PublicClient) and isinstance(new_cli, NewPublicClient)
     # resolving, not connecting
-    assert cli.connect.await_args_list == []
-    assert cli.disconnect.await_args_list == []
-
-    assert new_cli.connect.await_args_list == []
-    assert new_cli.disconnect.await_args_list == []
-
-    assert cli.inner.connect.await_args_list == []
-    assert cli.inner.disconnect.await_args_list == []
+    assert awaits(cli, new_cli) == {
+        "cli.connect": [],
+        "cli.disconnect": [],
+        "new_cli.connect": [],
+        "new_cli.disconnect": [],
+        "cli.inner.connect": [],
+        "cli.inner.disconnect": [],
+    }
 
     async with dep:
         # connecting
-        assert cli.connect.await_args_list == [call()]
-        assert cli.disconnect.await_args_list == []
-
-        assert new_cli.connect.await_args_list == [call()]
-        assert new_cli.disconnect.await_args_list == []
-
-        assert cli.inner.connect.await_args_list == [call(), call()]
-        assert cli.inner.disconnect.await_args_list == []
+        assert awaits(cli, new_cli) == {
+            "cli.connect": [call()],
+            "cli.disconnect": [],
+            "new_cli.connect": [call()],
+            "new_cli.disconnect": [],
+            "cli.inner.connect": [call(), call()],
+            "cli.inner.disconnect": [],
+        }
 
         assert cli.inner is not new_cli.inner
 
     # disconnecting
-    assert cli.connect.await_args_list == [call()]
-    assert cli.disconnect.await_args_list == [call()]
-
-    assert new_cli.connect.await_args_list == [call()]
-    assert new_cli.disconnect.await_args_list == [call()]
-
-    assert cli.inner.connect.await_args_list == [call(), call()]
-    assert cli.inner.disconnect.await_args_list == [call(), call()]
+    assert awaits(cli, new_cli) == {
+        "cli.connect": [call()],
+        "cli.disconnect": [call()],
+        "new_cli.connect": [call()],
+        "new_cli.disconnect": [call()],
+        "cli.inner.connect": [call(), call()],
+        "cli.inner.disconnect": [call(), call()],
+    }
 
 
 class TypedSelfClient(Client):
     connect: Any = AsyncMock()
     disconnect: Any = AsyncMock()
 
-    def __init__(self: "TypedSelfClient") -> None:
-        pass
+    def __init__(self: "TypedSelfClient") -> None: ...
 
 
 async def test_typed_self() -> None:
@@ -86,19 +98,24 @@ async def test_typed_self() -> None:
     cli = dep.resolve(TypedSelfClient)
 
     async with dep:
-        pass
+        ...
 
     assert cli.connect.await_args_list == [call()]
     assert cli.disconnect.await_args_list == [call()]
 
 
-def chain(n: int, name: str = "Link", bottom: type[Client] | None = None) -> list[type[Client]]:
+def chain(
+    length: int,
+    name: str = "Link",
+    bottom: type[Client] | None = None,
+) -> list[type[Client]]:
     """
-    `n` clients, each taking the one before it, the first one taking `bottom` if given: a tree `n` clients deep.
+    `length` clients, each taking the one before it, the first one taking `bottom` if given: a tree `length` clients
+    deep.
     """
     links: list[type[Client]] = []
     below = bottom
-    for number in range(n):
+    for number in range(length):
         namespace: dict[str, Any] = {}
         if below is not None:
 
@@ -123,8 +140,18 @@ def test_chain_deeper_than_the_recursion_limit() -> None:
     while hasattr(built[-1], "below"):
         built.append(built[-1].below)
     assert [type(client) for client in reversed(built)] == links
-    assert dep.connect_clients == built[::-1]
+    assert dep.connect_clients == list(reversed(built))
     assert [node.client_class for node in dep.graph().nodes] == links
+
+
+ResolvePath: TypeAlias = list[type[NotSingletonClient]]
+
+
+def arrows(path: list[type[Client]]) -> str:
+    """
+    The names of the classes on `path`, joined the way an error message shows a resolve path.
+    """
+    return " -> ".join(client_class.__name__ for client_class in path)
 
 
 class Unbuildable(Client):
@@ -165,22 +192,23 @@ def test_failure_deep_in_a_chain_closes_every_frame(
     links = chain(1500, bottom=bottom)
     dep = Dependencies()
 
-    with pytest.raises(error) as info:
+    with pytest.raises(error) as excinfo:
         dep.resolve(links[-1])
 
-    path = " -> ".join([*(link.__name__ for link in reversed(links)), bottom.__name__])
-    assert str(info.value) == message.format(path)
+    path = arrows([*reversed(links), bottom])
+    assert str(excinfo.value) == message.format(path)
     # Nothing of the chain was built, and no frame of it is left on the path
-    assert dep.connect_clients == []
-    assert dep.clients == {}
-    assert dep._resolving == []
-    assert dep._resolving_set == set()
+    assert (
+        dep.connect_clients,
+        dep.clients,
+        dep._resolving,
+        dep._resolving_set,
+    ) == ([], {}, [], set())
 
     # The next tree resolves from scratch: no stale cycle, and an error names its own path
     healthy = chain(1500, name="Healthy")
     assert isinstance(dep.resolve(healthy[-1]), healthy[-1])
-    assert len(dep.connect_clients) == 1500
-    assert dep._resolving == []
+    assert (len(dep.connect_clients), dep._resolving) == (1500, [])
     with pytest.raises(CircularDependencyError, match=r"^Circular dependency: Loop -> LoopLink -> Loop$"):
         dep.resolve(Loop)  # type: ignore[nuke-di]
 
@@ -194,12 +222,12 @@ def test_failed_resolve_inside_an_init_closes_only_its_own_frames() -> None:
     failing = chain(3, name="Bad", bottom=Unbuildable)
 
     class Leaf(Client):
-        pass
+        """The one client of the tree that resolves without failing."""
 
     class Swallower(Client):
         def __init__(self, leaf: Leaf) -> None:
             self.errors: list[str] = []
-            self.paths: list[list[type[NotSingletonClient]]] = []
+            self.paths: list[ResolvePath] = []
             for client_class in (Loop, failing[-1]):
                 try:
                     dep.resolve(client_class)
@@ -219,8 +247,7 @@ def test_failed_resolve_inside_an_init_closes_only_its_own_frames() -> None:
     ]
     # The `__init__` runs with its consumer on the path, and each failure left it there
     assert top.swallower.paths == [[Top], [Top]]
-    assert dep._resolving == []
-    assert dep._resolving_set == set()
+    assert (dep._resolving, dep._resolving_set) == ([], set())
     assert [type(client) for client in dep.connect_clients] == [Leaf, Swallower, Top]
     assert dep.clients[Top] is top
 

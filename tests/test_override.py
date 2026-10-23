@@ -11,7 +11,7 @@ class Database(Client):
 
 
 class Clock(Client):
-    pass
+    """A client with nothing to connect, the second argument of Users."""
 
 
 class Users(Client):
@@ -84,7 +84,7 @@ def test_override_after_resolve_raises() -> None:
     dep.resolve(Users)
 
     with pytest.raises(ConnectError, match="needs a container without resolved clients"), dep.override(Database):
-        pass
+        ...
 
 
 async def test_override_exit_while_connected_raises() -> None:
@@ -112,7 +112,7 @@ def test_override_drops_mocks_on_exit() -> None:
     clock = dep.mock(Clock)
 
     with dep.override(Database):
-        pass
+        ...
 
     assert dep.resolve(Users).clock is not clock
 
@@ -133,7 +133,7 @@ def test_override_needs_container_without_resolved_clients() -> None:
 
     expected = r"override\(Database\) needs a container without resolved clients, found: Clock"
     with pytest.raises(ConnectError, match=expected), dep.override(Database):
-        pass
+        ...
 
     assert Clock in dep.clients
 
@@ -144,7 +144,7 @@ def test_nested_override_after_resolve_raises() -> None:
     with dep.override(Database):
         dep.resolve(Users)
         with pytest.raises(ConnectError, match="found: Clock, Users"), dep.override(Clock):
-            pass
+            ...
 
 
 def test_override_of_replaced_client_raises() -> None:
@@ -152,7 +152,7 @@ def test_override_of_replaced_client_raises() -> None:
     dep.mock(Database)
 
     with pytest.raises(ConnectError, match="Database already has a replacement"), dep.override(Database):
-        pass
+        ...
 
 
 async def test_override_keeps_exception_while_connected() -> None:
@@ -173,4 +173,4 @@ def test_override_when_connected_raises() -> None:
     dep.connected = True
 
     with pytest.raises(ConnectError, match="already connected"), dep.override(Database):
-        pass
+        ...
