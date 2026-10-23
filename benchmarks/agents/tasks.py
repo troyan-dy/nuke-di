@@ -122,7 +122,7 @@ class Attempt:
     grades: dict[str, bool] = field(default_factory=dict)
     shapes: list[str] = field(default_factory=list)
     skill_used: bool = False
-    seconds: float = 0
+    seconds: float = float(0)
     cost_usd: float | None = None
     turns: int | None = None
     notes: str = ""
