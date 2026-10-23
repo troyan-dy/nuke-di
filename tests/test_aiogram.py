@@ -19,7 +19,8 @@ from aiogram.methods import GetMe, GetUpdates, SendMessage, TelegramMethod
 from aiogram.types import ErrorEvent, Message, Update, User
 
 from nuke_di import DI, BackgroundTasks, Client, Dependencies, Shutdown
-from nuke_di.aiogram import _AIOGRAM, setup
+from nuke_di.aiogram import setup
+from nuke_di.aiogram.framework import _AIOGRAM
 from nuke_di.integration.testing import check
 
 if TYPE_CHECKING:
