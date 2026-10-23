@@ -86,8 +86,10 @@ def register_replacement(
 
 
 def is_resolved(container: "Dependencies", client_class: type[NotSingletonClient]) -> bool:
-    # A NotSingletonClient is never cached in `clients`, only its instances are in `connect_clients`
-    return client_class in container.clients or client_class in map(type, container.connect_clients)
+    # A NotSingletonClient is never cached in `clients`, only its instances are in `connect_clients`. The classes
+    # are compared by identity: a metaclass `__eq__` must not make another class look resolved.
+    classes = map(id, map(type, container.connect_clients))
+    return client_class in container.clients or id(client_class) in classes
 
 
 def autospec(client_class: type[NotSingletonClient]) -> Any:

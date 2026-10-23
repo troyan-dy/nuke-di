@@ -106,6 +106,30 @@ def test_mock_not_singleton_after_resolve_raises() -> None:
         dep.mock(Session)
 
 
+class _EqualClasses(type):
+    """A metaclass whose classes all compare equal."""
+
+    def __eq__(cls, other: object) -> bool:
+        return isinstance(other, _EqualClasses)
+
+    __hash__ = type.__hash__
+
+
+class _Resolved(NotSingletonClient, metaclass=_EqualClasses):
+    """A client resolved before the mock."""
+
+
+class _NotResolved(NotSingletonClient, metaclass=_EqualClasses):
+    """A client equal to `_Resolved` by its metaclass, never resolved."""
+
+
+def test_mock_compares_resolved_classes_by_identity() -> None:
+    dep = Dependencies()
+    dep.resolve(_Resolved)
+
+    assert isinstance(dep.mock(_NotResolved), NonCallableMock)
+
+
 def test_mock_twice_returns_the_same_mock() -> None:
     dep = Dependencies()
 
