@@ -3083,7 +3083,7 @@ asyncio.run(main())
 ```console
 $ python ask.py bookshop.server
 database: connected
-[10/10/26 18:46:46] INFO     Connected 2 clients in 0.00s (slowest:  core.py:177
+[10/10/26 18:46:46] INFO     Connected 2 clients in 0.00s (slowest:  core.py:111
                              Database 0.00s, Catalog 0.00s)
 count_books {'genre': {'title': 'Genre', 'type': 'string'}}
 {'result': 2}
