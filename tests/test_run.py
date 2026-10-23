@@ -7,19 +7,11 @@ from typing import Any
 
 import pytest
 
-from nuke_di import (
-    BackgroundTasks,
-    Client,
-    ConnectError,
-    Dependencies,
-    InitializeDependencyError,
-    InvalidSignatureError,
-    Run,
-    Shutdown,
-    UsageError,
-)
+from nuke_di import BackgroundTasks, Client, Dependencies, Run, Shutdown
+from nuke_di.errors import ConnectError, InitializeDependencyError, InvalidSignatureError, UsageError
 from nuke_di.logs import current_run
 from nuke_di.run import RunRequest, RunSettings, run_entrypoint
+from tests.sequences import single
 
 
 class Events:
@@ -28,6 +20,9 @@ class Events:
 
 
 events = Events()
+
+# The seconds an environment variable gives in the tests of the settings
+FROM_ENV = "2.5"
 
 
 @pytest.fixture(autouse=True)
@@ -108,8 +103,7 @@ async def test_job_succeeds() -> None:
 
 
 async def test_run_records_metadata() -> None:
-    async def entry() -> None:
-        pass
+    async def entry() -> None: ...
 
     run = await start(entry, kind="worker")
 
@@ -142,12 +136,11 @@ async def test_connect_error_fails_run() -> None:
 
     assert run.exit_code == 1
     assert isinstance(run.error, ConnectError)
-    assert events.log == []
+    assert not events.log
 
 
 async def test_resolution_error_fails_run() -> None:
-    async def entry(broken: BrokenInit) -> None:
-        pass
+    async def entry(broken: BrokenInit) -> None: ...
 
     run = await start(entry)
 
@@ -157,7 +150,7 @@ async def test_resolution_error_fails_run() -> None:
 
 async def test_invalid_signature_fails_run() -> None:
     async def entry(db) -> None:  # type: ignore[no-untyped-def]
-        pass
+        ...
 
     run = await start(entry)
 
@@ -184,10 +177,8 @@ async def test_usage_error_fails_run_before_resolution(caplog: pytest.LogCapture
 
     run = await start(entry, container=container, error=error)
 
-    assert run.exit_code == 2
-    assert run.error is error
-    assert events.log == []
-    assert container.connect_clients == []
+    outcome = (run.exit_code, run.error, events.log, container.connect_clients)
+    assert outcome == (2, error, [], [])
     assert "Run tests.entry failed: unrecognized arguments: --bogus" in caplog.text
     assert "Traceback" not in caplog.text
 
@@ -202,13 +193,12 @@ async def test_kept_signature_error_fails_run(caplog: pytest.LogCaptureFixture) 
 
     assert run.exit_code == 1
     assert run.error is error
-    assert events.log == []
+    assert not events.log
     assert "InvalidSignatureError: bad signature" in caplog.text
 
 
 async def test_worker_ending_on_its_own_ends_run() -> None:
-    async def entry() -> None:
-        pass
+    async def entry() -> None: ...
 
     run = await start(entry, kind="worker")
 
@@ -256,7 +246,8 @@ async def test_second_signal_cancels_immediately() -> None:
         send(signal.SIGINT)
         await asyncio.sleep(10)
 
-    run = await asyncio.wait_for(start(entry, kind="worker", grace=10), timeout=2)
+    started = start(entry, kind="worker", grace=10)
+    run = await asyncio.wait_for(started, timeout=2)
 
     assert run.exit_code == 128 + signal.SIGINT
 
@@ -273,8 +264,7 @@ async def test_signal_during_connect_disconnects_connected_clients() -> None:
 
 
 async def test_signal_after_entrypoint_ended_is_ignored() -> None:
-    async def entry(client: SignalsOnDisconnect) -> None:
-        pass
+    async def entry(client: SignalsOnDisconnect) -> None: ...
 
     run = await start(entry)
 
@@ -325,8 +315,9 @@ async def test_background_tasks_stop_before_clients_disconnect() -> None:
     async def loop() -> None:
         try:
             await asyncio.sleep(10)
-        finally:
+        except asyncio.CancelledError:
             events.log.append("task:stopped")
+            raise
 
     async def entry(db: Db, tasks: BackgroundTasks) -> None:
         tasks.spawn(loop())
@@ -351,8 +342,7 @@ async def test_error_wins_over_signal() -> None:
 
 
 async def test_signal_handlers_are_removed() -> None:
-    async def entry() -> None:
-        pass
+    async def entry() -> None: ...
 
     before = signal.getsignal(signal.SIGTERM)
     await start(entry)
@@ -379,7 +369,8 @@ async def test_run_cancelled_from_outside_restores_what_it_set() -> None:
         await task
     assert (signal.getsignal(signal.SIGTERM), current_run.get()) == (before, None)
     # The connect the Run leaves behind
-    (left,) = [other for other in asyncio.all_tasks() if other.get_coro().__name__ == "_guarded"]  # type: ignore[union-attr]
+    tasks = asyncio.all_tasks()
+    left = single(other for other in tasks if other.get_coro().__name__ == "_guarded")  # type: ignore[union-attr]
     left.cancel()
     await asyncio.wait({left})
 
@@ -441,8 +432,7 @@ async def test_hooks_wrap_the_run() -> None:
 
 
 async def test_hooks_see_connect_failure() -> None:
-    async def entry(broken: Broken) -> None:
-        pass
+    async def entry(broken: Broken) -> None: ...
 
     hook = Hook("a")
     await start(entry, hooks=[hook])
@@ -453,10 +443,10 @@ async def test_hooks_see_connect_failure() -> None:
 
 
 async def test_failing_hook_does_not_change_exit_code(caplog: pytest.LogCaptureFixture) -> None:
-    async def entry() -> None:
-        pass
+    async def entry() -> None: ...
 
-    run = await start(entry, hooks=[Hook("a", fail=True), Hook("b")])
+    hooks = [Hook("a", fail=True), Hook("b")]
+    run = await start(entry, hooks=hooks)
 
     assert run.exit_code == 0
     assert events.log == ["start:a:None", "start:b:None", "finish:b:0", "finish:a:0"]
@@ -464,9 +454,9 @@ async def test_failing_hook_does_not_change_exit_code(caplog: pytest.LogCaptureF
 
 
 def test_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SHUTDOWN_GRACE_SECONDS", "2.5")
+    monkeypatch.setenv("SHUTDOWN_GRACE_SECONDS", FROM_ENV)
 
-    assert RunSettings().shutdown_grace == 2.5
+    assert RunSettings().shutdown_grace == float(FROM_ENV)
 
 
 def test_settings_default(monkeypatch: pytest.MonkeyPatch) -> None:

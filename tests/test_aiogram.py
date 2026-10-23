@@ -10,7 +10,8 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, ForwardRef
 
 import pytest
-from aiogram import Bot, Dispatcher, F, Router
+from aiogram import Bot, Dispatcher, Router
+from aiogram import F as MAGIC_FILTER
 from aiogram.client.session.base import BaseSession
 from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.filters import Command, Filter
@@ -22,6 +23,7 @@ from nuke_di import DI, BackgroundTasks, Client, Dependencies, Shutdown
 from nuke_di.aiogram import setup
 from nuke_di.aiogram.framework import _AIOGRAM
 from nuke_di.integration.testing import check
+from tests.sequences import repeated
 
 if TYPE_CHECKING:
     from decimal import Decimal
@@ -55,7 +57,8 @@ class UserService(Client):
         self.db = db
 
     async def greet(self, user_id: int) -> str:
-        return f"Hello, {await self.db.fetch_user(user_id)}!"
+        name = await self.db.fetch_user(user_id)
+        return f"Hello, {name}!"
 
 
 class FakeDatabase(Database):
@@ -64,7 +67,7 @@ class FakeDatabase(Database):
 
 
 class Billing(Client):
-    pass
+    """A second client, for handlers that take two."""
 
 
 class Broken(Client):
@@ -78,11 +81,10 @@ class Offline(BaseSession):
     """
 
     async def make_request(self, bot: Bot, method: TelegramMethod[Any], timeout: int | None = None) -> Any:  # noqa: ASYNC109
-        raise AssertionError(f"{type(method).__name__} would reach Telegram")  # pragma: no cover
+        raise AssertionError(f"{type(method).__name__} would reach Telegram")
 
-    async def stream_content(self, *args: Any, **kwargs: Any) -> AsyncGenerator[bytes, None]:
-        raise NotImplementedError  # pragma: no cover
-        yield b""  # pragma: no cover
+    def stream_content(self, *args: Any, **kwargs: Any) -> AsyncGenerator[bytes, None]:
+        raise NotImplementedError
 
     async def close(self) -> None:
         events.append("session: closed")
@@ -175,7 +177,9 @@ async def test_handler_stays_callable_directly() -> None:
 
 
 async def test_routers_nested_before_and_after_setup() -> None:
-    inner, outer, late = Router(name="inner"), Router(name="outer"), Router(name="late")
+    inner = Router(name="inner")
+    outer = Router(name="outer")
+    late = Router(name="late")
     outer.include_router(inner)
     inner.message.register(greet, Command("start"))
     dp = make_dispatcher(Dependencies(), outer)
@@ -183,7 +187,9 @@ async def test_routers_nested_before_and_after_setup() -> None:
     # Included after setup(), and a router into a router that is in the dispatcher already
     @late.message(Command("bill"))
     async def bill(message: Message, billing: Billing, users: UserService) -> str:
-        return f"{type(billing).__name__} {await users.greet(1)}"
+        class_name = type(billing).__name__
+        greeting = await users.greet(1)
+        return f"{class_name} {greeting}"
 
     inner.include_router(late)
 
@@ -195,9 +201,10 @@ async def test_routers_nested_before_and_after_setup() -> None:
 async def test_filters_pass_their_data_next_to_clients() -> None:
     dp = make_dispatcher(Dependencies())
 
-    @dp.message(Command("echo"), F.text.as_("text"))
+    @dp.message(Command("echo"), MAGIC_FILTER.text.as_("text"))
     async def echo(message: Message, text: str, users: UserService) -> str:
-        return f"{text} {await users.greet(2)}"
+        greeting = await users.greet(2)
+        return f"{text} {greeting}"
 
     async with started(dp):
         assert await dp.feed_update(BOT, update("/echo")) == "/echo Hello, user-2!"
@@ -261,8 +268,9 @@ async def test_class_based_handler_is_left_to_aiogram() -> None:
 
     @dp.message()
     class Hello(MessageHandler):
-        async def handle(self) -> str:
-            return f"hello {self.from_user.first_name if self.from_user else ''}"
+        async def handle(self) -> str:  # noqa: WPS110 - the method aiogram calls
+            first_name = self.from_user.first_name if self.from_user else ""
+            return f"hello {first_name}"
 
     async with started(dp):
         assert await dp.feed_update(BOT, update()) == "hello Ada"
@@ -277,14 +285,15 @@ async def test_error_handler_gets_clients() -> None:
 
     @dp.error()
     async def on_error(event: ErrorEvent, users: UserService) -> str:
-        return f"{event.exception} {await users.greet(3)}"
+        greeting = await users.greet(3)
+        return f"{event.exception} {greeting}"
 
     async with started(dp):
         assert await dp.feed_update(BOT, update()) == "boom Hello, user-3!"
 
 
 async def unevaluable(message: Message, amount: Decimal, users: UserService, note: Missing | None = None) -> str:
-    return "unevaluable"  # pragma: no cover
+    return "unevaluable"
 
 
 async def test_handler_with_unevaluable_hints_is_left_to_aiogram() -> None:
@@ -350,7 +359,8 @@ async def test_unhashable_callable_handlers() -> None:
 
 
 async def prefixed(prefix: str, message: Message, users: UserService) -> str:
-    return f"{prefix}: {await users.greet(6)}"
+    greeting = await users.greet(6)
+    return f"{prefix}: {greeting}"
 
 
 async def test_partial_handler() -> None:
@@ -369,8 +379,8 @@ async def test_handler_after_skip_handler_sees_no_clients_of_the_skipped_one() -
         raise SkipHandler
 
     @dp.message()
-    async def everything(message: Message, **data: Any) -> bool:
-        return "users" in data
+    async def everything(message: Message, **passed: Any) -> bool:
+        return "users" in passed
 
     async with started(dp):
         assert await dp.feed_update(BOT, update()) is False
@@ -403,7 +413,8 @@ async def test_startup_and_shutdown_handlers_run_inside_connected_clients() -> N
 
     @dp.startup()
     async def on_startup(bot: Bot, users: UserService) -> None:
-        events.append(f"dispatcher startup: {await users.greet(bot.id)}, connected={deps.connected}")
+        greeting = await users.greet(bot.id)
+        events.append(f"dispatcher startup: {greeting}, connected={deps.connected}")
 
     @child.startup()
     async def child_startup(router: Router) -> None:
@@ -415,10 +426,11 @@ async def test_startup_and_shutdown_handlers_run_inside_connected_clients() -> N
 
     @child.shutdown()
     async def child_shutdown(db: Database) -> None:
-        events.append(f"router shutdown: {await db.fetch_user(1)}, connected={deps.connected}")
+        user = await db.fetch_user(1)
+        events.append(f"router shutdown: {user}, connected={deps.connected}")
 
     async with started(dp):
-        pass
+        ...
 
     assert events == [
         "database: connected",
@@ -458,7 +470,7 @@ async def test_failed_shutdown_handler_still_disconnects() -> None:
 
     with pytest.raises(ConnectionError, match="telegram is down"):
         async with started(dp):
-            pass
+            ...
 
     assert events == ["database: connected", "database: disconnected"]
 
@@ -516,7 +528,8 @@ class FakeTelegram(Offline):
             return True
         assert isinstance(method, GetUpdates)
         if self.updates:
-            updates, self.updates = self.updates, []
+            updates = self.updates
+            self.updates = []
             return updates
         # Nothing more to come: stop as Ctrl+C would, and wait to be cancelled as a long poll would
         self.stopping = asyncio.create_task(self.dp.stop_polling())
@@ -530,16 +543,23 @@ async def test_start_polling_runs_the_container() -> None:
     @dp.message()
     async def reply(message: Message, users: UserService, users_seen: str) -> None:
         assert message.from_user is not None
-        await message.answer(f"{await users.greet(message.from_user.id)} ({users_seen})")
+        greeting = await users.greet(message.from_user.id)
+        await message.answer(f"{greeting} ({users_seen})")
 
     @dp.startup()
     async def on_startup(bots: tuple[Bot, ...], dispatcher: Dispatcher, users: UserService) -> None:
-        events.append(f"startup: {len(bots)} bot, {await users.greet(0)}")
+        count = len(bots)
+        greeting = await users.greet(0)
+        events.append(f"startup: {count} bot, {greeting}")
 
-    telegram = FakeTelegram(dp, [update(update_id=1, bot=None), update(update_id=2, bot=None)])
+    updates = [
+        update(update_id=1, bot=None),
+        update(update_id=2, bot=None),
+    ]
+    telegram = FakeTelegram(dp, updates)
     await dp.start_polling(Bot("43:TEST", session=telegram), handle_signals=False, handle_as_tasks=False)
 
-    assert telegram.sent == ["Hello, user-7! (workflow data)"] * 2
+    assert telegram.sent == repeated(["Hello, user-7! (workflow data)"], 2)
     assert events == [
         "database: connected",
         "startup: 1 bot, Hello, user-0!",
@@ -552,27 +572,29 @@ async def test_start_polling_runs_the_container() -> None:
 
 
 async def test_two_dispatchers_with_their_own_containers() -> None:
-    first, second = Dependencies(), Dependencies()
-    a, b = make_dispatcher(first), make_dispatcher(second)
-    a.message.register(greet)
-    b.message.register(greet)
+    second = Dependencies()
+    dispatcher_a = make_dispatcher(Dependencies())
+    dispatcher_b = make_dispatcher(second)
+    dispatcher_a.message.register(greet)
+    dispatcher_b.message.register(greet)
 
     with second.override(Database, FakeDatabase()):
-        async with started(a), started(b):
-            assert await a.feed_update(BOT, update()) == "Hello, user-7!"
-            assert await b.feed_update(BOT, update()) == "Hello, alice!"
+        async with started(dispatcher_a), started(dispatcher_b):
+            assert await dispatcher_a.feed_update(BOT, update()) == "Hello, user-7!"
+            assert await dispatcher_b.feed_update(BOT, update()) == "Hello, alice!"
 
 
 async def test_two_dispatchers_on_one_container_run_one_at_a_time() -> None:
     deps = Dependencies()
-    a, b = make_dispatcher(deps), make_dispatcher(deps)
-    a.message.register(greet)
-    b.message.register(greet)
+    dispatcher_a = make_dispatcher(deps)
+    dispatcher_b = make_dispatcher(deps)
+    dispatcher_a.message.register(greet)
+    dispatcher_b.message.register(greet)
 
-    async with started(a):
+    async with started(dispatcher_a):
         with pytest.raises(RuntimeError, match=r"the container is already connected"):
-            await b.emit_startup(bot=BOT)
-        assert await a.feed_update(BOT, update()) == "Hello, user-7!"
+            await dispatcher_b.emit_startup(bot=BOT)
+        assert await dispatcher_a.feed_update(BOT, update()) == "Hello, user-7!"
 
 
 async def test_dispatcher_started_twice_keeps_its_clients() -> None:
@@ -624,7 +646,7 @@ async def test_handler_registered_after_startup_explains() -> None:
 async def test_client_under_a_reserved_name_is_refused(name: str) -> None:
     dp = make_dispatcher(Dependencies())
     namespace: dict[str, Any] = {}
-    exec(  # noqa: S102
+    exec(  # noqa: S102, WPS421
         f"async def handler(message: Message, {name}: UserService) -> None: ...",
         {"Message": Message, "UserService": UserService},
         namespace,
@@ -652,11 +674,11 @@ async def test_client_under_a_name_of_the_workflow_data_is_refused() -> None:
 
 async def test_filter_with_a_client_is_refused() -> None:
     async def is_admin(message: Message, users: UserService) -> bool:
-        return True  # pragma: no cover
+        return True
 
     class Admin(Filter):
         async def __call__(self, message: Message, db: Database) -> bool:
-            return True  # pragma: no cover
+            return True
 
     dp = make_dispatcher(Dependencies())
     dp.message.register(greet, is_admin)
@@ -737,7 +759,7 @@ async def test_second_shutdown_runs_the_shutdown_handlers_without_clients() -> N
         events.append("plain shutdown handler")
 
     async with started(dp):
-        pass
+        ...
     # Not connected any more: aiogram itself reports the client argument it cannot fill
     with pytest.raises(TypeError, match=r"missing 1 required positional argument: 'db'"):
         await dp.emit_shutdown(bot=BOT)
@@ -784,7 +806,7 @@ async def test_data_under_a_client_name_is_refused() -> None:
 
 async def test_root_filter_with_a_client_is_refused() -> None:
     async def is_admin(message: Message, users: UserService) -> bool:
-        return True  # pragma: no cover
+        return True
 
     router = Router()
     router.message.filter(is_admin)
@@ -811,7 +833,7 @@ async def test_scene_with_a_client_is_refused() -> None:
 
     dp = make_dispatcher(Dependencies(), Plain.as_router())
     async with started(dp):
-        pass
+        ...
 
 
 # --- the contract ----------------------------------------------------------------------------------------

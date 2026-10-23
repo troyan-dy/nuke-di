@@ -1,9 +1,12 @@
+import sys
+
 from nuke_di import Client, job
 
 
 class Db(Client):
     async def disconnect(self) -> None:
-        print("disconnected", flush=True)
+        sys.stdout.write("disconnected\n")
+        sys.stdout.flush()
 
 
 @job

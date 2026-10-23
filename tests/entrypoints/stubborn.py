@@ -1,18 +1,22 @@
 import asyncio
+import sys
 
 from nuke_di import Client, worker
 
 
 class Db(Client):
     async def disconnect(self) -> None:
-        print("disconnected", flush=True)
+        sys.stdout.write("disconnected\n")
+        sys.stdout.flush()
 
 
 @worker
 async def stubborn(db: Db) -> None:
-    print("ready", flush=True)
+    sys.stdout.write("ready\n")
+    sys.stdout.flush()
     try:
         await asyncio.sleep(60)
     except asyncio.CancelledError:
-        print("cancelled", flush=True)
+        sys.stdout.write("cancelled\n")
+        sys.stdout.flush()
         raise

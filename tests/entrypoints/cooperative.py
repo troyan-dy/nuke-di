@@ -1,13 +1,18 @@
+import sys
+
 from nuke_di import Client, Shutdown, worker
 
 
 class Db(Client):
     async def disconnect(self) -> None:
-        print("disconnected", flush=True)
+        sys.stdout.write("disconnected\n")
+        sys.stdout.flush()
 
 
 @worker
 async def cooperative(db: Db, shutdown: Shutdown) -> None:
-    print("ready", flush=True)
+    sys.stdout.write("ready\n")
+    sys.stdout.flush()
     await shutdown.wait()
-    print("stopped", flush=True)
+    sys.stdout.write("stopped\n")
+    sys.stdout.flush()

@@ -43,7 +43,8 @@ class UserService(Client):
         self.db = db
 
     async def greet(self, user_id: int) -> str:
-        return f"Hello, {await self.db.fetch_user(user_id)}!"
+        name = await self.db.fetch_user(user_id)
+        return f"Hello, {name}!"
 
 
 class FakeDatabase(Database):
@@ -52,7 +53,7 @@ class FakeDatabase(Database):
 
 
 class Session(NotSingletonClient):
-    pass
+    """A client built for every argument that takes it."""
 
 
 class Broken(Client):
@@ -119,7 +120,7 @@ async def test_handler_stays_callable_directly() -> None:
     broker_of(app).subscriber("greet")(greet)
 
     async with TestNatsBroker(broker_of(app)), TestApp(app):
-        pass
+        ...
 
     await greet(1, UserService(FakeDatabase()))
     assert events[-1] == "Hello, alice!"
@@ -144,7 +145,8 @@ async def current_user(user_id: int, db: Database) -> str:
 
 
 async def me(user: Annotated[str, Depends(current_user)], users: UserService) -> None:
-    events.append(f"{user}: {await users.greet(9)}")
+    greeting = await users.greet(9)
+    events.append(f"{user}: {greeting}")
 
 
 async def broker_audit(db: Database) -> None:
@@ -160,9 +162,8 @@ async def subscriber_audit(db: Database) -> None:
 
 
 async def test_dependencies_get_clients() -> None:
-    deps = Dependencies()
     broker = NatsBroker(dependencies=[Depends(broker_audit)])
-    app = make_app(deps, broker)
+    app = make_app(Dependencies(), broker)
     router = NatsRouter(dependencies=[Depends(router_audit)])
     router.subscriber("me", dependencies=[Depends(subscriber_audit)])(me)
     broker.include_router(router)
@@ -170,7 +171,8 @@ async def test_dependencies_get_clients() -> None:
     async with TestNatsBroker(broker) as test_broker, TestApp(app):
         await test_broker.publish(4, "me")
 
-    assert sorted(events[1:-1]) == ["broker audit", "router audit", "subscriber audit", "user-4: Hello, user-9!"]
+    audits = ["broker audit", "router audit", "subscriber audit", "user-4: Hello, user-9!"]
+    assert sorted(events[1:-1]) == audits
 
 
 class Auth:
@@ -198,7 +200,8 @@ def sync_greet(name: str, session: Session) -> None:
 
 
 async def sessions(first: Session, second: Session) -> None:
-    events.append(f"same session: {first is second}")
+    same = first is second
+    events.append(f"same session: {same}")
 
 
 async def test_sync_handler_and_not_singleton_clients() -> None:
@@ -237,7 +240,7 @@ async def test_app_lifespan_and_hooks_run_inside_connected_clients() -> None:
         events.append(f"after_shutdown: connected={DI.connected}")
 
     async with TestNatsBroker(broker_of(app)), TestApp(app):
-        pass
+        ...
 
     assert events == [
         "database: connected",
@@ -279,7 +282,7 @@ async def test_failed_connect_fails_startup_and_forgets_clients() -> None:
         RuntimeError, match=r"nuke-di clients failed to start: Broken.connect\(\) raised OSError: unreachable"
     ):
         async with TestNatsBroker(broker_of(app)), TestApp(app):
-            pass
+            ...
 
     assert not deps.connected
     assert deps.connect_clients == []
@@ -294,7 +297,7 @@ async def test_container_connected_before_startup_is_left_alone() -> None:
     async with deps:
         with pytest.raises(RuntimeError, match=r"the container is already connected"):
             async with TestNatsBroker(broker_of(app)), TestApp(app):
-                pass
+                ...
         assert deps.connected
 
     assert events == ["database: connected", "database: disconnected"]
@@ -307,7 +310,7 @@ async def test_subscribers_of_other_brokers_are_not_connected() -> None:
     NatsBroker().subscriber("greet")(greet)
 
     async with TestNatsBroker(broker_of(app)), TestApp(app):
-        pass
+        ...
 
     assert events == []
 
@@ -341,12 +344,11 @@ async def test_app_per_container_on_one_broker() -> None:
     broker = NatsBroker()
     broker.subscriber("greet")(greet)
     broker.subscriber("nested")(nested)
-    first, second = Dependencies(), Dependencies()
-    first_app = make_app(first, broker)
-    second_app = make_app(second, broker)
+    second = Dependencies()
+    apps = (make_app(Dependencies(), broker), make_app(second, broker))
 
     with second.override(Database, FakeDatabase()):
-        for app in (first_app, second_app, first_app):
+        for app in (*apps, apps[0]):
             async with TestNatsBroker(broker) as test_broker, TestApp(app):
                 await test_broker.publish(1, "greet")
                 await test_broker.publish(2, "nested")
@@ -408,7 +410,7 @@ async def test_apps_sharing_a_function_run_one_at_a_time() -> None:
     async with TestNatsBroker(first_broker), TestApp(first_app):
         with pytest.raises(RuntimeError, match=expected):
             async with TestNatsBroker(second_broker), TestApp(second_app):
-                pass  # pragma: no cover
+                ...
 
 
 async def shared_user(user_id: int, db: Database) -> str:
@@ -428,7 +430,7 @@ async def test_function_shared_with_fastapi_is_refused() -> None:
     expected = r"shared_user takes clients in both FastAPI and FastStream handlers: .* its own function"
     with pytest.raises(TypeError, match=expected):
         async with TestNatsBroker(broker_of(app)), TestApp(app):
-            pass  # pragma: no cover
+            ...
 
 
 async def shared_fastapi(user: Annotated[str, FastAPIDepends(shared_user)]) -> str:
