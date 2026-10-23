@@ -39,7 +39,7 @@ class DependsFramework(Framework):
     # bound once, and every app that starts resolves the same bindings
     per_container: bool = True
     # Internal, for nuke_di.fastapi: what the marker of a client argument calls, `binding.get` when not given.
-    # FastAPI's is a function that takes the request and finds the client of the app it came to, since
+    # FastAPI's is a callable object that takes the request and finds the client of the app it came to, since
     # FastAPI reads signatures lazily and serves one function from several apps at once
     _getter: Callable[["Binding"], Callable[..., Any]] | None = None
 
