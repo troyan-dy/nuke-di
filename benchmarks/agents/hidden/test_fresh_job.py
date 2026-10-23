@@ -46,6 +46,6 @@ async def test_redis_connects_after_postgres(monkeypatch: pytest.MonkeyPatch) ->
     deps = Dependencies()
     deps.inject(module.sync)
     async with deps:
-        pass
+        ...
 
     assert events.index("postgres done") < events.index("redis start"), events

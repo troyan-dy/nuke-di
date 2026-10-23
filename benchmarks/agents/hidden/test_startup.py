@@ -20,6 +20,6 @@ def test_unreachable_database_fails_fast(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(database, "connect", unreachable)
 
     with pytest.raises(Exception), TestClient(app):  # noqa: B017 - whatever the startup raises
-        pass
+        ...
 
     assert len(calls) == 1, f"Database.connect() was called {len(calls)} times: a retry"

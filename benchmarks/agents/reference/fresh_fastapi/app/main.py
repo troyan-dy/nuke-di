@@ -1,7 +1,7 @@
 import os
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, status
 
 from nuke_di import Client
 from nuke_di.fastapi import setup
@@ -46,7 +46,7 @@ setup(app)
 
 @app.get("/orders/{order_id}")
 async def get_order(order_id: int, store: OrderStore, payments: Payments) -> dict[str, object]:
-    item = await store.get(order_id)
-    if item is None:
-        raise HTTPException(status_code=404)
-    return {"order_id": order_id, "item": item, "paid": await payments.paid(order_id)}
+    product = await store.get(order_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return {"order_id": order_id, "item": product, "paid": await payments.paid(order_id)}

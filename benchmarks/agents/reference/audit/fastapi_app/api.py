@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, status
 from fastapi_app.clients import AuditLog, UserCache
 
 from nuke_di import DI
@@ -13,7 +13,8 @@ from nuke_di.fastapi import ClientRouter, setup
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Runs inside the connected container: its startup code sees every client connected
-    print(f"app: started with {', '.join(timing.name for timing in DI.timings)}")
+    started = ", ".join(timing.name for timing in DI.timings)
+    print(f"app: started with {started}")
     yield
     print("app: stopping")  # the clients are still connected here
 
@@ -27,7 +28,7 @@ async def get_user(user_id: int, cache: UserCache, audit: AuditLog) -> str:
     audit.record(str(uuid.uuid4()), user_id)
     name = cache.get(user_id)
     if name is None:
-        raise HTTPException(status_code=404, detail=f"user {user_id} not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"user {user_id} not found")
     return name
 
 
@@ -35,7 +36,7 @@ async def current_user(x_user_id: Annotated[int, Header()], cache: UserCache) ->
     # A dependency takes clients by type hint, the same way as a route
     name = cache.get(x_user_id)
     if name is None:
-        raise HTTPException(status_code=401, detail="unknown X-User-Id")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unknown X-User-Id")
     return name
 
 
