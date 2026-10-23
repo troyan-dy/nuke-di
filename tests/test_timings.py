@@ -255,6 +255,8 @@ async def test_startup_summary(caplog: pytest.LogCaptureFixture) -> None:
     assert summary.getMessage().startswith("Connected 3 clients in 0.")
     assert "(slowest: Postgres 0.0" in summary.getMessage()
     assert summary.duration >= 0.04  # type: ignore[attr-defined]
+    # The log lines of the guide print both (docs/guide/litestar.md)
+    assert (summary.name, summary.module) == ("nuke_di.core", "core")
 
 
 async def test_startup_summary_singular(caplog: pytest.LogCaptureFixture) -> None:
@@ -419,8 +421,9 @@ async def test_records_outside_a_run_have_no_run(caplog: pytest.LogCaptureFixtur
 def test_every_log_call_passes_structured_fields() -> None:
     package = Path(nuke_di.__file__).parent
     calls = [
-        (path.name, node.lineno)
-        for path in package.glob("*.py")
+        (str(path.relative_to(package)), node.lineno)
+        # The subpackages too: the container logs from nuke_di._container
+        for path in package.rglob("*.py")
         for node in ast.walk(ast.parse(path.read_text()))
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
