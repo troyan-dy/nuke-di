@@ -8,26 +8,24 @@ from nuke_di import DI, Client, ConnectError, Dependencies, NotSingletonClient
 
 
 class InnerDeps(Client):
-    pass
+    """The singleton `PublicClient` depends on."""
 
 
 class PublicClient(Client):
     def __init__(self, inner: InnerDeps):
         self.inner = inner
 
-    async def add(self, a: int, b: int) -> int:
-        return a + b
+    async def add(self, left: int, right: int) -> int:
+        return left + right
 
 
 async def test_cached_client() -> None:
     dep = Dependencies()
-
     mocked_client = dep.mock(PublicClient)
-
-    client_1 = dep.resolve(PublicClient)
+    first_client = dep.resolve(PublicClient)
 
     async with dep:
-        await client_1.add(1, 2)
+        await first_client.add(1, 2)
 
     assert mocked_client.add.await_args_list == [call(1, 2)]
 
@@ -82,7 +80,7 @@ async def test_mock_keeps_async_methods_awaitable() -> None:
 
 
 class Session(NotSingletonClient):
-    pass
+    """The not-singleton client `UsesSession` depends on."""
 
 
 class UsesSession(Client):

@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from nuke_di import Client, ConnectError, Dependencies, NotSingletonClient
+from tests.sequences import repeated
 
 THREADS = 8
 # Long enough for every other thread to reach resolve() while the first one is still inside an `__init__`
@@ -54,24 +55,24 @@ class PerConsumer(NotSingletonClient):
 
 def run_threads(targets: list[Callable[[], Any]]) -> list[Any]:
     """
-    Run every target in a thread of its own, started together; the results in the order of `targets`.
+    Run every target in a thread of its own, started together; the outcomes in the order of `targets`.
     """
     barrier = threading.Barrier(len(targets))
-    results: list[Any] = [None] * len(targets)
+    outcomes: list[Any] = [None for _ in targets]
 
     def run(index: int, target: Callable[[], Any]) -> None:
         barrier.wait()
         try:
-            results[index] = target()
+            outcomes[index] = target()
         except BaseException as exc:  # the thread reports what it raised
-            results[index] = exc
+            outcomes[index] = exc
 
-    threads = [threading.Thread(target=run, args=(index, target)) for index, target in enumerate(targets)]
+    threads = [threading.Thread(target=run, args=numbered) for numbered in enumerate(targets)]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
-    return results
+    return outcomes
 
 
 @pytest.fixture(autouse=True)
@@ -82,12 +83,12 @@ def count_instances() -> None:
 def test_threads_resolving_one_singleton_share_the_instance() -> None:
     deps = Dependencies()
 
-    results = run_threads([lambda: deps.resolve(ConsumerA)] * THREADS)
+    outcomes = run_threads(repeated([lambda: deps.resolve(ConsumerA)], THREADS))
 
-    assert all(result is results[0] for result in results)
+    assert all(outcome is outcomes[0] for outcome in outcomes)
     assert Slow.instances == 1
-    assert deps.connect_clients.count(results[0].shared.slow) == 1
-    assert deps.connect_clients.count(results[0]) == 1
+    assert deps.connect_clients.count(outcomes[0].shared.slow) == 1
+    assert deps.connect_clients.count(outcomes[0]) == 1
     assert len(deps.connect_clients) == 3
 
 
@@ -98,13 +99,16 @@ def test_threads_resolving_different_trees_see_no_false_cycle() -> None:
     """
     deps = Dependencies()
 
-    results = run_threads(
-        [lambda: deps.resolve(ConsumerA), lambda: deps.resolve(ConsumerB), lambda: deps.resolve(PerConsumer)] * THREADS
-    )
+    targets = [
+        lambda: deps.resolve(ConsumerA),
+        lambda: deps.resolve(ConsumerB),
+        lambda: deps.resolve(PerConsumer),
+    ]
+    outcomes = run_threads(repeated(targets, THREADS))
 
-    assert not any(isinstance(result, Exception) for result in results), results
-    shared = results[0].shared
-    assert all(result.shared is shared for result in results)
+    assert not any(isinstance(outcome, Exception) for outcome in outcomes), outcomes
+    shared = outcomes[0].shared
+    assert all(outcome.shared is shared for outcome in outcomes)
     assert Slow.instances == 1
 
 
@@ -117,11 +121,15 @@ def test_threads_injecting_share_the_instance() -> None:
     def handler_b(consumer: ConsumerB, per_consumer: PerConsumer) -> ConsumerB:
         return consumer
 
-    results = run_threads([lambda: deps.inject(handler_a)(), lambda: deps.inject(handler_b)()] * THREADS)
+    targets = [
+        lambda: deps.inject(handler_a)(),
+        lambda: deps.inject(handler_b)(),
+    ]
+    outcomes = run_threads(repeated(targets, THREADS))
 
-    assert not any(isinstance(result, Exception) for result in results), results
-    shared = results[0].shared
-    assert all(result.shared is shared for result in results)
+    assert not any(isinstance(outcome, Exception) for outcome in outcomes), outcomes
+    shared = outcomes[0].shared
+    assert all(outcome.shared is shared for outcome in outcomes)
     assert Slow.instances == 1
 
 
@@ -140,12 +148,13 @@ def test_client_resolving_on_its_own_reenters_the_lock() -> None:
             self.shared = deps.inject(handler)()
             self.slow = deps.resolve(Slow)
 
-    results = run_threads([lambda: deps.resolve(Reentrant), lambda: deps.resolve(ConsumerA)] * THREADS)
+    targets = [lambda: deps.resolve(Reentrant), lambda: deps.resolve(ConsumerA)]
+    outcomes = run_threads(repeated(targets, THREADS))
 
-    assert not any(isinstance(result, Exception) for result in results), results
-    reentrant = results[0]
+    assert not any(isinstance(outcome, Exception) for outcome in outcomes), outcomes
+    reentrant = outcomes[0]
     assert isinstance(reentrant, Reentrant)
-    assert reentrant.shared is results[1].shared
+    assert reentrant.shared is outcomes[1].shared
     assert reentrant.slow is reentrant.shared.slow
     assert Slow.instances == 1
 
@@ -177,31 +186,37 @@ def test_override_blocks_on_different_containers_are_independent() -> None:
             assert consumer.shared.slow is slow
             time.sleep(SLEEP)
             assert deps.resolve(ConsumerA) is consumer
-        return slow
+            return slow
 
-    results = run_threads([lambda: use(first), lambda: use(second)] * THREADS)
+    targets = [lambda: use(first), lambda: use(second)]
+    outcomes = run_threads(repeated(targets, THREADS))
 
-    assert not any(isinstance(result, Exception) for result in results), results
-    assert Slow.instances == 0
-    assert not first.connect_clients
-    assert not second.connect_clients
+    assert not any(isinstance(outcome, Exception) for outcome in outcomes), outcomes
+    # No instance was made and neither container registered a client
+    assert (Slow.instances, first.connect_clients, second.connect_clients) == (0, [], [])
 
 
 def test_mock_from_threads_registers_one_replacement() -> None:
     deps = Dependencies()
 
-    results = run_threads([lambda: deps.mock(Slow)] * THREADS)
+    outcomes = run_threads(repeated([lambda: deps.mock(Slow)], THREADS))
 
-    assert all(result is results[0] for result in results)
-    assert deps.resolve(ConsumerA).shared.slow is results[0]
+    assert all(outcome is outcomes[0] for outcome in outcomes)
+    assert deps.resolve(ConsumerA).shared.slow is outcomes[0]
 
 
 def test_flush_from_a_thread_is_serialized_with_resolve() -> None:
     deps = Dependencies()
 
-    results = run_threads([lambda: deps.resolve(ConsumerA), deps.flush, lambda: deps.resolve(ConsumerB)])
+    outcomes = run_threads(
+        [
+            lambda: deps.resolve(ConsumerA),
+            deps.flush,
+            lambda: deps.resolve(ConsumerB),
+        ],
+    )
 
-    assert not any(isinstance(result, Exception) for result in results), results
+    assert not any(isinstance(outcome, Exception) for outcome in outcomes), outcomes
     # Whatever the order, every registered client is a complete tree
     for client in deps.connect_clients:
         if isinstance(client, ConsumerA | ConsumerB):
@@ -218,8 +233,8 @@ def test_copy_of_a_container_has_a_lock_of_its_own() -> None:
     assert copied._lock is not deps._lock
     # The lock stays out of the comparison: two locks are never equal, two empty containers are
     assert copy.deepcopy(Dependencies()) == Dependencies()
-    results = run_threads([lambda: copied.resolve(ConsumerB)] * THREADS)
-    assert all(result is results[0] for result in results)
+    outcomes = run_threads(repeated([lambda: copied.resolve(ConsumerB)], THREADS))
+    assert all(outcome is outcomes[0] for outcome in outcomes)
     assert copied.resolve(ConsumerA) is not deps.resolve(ConsumerA)
 
 
@@ -228,9 +243,9 @@ def test_connected_container_rejects_resolve_from_a_thread() -> None:
     deps.resolve(ConsumerA)
     deps.connected = True
 
-    results = run_threads([lambda: deps.resolve(ConsumerB)])
+    outcomes = run_threads([lambda: deps.resolve(ConsumerB)])
 
-    assert isinstance(results[0], ConnectError)
+    assert isinstance(outcomes[0], ConnectError)
 
 
 async def test_connect_waits_for_a_resolve_in_flight() -> None:
@@ -254,7 +269,7 @@ async def test_connect_waits_for_a_resolve_in_flight() -> None:
     thread.join()
 
     assert [type(client) for client in deps.connect_clients] == [Slow, Waits]
-    assert len(deps.timings) == 2 and all(timing.connect_outcome == "ok" for timing in deps.timings)
+    assert [timing.connect_outcome for timing in deps.timings] == ["ok", "ok"]
     await deps.disconnect()
 
 
@@ -287,9 +302,9 @@ async def test_resolve_after_a_concurrent_connect_is_refused() -> None:
     loop = asyncio.get_running_loop()
 
     await deps.connect()
-    result = await loop.run_in_executor(None, run_threads, [lambda: deps.resolve(ConsumerB)])
+    outcomes = await loop.run_in_executor(None, run_threads, [lambda: deps.resolve(ConsumerB)])
 
-    assert isinstance(result[0], ConnectError)
+    assert isinstance(outcomes[0], ConnectError)
     await deps.disconnect()
 
 
