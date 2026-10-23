@@ -72,15 +72,17 @@ def _fail(errors: list[str]) -> int:
 def main(argv: list[str]) -> int:  # pragma: no cover - exercised by CI
     version = _version_in((ROOT / "pyproject.toml").read_text())
     changelog = (ROOT / "CHANGELOG.md").read_text()
-    tagged = _git("rev-parse", "--quiet", "--verify", f"refs/tags/v{version}").returncode == 0
 
     match argv:
         case ["check", base]:
             shown = _git("show", f"{base}:pyproject.toml")
             if shown.returncode != 0:
                 return _fail([_UNREADABLE.format(base=base, reason=shown.stderr.strip())])
+            tagged = _git("rev-parse", "--quiet", "--verify", f"refs/tags/v{version}").returncode == 0
             errors = problems(version, _version_in(shown.stdout), changelog, tagged=tagged)
         case ["unreleased"]:
+            # Only `check` and `unreleased` ask git for the tag: `notes` and the usage run without git
+            tagged = _git("rev-parse", "--quiet", "--verify", f"refs/tags/v{version}").returncode == 0
             errors = (
                 [f"v{version} is released already: a change reached master without a version bump"] if tagged else []
             )
