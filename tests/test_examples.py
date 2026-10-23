@@ -257,11 +257,6 @@ class Running:
         self._reader = threading.Thread(target=self._read, daemon=True)
         self._reader.start()
 
-    def _read(self) -> None:
-        assert self.process.stdout is not None
-        for line in self.process.stdout:
-            self.lines.append(line)
-
     @property
     def output(self) -> str:
         return "".join(self.lines)
@@ -283,6 +278,11 @@ class Running:
         exit_code = self.process.wait(timeout=TIMEOUT)
         self._reader.join(timeout=TIMEOUT)
         return exit_code
+
+    def _read(self) -> None:
+        assert self.process.stdout is not None
+        for line in self.process.stdout:
+            self.lines.append(line)
 
 
 @contextmanager

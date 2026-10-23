@@ -46,12 +46,12 @@ class UserCache(Client):
     async def refresh(self) -> None:
         self._users = await self._db.fetch_users()
 
+    def get(self, user_id: int) -> str | None:
+        return self._users.get(user_id)
+
     async def _refresh_forever(self) -> None:
         # Cancelled on shutdown before any client disconnects
         while True:
             await asyncio.sleep(self.refresh_seconds)
             await self.refresh()
             print(f"cache: refreshed, {len(self._users)} users")
-
-    def get(self, user_id: int) -> str | None:
-        return self._users.get(user_id)

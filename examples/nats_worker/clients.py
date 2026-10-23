@@ -34,18 +34,18 @@ class Nats(Client):
             self._connection = None
         print("nats: disconnected")
 
+    @property
+    def connection(self) -> NatsConnection:
+        if self._connection is None:
+            raise RuntimeError("Nats is not connected")
+        return self._connection
+
     async def _on_error(self, error: Exception) -> None:
         if self._connection is None:
             # The first connection: fail at once, instead of nats-py retrying it for two minutes
             raise error
         # Later errors: nats-py reconnects on its own
         print(f"nats: {error!r}")
-
-    @property
-    def connection(self) -> NatsConnection:
-        if self._connection is None:
-            raise RuntimeError("Nats is not connected")
-        return self._connection
 
 
 class Orders(Client):
