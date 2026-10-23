@@ -4,6 +4,7 @@ Every link of the README and the guide pages of docs/guide/ lands on a file and 
 
 import re
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -11,9 +12,10 @@ ROOT = Path(__file__).resolve().parent.parent
 BASE_URL = "https://github.com/troyan-dy/nuke-di/blob/master/"
 RAW_URL = "https://raw.githubusercontent.com/troyan-dy/nuke-di/master/"
 # The guide: docs/guide/<page>.md
-PAGES = sorted(path.stem for path in (ROOT / "docs" / "guide").glob("*.md"))
+GUIDE = ROOT / "docs" / "guide"
+PAGES = sorted(guide_page.stem for guide_page in GUIDE.glob("*.md"))
 # A document is the README (page None) or a guide page
-DOCUMENTS = [None, *PAGES]
+DOCUMENTS: Final = (None, *PAGES)
 
 
 def path(page: str | None = None) -> str:
@@ -39,17 +41,18 @@ def split(text: str) -> tuple[str, list[str]]:
                 current.append(line)
                 blocks.append("\n".join(current))
                 current = None
-        elif current is not None:
-            current.append(line)
-        else:
+        elif current is None:
             prose.append(line)
+        else:
+            current.append(line)
     assert current is None, "unclosed code block"
     return "\n".join(prose), blocks
 
 
 def headings(prose: str) -> list[str]:
     # Every heading but `# nuke-di` of a README; a guide page's `# ` title is a section of its own
-    return [heading for heading in re.findall(r"^#+ (.+)$", prose, flags=re.MULTILINE) if heading != "nuke-di"]
+    found = re.findall(r"^#+ (.+)$", prose, flags=re.MULTILINE)
+    return [heading for heading in found if heading != "nuke-di"]
 
 
 def internal_links(prose: str) -> list[str]:
@@ -62,7 +65,8 @@ def relative_links(prose: str) -> list[str]:
 
 def slug(heading: str) -> str:
     # GitHub's anchor for a heading: lowercase, punctuation dropped, spaces become hyphens
-    return re.sub(r"[^\w\- ]", "", heading.strip().lower()).replace(" ", "-")
+    words = re.sub(r"[^\w\- ]", "", heading.strip().lower())
+    return words.replace(" ", "-")
 
 
 def explicit_anchor(heading: str) -> str | None:
@@ -74,6 +78,14 @@ def anchors(text: str) -> list[str]:
     # A heading may carry its anchor as <a id="...">, any other one is its own slug
     prose, _ = split(text)
     return [explicit_anchor(heading) or slug(heading) for heading in headings(prose)]
+
+
+def landing(page: str | None, target: str) -> tuple[Path, str]:
+    """The file a relative link of `page` lands on, and the anchor it names there ("" for none)."""
+    # A link is relative to the file that holds it
+    holder = ROOT / path(page)
+    filename, _, anchor = target.partition("#")
+    return (holder.parent / filename).resolve(), anchor
 
 
 def test_guide_exists() -> None:
@@ -93,21 +105,19 @@ def test_guide_page_header(page: str) -> None:
 @pytest.mark.parametrize("page", DOCUMENTS)
 def test_internal_links_resolve(page: str | None) -> None:
     prose, _ = split(document(page))
+    known = set(anchors(document(page)))
 
-    assert set(internal_links(prose)) - set(anchors(document(page))) == set()
+    assert set(internal_links(prose)) - known == set()
 
 
 @pytest.mark.parametrize("page", DOCUMENTS)
 def test_relative_links_point_to_existing_files(page: str | None) -> None:
-    # A link is relative to the file that holds it
-    holder = ROOT / path(page)
     prose, _ = split(document(page))
     targets = relative_links(prose)
 
     assert targets
     for target in targets:
-        file, _, anchor = target.partition("#")
-        resolved = (holder.parent / file).resolve()
+        resolved, anchor = landing(page, target)
         assert resolved.is_file(), target
         if anchor and resolved.suffix == ".md":
             # A link to a section of another page lands on a heading of that page
@@ -117,9 +127,11 @@ def test_relative_links_point_to_existing_files(page: str | None) -> None:
 def test_readme_links_into_the_repository_are_absolute() -> None:
     # PyPI shows README.md too, where only an absolute link reaches the docs; every one names an existing file
     prose, _ = split(document())
-    targets = re.findall(rf"\]\((?:{re.escape(BASE_URL)}|{re.escape(RAW_URL)})([^)#\s]+)", prose)
+    bases = "|".join(map(re.escape, (BASE_URL, RAW_URL)))
+    targets = re.findall(rf"\]\((?:{bases})([^)#\s]+)", prose)
 
     assert any(target.startswith("docs/guide/") for target in targets)
     for target in targets:
         assert (ROOT / target).is_file(), target
-    assert [target for target in relative_links(prose) if target.startswith("docs/")] == []
+    into_docs = [link for link in relative_links(prose) if link.startswith("docs/")]
+    assert not into_docs
