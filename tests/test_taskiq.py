@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from typing import Annotated, Any
 
 import pytest
@@ -60,7 +60,8 @@ class UserService(Client):
         self.db = db
 
     async def greet(self, user_id: int) -> str:
-        return f"Hello, {await self.db.fetch_user(user_id)}!"
+        name = await self.db.fetch_user(user_id)
+        return f"Hello, {name}!"
 
 
 class FakeDatabase(Database):
@@ -106,9 +107,28 @@ async def started(broker: AsyncBroker) -> AsyncIterator[None]:
         await broker.shutdown()
 
 
-async def result(task: Any, *args: Any) -> Any:
+async def task_result(task: Any, *args: Any) -> Any:
     kicked = await task.kiq(*args)
-    return (await kicked.wait_result(check_interval=0.01, timeout=5)).raise_for_error().return_value
+    finished = await kicked.wait_result(check_interval=0.01, timeout=5)
+    return finished.raise_for_error().return_value
+
+
+@contextmanager
+def forgetting(shared: Any) -> Iterator[None]:
+    """
+    Forget the shared task `shared`, and the default broker of the shared tasks, on exit.
+    """
+    try:
+        yield
+    finally:
+        AsyncBroker.global_task_registry.pop(shared.task_name)
+        async_shared_broker.default_broker(None)  # type: ignore[arg-type]
+
+
+def listen_arguments(receiver: Receiver) -> list[asyncio.Event]:
+    # taskiq 0.11 listens without a finish event; either way it stops when the queue runs out
+    takes_finish = "finish_event" in inspect.signature(receiver.listen).parameters
+    return [asyncio.Event()] if takes_finish else []
 
 
 # --- tasks -----------------------------------------------------------------------------------------------
@@ -123,7 +143,7 @@ async def test_task_gets_client_by_type_hint() -> None:
     task = broker.task(send_report)
 
     async with started(broker):
-        events.append(await result(task, 1))
+        events.append(await task_result(task, 1))
 
     assert events == ["database: connected", "Hello, user-1!", "database: disconnected"]
 
@@ -135,7 +155,7 @@ async def test_override_before_startup() -> None:
 
     with deps.override(Database, FakeDatabase()):
         async with started(broker):
-            events.append(await result(task, 1))
+            events.append(await task_result(task, 1))
 
     assert events == ["Hello, alice!"]
 
@@ -147,7 +167,7 @@ async def test_global_container_by_default() -> None:
 
     with DI.override(Database, FakeDatabase()):
         async with started(broker):
-            events.append(await result(task, 2))
+            events.append(await task_result(task, 2))
 
     assert events == ["Hello, alice!"]
 
@@ -172,7 +192,9 @@ async def test_tasks_declared_before_and_after_setup() -> None:
     registered = broker.register_task(report_registered, "reports:registered")
 
     async with started(broker):
-        events.extend([await result(before, 1), await result(named, 2), await result(registered, 3)])
+        events.append(await task_result(before, 1))
+        events.append(await task_result(named, 2))
+        events.append(await task_result(registered, 3))
 
     assert events[1:-1] == ["Hello, user-1!", "Hello, user-2!", "Hello, user-3!"]
     assert named.task_name == "reports:named"
@@ -189,7 +211,7 @@ async def test_sync_task_gets_client() -> None:
     task = broker.task(sync_report)
 
     async with started(broker):
-        events.append(await result(task, 3))
+        events.append(await task_result(task, 3))
 
     assert events[1] == "Database for user-3"
 
@@ -200,12 +222,12 @@ async def test_task_parameters_are_still_parsed() -> None:
 
     async with started(broker):
         # taskiq casts the argument to the annotation, the client argument is left to the container
-        events.append(await result(task, "4"))
+        events.append(await task_result(task, "4"))
 
     assert events[1] == "Hello, user-4!"
 
 
-async def report_typed(user_id: int, users: UserService = TaskiqDepends()) -> str:  # noqa: B008
+async def report_typed(user_id: int, users: UserService = TaskiqDepends()) -> str:  # noqa: B008, WPS404
     return await users.greet(user_id)
 
 
@@ -217,7 +239,8 @@ async def test_client_with_a_default_for_type_checkers() -> None:
 
     async with started(broker):
         kicked = await task.kiq(5)
-        events.append((await kicked.wait_result(check_interval=0.01, timeout=5)).raise_for_error().return_value)
+        finished = await kicked.wait_result(check_interval=0.01, timeout=5)
+        events.append(finished.raise_for_error().return_value)
 
     assert events[1] == "Hello, user-5!"
 
@@ -247,13 +270,13 @@ async def test_dependency_function_takes_client() -> None:
 
     async def report(
         user: Annotated[str, TaskiqDepends(current_user, kwargs={"user_id": 7})],
-        session: str = TaskiqDepends(opened),
+        session: str = TaskiqDepends(opened),  # noqa: WPS404
     ) -> str:
         return f"{user} in {session}"
 
     task = broker.task(report)
     async with started(broker):
-        events.append(await result(task))
+        events.append(await task_result(task))
 
     assert events == [
         "database: connected",
@@ -266,30 +289,32 @@ async def test_dependency_function_takes_client() -> None:
 
 class Auth:
     def __init__(self, db: Database) -> None:
-        self.db = db  # pragma: no cover
+        self.db = db
 
 
-async def audit_auth(auth: Annotated[Auth, TaskiqDepends()]) -> None: ...  # pragma: no cover
+async def audit_auth(auth: Annotated[Auth, TaskiqDepends()]) -> None: ...
 
 
-async def audit_users(users: Annotated[UserService, TaskiqDepends()]) -> None: ...  # pragma: no cover
+async def audit_users(users: Annotated[UserService, TaskiqDepends()]) -> None: ...
 
 
-async def audit_nested(user: Annotated[str, TaskiqDepends(current_user)], auth: Auth = TaskiqDepends()) -> None:  # noqa: B008
-    ...  # pragma: no cover
+async def audit_nested(user: Annotated[str, TaskiqDepends(current_user)], auth: Auth = TaskiqDepends()) -> None:  # noqa: B008, WPS404
+    ...
 
 
-@pytest.mark.parametrize(("task", "cls"), [(audit_auth, "Auth"), (audit_users, "UserService"), (audit_nested, "Auth")])
-def test_dependency_class_with_clients_is_refused(task: Callable[..., Any], cls: str) -> None:
+@pytest.mark.parametrize(
+    ("task", "class_name"), [(audit_auth, "Auth"), (audit_users, "UserService"), (audit_nested, "Auth")]
+)
+def test_dependency_class_with_clients_is_refused(task: Callable[..., Any], class_name: str) -> None:
     # taskiq builds a dependency class from its own __init__, which nuke-di does not rewrite: the task would fail
     broker = make_broker(Dependencies())
 
-    with pytest.raises(TypeError, match=rf"{cls} takes clients in __init__ and is a taskiq dependency"):
+    with pytest.raises(TypeError, match=rf"{class_name} takes clients in __init__ and is a taskiq dependency"):
         broker.task("audit")(task)
 
     assert broker.find_task("audit") is None
-    assert "__nuke_di_owner__" not in vars(Auth)
-    assert "__nuke_di_owner__" not in vars(task)
+    assert "__nuke_di_owner__" not in Auth.__dict__
+    assert "__nuke_di_owner__" not in task.__dict__
 
 
 def test_dependency_class_with_clients_is_refused_on_setup() -> None:
@@ -313,17 +338,17 @@ async def test_dependency_class_takes_clients_through_a_function() -> None:
 
     task = broker.task(audit)
     async with started(broker):
-        events.append(await result(task))
+        events.append(await task_result(task))
 
     assert events[1] == "user-4"
 
 
-async def unreadable(value: Undefined) -> None: ...  # type: ignore[name-defined]  # noqa: F821  # pragma: no cover
+async def unreadable(missing: Undefined) -> None: ...  # type: ignore[name-defined]  # noqa: F821
 
 
 class Constant:
     def __call__(self) -> str:
-        return "constant"  # pragma: no cover
+        return "constant"
 
 
 async def mixed(
@@ -331,7 +356,7 @@ async def mixed(
     again: Annotated[str, TaskiqDepends(current_user)],
     odd: Annotated[str, TaskiqDepends(unreadable)],
     constant: Annotated[str, TaskiqDepends(Constant())],
-) -> None: ...  # pragma: no cover
+) -> None: ...
 
 
 def test_dependencies_nuke_di_cannot_read_are_left_to_taskiq() -> None:
@@ -344,7 +369,7 @@ def test_dependencies_nuke_di_cannot_read_are_left_to_taskiq() -> None:
 
 
 async def shared_dependency(db: Database) -> str:
-    return await db.fetch_user(1)  # pragma: no cover
+    return await db.fetch_user(1)
 
 
 def test_function_bound_to_fastapi_is_not_registered() -> None:
@@ -352,9 +377,9 @@ def test_function_bound_to_fastapi_is_not_registered() -> None:
     fastapi_setup(app, Dependencies())
 
     @app.get("/me")
-    async def me(user: Annotated[str, FastAPIDepends(shared_dependency)]) -> None: ...  # pragma: no cover
+    async def me(user: Annotated[str, FastAPIDepends(shared_dependency)]) -> None: ...
 
-    async def task(user: Annotated[str, TaskiqDepends(shared_dependency)]) -> None: ...  # pragma: no cover
+    async def task(user: Annotated[str, TaskiqDepends(shared_dependency)]) -> None: ...
 
     broker = make_broker(Dependencies())
     with pytest.raises(TypeError, match="takes clients in both FastAPI and taskiq handlers"):
@@ -364,7 +389,7 @@ def test_function_bound_to_fastapi_is_not_registered() -> None:
 
 
 class Session(NotSingletonClient):
-    pass
+    """A client built for every argument that takes it."""
 
 
 async def two_sessions(first: Session, second: Session) -> bool:
@@ -376,7 +401,7 @@ async def test_not_singleton_client_per_argument() -> None:
     task = broker.task(two_sessions)
 
     async with started(broker):
-        assert await result(task) is True
+        assert await task_result(task) is True
 
 
 # --- lifecycle -------------------------------------------------------------------------------------------
@@ -387,7 +412,7 @@ async def test_not_connected_without_startup() -> None:
     task = broker.task(send_report)
 
     with pytest.raises(RuntimeError, match=r"UserService is not connected: the clients connect when the worker"):
-        await result(task, 1)
+        await task_result(task, 1)
 
     assert events == []
 
@@ -397,18 +422,18 @@ async def test_task_declared_after_startup_was_not_started() -> None:
 
     async with started(broker):
 
-        async def late(users: UserService) -> None: ...  # pragma: no cover
+        async def late(users: UserService) -> None: ...
 
         task = broker.task(late)
         with pytest.raises(RuntimeError, match="UserService was not started with the worker"):
-            await result(task)
+            await task_result(task)
 
 
 async def test_failed_connect_fails_the_startup() -> None:
     deps = Dependencies()
     broker = make_broker(deps)
 
-    async def task(broken: Broken) -> None: ...  # pragma: no cover
+    async def task(broken: Broken) -> None: ...
 
     broker.task(task)
     with pytest.raises(RuntimeError, match=r"nuke-di clients failed to start: .*Broken.*unreachable"):
@@ -436,7 +461,7 @@ async def test_handlers_around_the_container() -> None:
 
     broker.task(send_report)
     async with started(broker):
-        pass
+        ...
 
     assert events == [
         "database: connected",
@@ -479,7 +504,7 @@ async def test_disconnect_after_middlewares_and_result_backend() -> None:
     broker.task(send_report)
 
     async with started(broker):
-        pass
+        ...
 
     assert events == [
         "database: connected",
@@ -511,7 +536,7 @@ async def test_shutdown_is_set_and_background_tasks_stop() -> None:
     task = broker.task(watch)
 
     async with started(broker):
-        await result(task)
+        await task_result(task)
 
     assert events == ["shutdown set: False", "background: cancelled"]
     assert seen[0].is_set()
@@ -543,7 +568,7 @@ async def test_shutdown_waits_for_tasks_in_flight() -> None:
     assert events == ["slow: worked", "slow: disconnected"]
 
 
-async def report_twice(users: UserService) -> None: ...  # pragma: no cover
+async def report_twice(users: UserService) -> None: ...
 
 
 async def test_task_function_on_two_brokers_runs_one_at_a_time() -> None:
@@ -595,9 +620,7 @@ async def test_worker_process() -> None:
 
     broker.is_worker_process = True
     receiver = Receiver(broker, max_async_tasks=10)
-    # taskiq 0.11 listens without a finish event; either way it stops when the queue runs out
-    finish = [asyncio.Event()] if "finish_event" in inspect.signature(receiver.listen).parameters else []
-    await receiver.listen(*finish)
+    await receiver.listen(*listen_arguments(receiver))
     events.append(f"listened: connected={deps.connected}")
     await broker.shutdown()
 
@@ -635,13 +658,11 @@ async def test_shared_task_on_an_in_memory_broker(order: str) -> None:
     setup(broker, Dependencies())
     if order == "after setup":
         shared = async_shared_broker.task(shared_report)
-    try:
+    with forgetting(shared):
         async_shared_broker.default_broker(broker)
         async with started(broker):
-            await (await shared.kiq(6)).wait_result(check_interval=0.01, timeout=5)
-    finally:
-        AsyncBroker.global_task_registry.pop(shared.task_name)
-        async_shared_broker.default_broker(None)  # type: ignore[arg-type]
+            kicked = await shared.kiq(6)
+            await kicked.wait_result(check_interval=0.01, timeout=5)
 
     assert events == ["database: connected", "Hello, user-6!", "database: disconnected"]
 
@@ -650,19 +671,15 @@ async def test_shared_task_in_a_worker_process() -> None:
     # `taskiq worker` imports the task modules, then builds the receiver: a shared task declared before setup()
     deps = Dependencies()
     shared: Any = async_shared_broker.task(shared_report)
-    try:
+    with forgetting(shared):
         broker = QueueBroker()
         setup(broker, deps)
         async_shared_broker.default_broker(broker)
         await shared.kiq(8)
         broker.is_worker_process = True
         receiver = Receiver(broker, max_async_tasks=10)
-        finish = [asyncio.Event()] if "finish_event" in inspect.signature(receiver.listen).parameters else []
-        await receiver.listen(*finish)
+        await receiver.listen(*listen_arguments(receiver))
         await broker.shutdown()
-    finally:
-        AsyncBroker.global_task_registry.pop(shared.task_name)
-        async_shared_broker.default_broker(None)  # type: ignore[arg-type]
 
     assert events == ["database: connected", "Hello, user-8!", "database: disconnected"]
 
@@ -689,7 +706,7 @@ async def contract_run(broker: InMemoryBroker, lifespan: bool) -> AsyncIterator[
     assert task is not None
 
     async def send() -> None:
-        await result(task)
+        await task_result(task)
 
     if lifespan:
         async with started(broker):

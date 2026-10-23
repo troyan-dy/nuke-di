@@ -44,30 +44,29 @@ async def test_spawned_task_runs() -> None:
 
 async def test_disconnect_cancels_and_awaits_tasks() -> None:
     tasks = BackgroundTasks()
-    cleaned_up = False
+    cleaned_up = asyncio.Event()
 
     async def loop() -> None:
-        nonlocal cleaned_up
         try:
             await asyncio.sleep(10)
-        finally:
+        except asyncio.CancelledError:
             await asyncio.sleep(0)
-            cleaned_up = True
+            cleaned_up.set()
+            raise
 
     task = tasks.spawn(loop())
     await asyncio.sleep(0)
     await tasks.disconnect()
 
     assert task.cancelled()
-    assert cleaned_up
+    assert cleaned_up.is_set()
 
 
 async def test_spawn_after_stop_raises_and_closes_coroutine() -> None:
     tasks = BackgroundTasks()
     await tasks.stop()
 
-    async def work() -> None:
-        pass
+    async def work() -> None: ...
 
     coro = work()
     with pytest.raises(RuntimeError, match="stopping"):
@@ -100,10 +99,10 @@ async def test_failure_is_reported_to_watcher() -> None:
     async def broken() -> None:
         raise RuntimeError("boom")
 
-    async def fine() -> None:
-        pass
+    async def fine() -> None: ...
 
-    await asyncio.wait({tasks.spawn(fine()), tasks.spawn(broken())})
+    spawned = {tasks.spawn(fine()), tasks.spawn(broken())}
+    await asyncio.wait(spawned)
     await asyncio.sleep(0)
 
     assert [str(exc) for exc in failures] == ["boom"]

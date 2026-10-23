@@ -1,7 +1,8 @@
+import inspect
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeVar
 
-from nuke_di.utils import sname
+from nuke_di.naming import sname
 
 
 class NotSingletonClient:
@@ -53,9 +54,20 @@ class Client(NotSingletonClient):
     """
 
 
-def _not_a_pydantic_type(cls: type) -> str:
+def isa(*types: type) -> Callable[[Any], bool]:
+    return lambda candidate: inspect.isclass(candidate) and issubclass(candidate, types)
+
+
+isclient = isa(Client)
+isnotsingleton = isa(NotSingletonClient)
+
+# A client class given to the container, and the client it gets back
+ClientT = TypeVar("ClientT", bound=NotSingletonClient)
+
+
+def _not_a_pydantic_type(client_class: type) -> str:
     return (
-        f"{sname(cls)} is a nuke-di client, not a pydantic type. A pydantic model takes it only with "
+        f"{sname(client_class)} is a nuke-di client, not a pydantic type. A pydantic model takes it only with "
         f"arbitrary_types_allowed, and has no JSON schema for it. A framework fills it only as a plain type hint, "
         f"not as an optional, through its nuke-di integration: e.g. in a FastAPI route declared through "
         f"nuke_di.fastapi, or in an MCP tool added after setup() of nuke_di.mcp or nuke_di.fastmcp. See "

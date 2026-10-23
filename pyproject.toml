@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "1.19.0"
+version = "2.0.0"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
@@ -111,6 +111,7 @@ dev = [
   "pytest-cov>=6.0",
   "ruff>=0.8",
   "taskiq>=0.13.0",
+  "wemake-python-styleguide>=1.8.1",
 ]
 
 [tool.uv]
@@ -134,6 +135,9 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "N", "B", "A", "UP", "ASYNC", "S", "RUF"]
 ignore = ["S101"]
+# wemake-python-styleguide runs under flake8 (setup.cfg): without this, RUF102 flags its `# noqa: WPS...` codes as
+# invalid and `ruff --fix` removes them
+external = ["WPS"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastMCP reads its markers from the defaults of a function's parameters only

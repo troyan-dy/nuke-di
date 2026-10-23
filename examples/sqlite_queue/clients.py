@@ -16,7 +16,8 @@ class Database(Client):
     """
 
     def __init__(self) -> None:
-        self.path = Path(os.environ.get("QUEUE_DB", Path(tempfile.gettempdir()) / "nuke-di-sqlite-queue.db"))
+        default = Path(tempfile.gettempdir()) / "nuke-di-sqlite-queue.db"
+        self.path = Path(os.environ.get("QUEUE_DB", default))
         self._connection: sqlite3.Connection | None = None
 
     async def connect(self) -> None:
@@ -84,5 +85,5 @@ class TaskQueue(Client):
         self._db.connection.execute("UPDATE tasks SET status = 'done' WHERE id = ?", (task_id,))
 
     async def pending(self) -> int:
-        (count,) = self._db.connection.execute("SELECT count(*) FROM tasks WHERE status = 'pending'").fetchone()
-        return int(count)
+        row = self._db.connection.execute("SELECT count(*) FROM tasks WHERE status = 'pending'").fetchone()
+        return int(row[0])

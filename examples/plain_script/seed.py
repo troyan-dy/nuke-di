@@ -5,13 +5,13 @@ from nuke_di import Dependencies
 
 from plain_script.clients import Customers, Sqlite
 
-DEMO_CUSTOMERS = [
+DEMO_CUSTOMERS = (
     ("Ada Lovelace", "ada@example.com"),
     ("Alan Turing", "alan@example.com"),
     ("Grace Hopper", "grace@example.com"),
     ("Edsger Dijkstra", "edsger@example.com"),
     ("Barbara Liskov", "barbara@example.com"),
-]
+)
 
 
 async def seed(customers: Customers, rows: Sequence[tuple[str, str]]) -> int:

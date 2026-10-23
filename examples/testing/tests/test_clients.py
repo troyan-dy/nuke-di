@@ -44,7 +44,7 @@ async def test_mock_follows_the_real_signatures(di: Dependencies) -> None:
 
 
 async def test_override_with_fake() -> None:
-    """DI.override(cls, Fake()): a hand-written fake for one block; the other clients stay real."""
+    """DI.override(client_class, Fake()): a hand-written fake for one block; the other clients stay real."""
     mailer = RecordingMailer()
     with DI.override(Mailer, mailer):
         injected = DI.inject(register)
@@ -56,9 +56,9 @@ async def test_override_with_fake() -> None:
 
 
 async def test_override_autospec_across_two_runs(di: Dependencies) -> None:
-    """override(cls) without `new`: an autospec mock that survives several `async with` cycles."""
+    """override(client_class) without `new`: an autospec mock that survives several `async with` cycles."""
     with di.override(Mailer) as mailer:
-        for email in ["dave@example.com", "erin@example.com"]:
+        for email in ("dave@example.com", "erin@example.com"):
             users = di.resolve(Signups)
             async with di:  # disconnect() flushes the container, the override stays
                 await users.register(email)

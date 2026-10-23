@@ -18,9 +18,9 @@ async def test_count_books() -> None:
     # An in-memory client runs the server's lifespan, which connects the clients
     with DI.override(Database, FakeDatabase()):
         async with Client(server) as client:
-            result = await client.call_tool("count_books", {"genre": "fantasy"})
+            tool_result = await client.call_tool("count_books", {"genre": "fantasy"})
 
-    assert result.structured_content == {"result": 1}
+    assert tool_result.structured_content == {"result": 1}
 
 
 async def test_clients_are_not_in_the_schema() -> None:
@@ -38,8 +38,10 @@ async def test_fastmcp_server() -> None:
         async with fastmcp.Client(mcp) as client:
             count = await client.call_tool("count_books", {"genre": "fantasy"})
             recommended = await client.call_tool("recommend", {})
-            (genres,) = await client.read_resource("books://genres")
+            resources = await client.read_resource("books://genres")
 
     assert (count.data, recommended.data) == (1, "Start with Dune.")
+    assert len(resources) == 1
+    genres = resources[0]
     assert isinstance(genres, TextResourceContents)
     assert genres.text == '["fantasy"]'

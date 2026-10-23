@@ -3,25 +3,44 @@ What a coding agent reads stays in step with the docs: llms.txt and llms-full.tx
 the pages, the Agent Skill links to files and headings that exist, and the plugin manifests name the skill.
 """
 
-import importlib.util
 import json
 import re
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
+from tests.sequences import single
 from tests.test_docs import anchors, split
 
 ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS = ROOT / "scripts"
 SKILL = ROOT / "skills" / "nuke-di" / "SKILL.md"
 
 
+@contextmanager
+def importable(directory: Path) -> Iterator[None]:
+    """
+    The modules of `directory` importable for the block, as they are when a script there runs.
+    """
+    sys.path.insert(0, str(directory))
+    try:
+        yield
+    finally:
+        sys.path.remove(str(directory))
+
+
 def load() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("llms_script", ROOT / "scripts" / "llms.py")
+    spec = spec_from_file_location("llms_script", SCRIPTS / "llms.py")
     assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = module_from_spec(spec)
+    # scripts/llms.py imports its sibling scripts/llms_pages.py
+    with importable(SCRIPTS):
+        spec.loader.exec_module(module)
     return module
 
 
@@ -31,18 +50,21 @@ BLOB_URL, RAW_URL = llms.BLOB_URL, llms.RAW_URL
 
 @pytest.mark.parametrize("name", ["llms.txt", "llms-full.txt"])
 def test_generated_files_are_up_to_date(name: str) -> None:
-    assert (ROOT / name).read_text(encoding="utf-8") == llms.outputs()[name], (
+    generated = llms.outputs()[name]
+    assert (ROOT / name).read_text(encoding="utf-8") == generated, (
         f"{name} is out of date: run `uv run python scripts/llms.py`"
     )
 
 
 def test_every_guide_page_is_in_the_full_text() -> None:
-    assert sorted(llms.GUIDE) == sorted(path.stem for path in (ROOT / "docs" / "guide").glob("*.md"))
+    pages = (ROOT / "docs" / "guide").glob("*.md")
+    assert sorted(llms.GUIDE) == sorted(path.stem for path in pages)
 
 
 def repository_files(text: str) -> list[tuple[str, str]]:
     """Every link to a file of this repository on GitHub: the path and the anchor."""
-    found = re.findall(rf"(?:{re.escape(BLOB_URL)}|{re.escape(RAW_URL)})([^)#\s>`,]+)(?:#([^)\s>`,]+))?", text)
+    prefixes = f"{re.escape(BLOB_URL)}|{re.escape(RAW_URL)}"
+    found = re.findall(rf"(?:{prefixes})([^)#\s>`,]+)(?:#([^)\s>`,]+))?", text)
     return [(path, anchor) for path, anchor in found]
 
 
@@ -52,17 +74,33 @@ def test_links_land_on_files_and_headings(path: str) -> None:
     targets = repository_files(prose)
 
     assert targets
-    for file, anchor in targets:
-        assert (ROOT / file).is_file(), file
-        if anchor and file.endswith(".md"):
-            assert anchor in anchors((ROOT / file).read_text(encoding="utf-8")), f"{file}#{anchor}"
+    for target, anchor in targets:
+        assert (ROOT / target).is_file(), target
+        if anchor and target.endswith(".md"):
+            headings = anchors((ROOT / target).read_text(encoding="utf-8"))
+            assert anchor in headings, f"{target}#{anchor}"
 
 
 def test_full_text_has_no_relative_links() -> None:
     # Pages are concatenated, so a link relative to one of them would lead nowhere
     prose, _ = split((ROOT / "llms-full.txt").read_text(encoding="utf-8"))
 
-    assert re.findall(r"\]\((?![a-z]+:)([^)\s]+)\)", prose) == []
+    assert not re.findall(r"\]\((?![a-z]+:)([^)\s]+)\)", prose)
+
+
+@pytest.mark.parametrize(
+    ("target", "source", "url"),
+    [
+        ("./", "README.md", BLOB_URL),
+        (".", "README.md", BLOB_URL),
+        ("../../README.md#quick-start", "docs/guide/mcp.md", f"{BLOB_URL}README.md#quick-start"),
+        ("./a/../b.md", "docs/guide/mcp.md", f"{BLOB_URL}docs/guide/b.md"),
+        ("#install", "README.md", f"{BLOB_URL}README.md#install"),
+        ("https://example.com/", "README.md", "https://example.com/"),
+    ],
+)
+def test_relative_links_resolve_against_their_page(target: str, source: str, url: str) -> None:
+    assert sys.modules["llms_pages"].absolute(target, source) == url
 
 
 def test_full_text_drops_the_navigation() -> None:
@@ -75,7 +113,8 @@ def test_full_text_drops_the_navigation() -> None:
 def frontmatter(text: str) -> dict[str, str]:
     match = re.match(r"---\n(.*?)\n---\n", text, flags=re.DOTALL)
     assert match, "SKILL.md starts with a frontmatter block"
-    return dict(line.split(": ", 1) for line in match.group(1).splitlines())
+    lines = match.group(1).splitlines()
+    return dict(line.split(": ", 1) for line in lines)
 
 
 def test_skill_frontmatter_follows_the_agent_skills_format() -> None:
@@ -92,7 +131,7 @@ def test_skill_frontmatter_follows_the_agent_skills_format() -> None:
 def test_skill_names_every_rejected_design() -> None:
     text = SKILL.read_text(encoding="utf-8")
 
-    for adr in ["0005", "0006", "0008", "0009"]:
+    for adr in ("0005", "0006", "0008", "0009"):
         assert f"docs/adr/{adr}-" in text, adr
 
 
@@ -102,7 +141,7 @@ def test_plugin_marketplace_serves_the_skill() -> None:
 
     # `/plugin install nuke-di@nuke-di`, as docs/guide/agents.md says
     assert marketplace["name"] == "nuke-di"
-    [entry] = marketplace["plugins"]
+    entry = single(marketplace["plugins"])
     assert entry["name"] == plugin["name"] == "nuke-di"
     # The repository root is the plugin, and skills/ at the root is where Claude Code looks for its skills
     assert entry["source"] == "./"

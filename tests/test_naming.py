@@ -1,10 +1,10 @@
 from nuke_di import Client
-from nuke_di.utils import qualname, sname
+from nuke_di.naming import qualname, sname
 
 
 class Outer:
     class Inner(Client):
-        pass
+        """A client nested in a class: its qualname keeps the outer class."""
 
 
 def test_sname_names_a_class_a_function_and_an_instance() -> None:
@@ -18,7 +18,7 @@ def test_sname_names_a_class_a_function_and_an_instance() -> None:
 
 def test_qualname_keeps_the_outer_class_and_drops_the_function() -> None:
     class Local(Client):
-        pass
+        """A client defined in a function: its `__qualname__` carries the function and `<locals>`."""
 
     assert qualname(Outer.Inner) == "Outer.Inner"
     assert qualname(Local) == "Local"

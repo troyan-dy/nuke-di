@@ -9,18 +9,23 @@ import sys
 import weakref
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
+from operator import attrgetter
 from typing import TYPE_CHECKING, Annotated, Any
 
-import fastapi.routing
 import pytest
-from fastapi import APIRouter, Depends, FastAPI, Header, WebSocket
+from fastapi import APIRouter, Depends, FastAPI, Header, Request, WebSocket
+from fastapi import routing as fastapi_routing
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from nuke_di import DI, BackgroundTasks, Client, ConnectError, Dependencies, NotSingletonClient, Shutdown
-from nuke_di.fastapi import _FASTAPI, ClientRoute, ClientRouter, setup
+from nuke_di.fastapi import ClientRoute, ClientRouter, setup
+from nuke_di.fastapi.bindings import _FASTAPI
 from nuke_di.integration.testing import check
+
+# How a client connected and disconnected: (name, connect outcome, disconnect outcome)
+_OUTCOMES = attrgetter("name", "connect_outcome", "disconnect_outcome")
 
 if TYPE_CHECKING:
     from decimal import Decimal
@@ -28,9 +33,9 @@ if TYPE_CHECKING:
 events: list[str] = []
 
 # FastAPI 0.14x applies included routers lazily instead of copying their routes
-LAZY_INCLUDES = hasattr(fastapi.routing, "_IncludedRouter")
+LAZY_INCLUDES = hasattr(fastapi_routing, "_IncludedRouter")
 # FastAPI 0.11x and later run the lifespan of a router included into another app
-MERGES_LIFESPANS = hasattr(fastapi.routing, "_merge_lifespan_context")
+MERGES_LIFESPANS = hasattr(fastapi_routing, "_merge_lifespan_context")
 
 
 @pytest.fixture(autouse=True)
@@ -56,7 +61,8 @@ class UserService(Client):
         self.db = db
 
     async def greet(self, user_id: int) -> str:
-        return f"Hello, {await self.db.fetch_user(user_id)}!"
+        name = await self.db.fetch_user(user_id)
+        return f"Hello, {name}!"
 
 
 class FakeDatabase(Database):
@@ -65,7 +71,7 @@ class FakeDatabase(Database):
 
 
 class Session(NotSingletonClient):
-    pass
+    """A client built for every argument that takes it."""
 
 
 class Pooled(NotSingletonClient):
@@ -84,7 +90,7 @@ class Unbuildable(Client):
 
 
 class CustomRoute(APIRoute):
-    pass
+    """A route class of the app's own, which fills no clients."""
 
 
 def make_app(deps: Dependencies, **kwargs: Any) -> FastAPI:
@@ -141,9 +147,9 @@ def test_clients_stay_out_of_openapi() -> None:
     app = make_app(Dependencies())
     app.get("/users/{user_id}")(greet)
 
-    parameters = app.openapi()["paths"]["/users/{user_id}"]["get"]["parameters"]
+    documented = app.openapi()["paths"]["/users/{user_id}"]["get"]["parameters"]
 
-    assert [parameter["name"] for parameter in parameters] == ["user_id"]
+    assert [parameter["name"] for parameter in documented] == ["user_id"]
 
 
 async def greet_directly() -> None:
@@ -184,7 +190,7 @@ async def me(user: Annotated[str, Depends(current_user)]) -> str:
     return user
 
 
-async def me_by_default(user: str = Depends(current_user)) -> str:
+async def me_by_default(user: str = Depends(current_user)) -> str:  # noqa: WPS404 - the default bind() reads
     return user
 
 
@@ -362,7 +368,7 @@ def test_app_lifespan_runs_inside_connected_clients() -> None:
     app.get("/users/{user_id}")(greet)
 
     with TestClient(app):
-        pass
+        ...
 
     assert events == ["database: connected", "app: startup", "app: shutdown", "database: disconnected"]
 
@@ -373,18 +379,18 @@ def test_app_lifespan_sees_connect_timings() -> None:
 
     @asynccontextmanager
     async def timed(app: FastAPI) -> AsyncIterator[None]:
-        seen.extend((t.name, t.connect_outcome, t.disconnect_outcome) for t in deps.timings)
+        seen.extend(map(_OUTCOMES, deps.timings))
         yield
 
     app = make_app(deps, lifespan=timed)
     app.get("/users/{user_id}")(greet)
 
     with TestClient(app):
-        pass
+        ...
 
     assert ("Database", "ok", None) in seen
     # The container disconnects after the app's lifespan, the timings stay on it
-    assert {t.name: t.disconnect_outcome for t in deps.timings}["Database"] == "ok"
+    assert {timing.name: timing.disconnect_outcome for timing in deps.timings}["Database"] == "ok"
 
 
 async def watch(shutdown: Shutdown, tasks: BackgroundTasks) -> None:
@@ -418,10 +424,10 @@ def test_failed_connect_fails_startup_and_forgets_clients() -> None:
     app.get("/")(broken)
 
     # A SystemExit would escape the event loop of the server, so the lifespan raises a plain error
-    with pytest.raises(RuntimeError, match="nuke-di clients failed to start") as info, TestClient(app):
-        pass  # pragma: no cover
+    with pytest.raises(RuntimeError, match="nuke-di clients failed to start") as excinfo, TestClient(app):
+        ...
 
-    assert isinstance(info.value.__cause__, ConnectError)
+    assert isinstance(excinfo.value.__cause__, ConnectError)
     assert not deps.connected
     assert deps.clients == {}
 
@@ -436,7 +442,7 @@ def test_failed_resolution_fails_startup_and_flushes() -> None:
     app.get("/")(unbuildable)
 
     with pytest.raises(TypeError, match=r'Argument "retries" of "Unbuildable\.__init__"'), TestClient(app):
-        pass  # pragma: no cover
+        ...
 
     assert deps.clients == {}
 
@@ -446,12 +452,12 @@ def test_failed_resolution_leaves_no_timings_of_an_earlier_run() -> None:
     app = make_app(deps)
     app.get("/users/{user_id}")(greet)
     with TestClient(app):
-        pass
+        ...
     assert deps.timings != []
 
     app.get("/")(unbuildable)
     with pytest.raises(TypeError), TestClient(app):
-        pass  # pragma: no cover
+        ...
 
     assert deps.timings == []
 
@@ -464,7 +470,7 @@ async def test_container_connected_before_startup_is_left_alone() -> None:
     await deps.connect()
 
     with pytest.raises(RuntimeError, match="already connected"), TestClient(app):
-        pass  # pragma: no cover
+        ...
 
     assert deps.connected
     await deps.disconnect()
@@ -489,7 +495,8 @@ def test_class_dependency_is_left_to_fastapi() -> None:
 
 class Auth:
     def __init__(self, users: UserService, user_id: int = 1) -> None:
-        self.users, self.user_id = users, user_id
+        self.users = users
+        self.user_id = user_id
 
 
 async def whoami(auth: Annotated[Auth, Depends()]) -> str:
@@ -517,7 +524,7 @@ async def test_failed_startup_of_another_app_keeps_the_running_one() -> None:
 
     with TestClient(first) as client:
         with pytest.raises(RuntimeError, match="already connected"), TestClient(second):
-            pass  # pragma: no cover
+            ...
 
         assert client.get("/users/1").json() == "Hello, user-1!"
 
@@ -537,18 +544,23 @@ def test_routes_of_dropped_apps_are_not_connected() -> None:
     gc.collect()
 
     with TestClient(make_closure_app(deps)):
-        pass
+        ...
 
     assert events.count("pooled: connected") == 1
 
 
-def test_container_is_garbage_collected() -> None:
+def collectable_container() -> weakref.ref[Dependencies]:
+    """
+    A reference to the container of an app set up and dropped.
+    """
     deps = Dependencies()
     app = make_app(deps)
     app.get("/users/{user_id}")(greet)
-    collected = weakref.ref(deps)
+    return weakref.ref(deps)
 
-    del deps, app
+
+def test_container_is_garbage_collected() -> None:
+    collected = collectable_container()
     gc.collect()
 
     assert collected() is None
@@ -600,18 +612,32 @@ def test_app_without_setup_explains() -> None:
 
 
 def test_function_on_two_containers() -> None:
-    first, second = Dependencies(), Dependencies()
-    first_app, second_app = make_app(first), make_app(second)
+    second = Dependencies()
+    first_app = make_app(Dependencies())
+    second_app = make_app(second)
     first_app.get("/users/{user_id}")(greet)
     second_app.get("/users/{user_id}")(greet)
 
-    with second.override(Database, FakeDatabase()), TestClient(first_app) as a, TestClient(second_app) as b:
-        assert a.get("/users/1").json() == "Hello, user-1!"
-        assert b.get("/users/1").json() == "Hello, alice!"
+    with second.override(Database, FakeDatabase()):
+        with TestClient(first_app) as client_a, TestClient(second_app) as client_b:
+            assert client_a.get("/users/1").json() == "Hello, user-1!"
+            assert client_b.get("/users/1").json() == "Hello, alice!"
 
 
 async def database_audit(db: Database) -> None:
-    events.append(f"audit: {type(db).__name__}")
+    class_name = type(db).__name__
+    events.append(f"audit: {class_name}")
+
+
+def audits() -> list[str]:
+    return [event for event in events if event.startswith("audit")]
+
+
+def audited(*class_names: str) -> list[str]:
+    """
+    The audits of one served() per class of the database: one per request, four requests each.
+    """
+    return [f"audit: {class_name}" for class_name in class_names for _ in range(4)]
 
 
 def make_nested_app(deps: Dependencies) -> FastAPI:
@@ -646,8 +672,8 @@ def served(client: TestClient) -> list[str]:
 def test_included_routes_of_an_app_built_before_another_container() -> None:
     # FastAPI 0.137+ reads the signatures of included routes on the app's first request, after the second
     # container has bound the same functions
-    first, second = Dependencies(), Dependencies()
-    first_app = make_nested_app(first)
+    second = Dependencies()
+    first_app = make_nested_app(Dependencies())
     second_app = make_nested_app(second)
 
     with TestClient(first_app) as client:
@@ -655,22 +681,22 @@ def test_included_routes_of_an_app_built_before_another_container() -> None:
     with second.override(Database, FakeDatabase()), TestClient(second_app) as client:
         assert served(client) == ["Hello, alice!", "Hello, alice!", "alice", "Hello, alice!: Hello, alice!"]
 
-    audits = [event for event in events if event.startswith("audit")]
     # Once per request: FastAPI caches the dependency within it
-    assert audits == ["audit: Database"] * 4 + ["audit: FakeDatabase"] * 4
+    assert audits() == audited("Database", "FakeDatabase")
 
 
 def test_included_routes_on_two_containers_at_once() -> None:
-    first, second = Dependencies(), Dependencies()
-    first_app, second_app = make_nested_app(first), make_nested_app(second)
+    second = Dependencies()
+    first_app = make_nested_app(Dependencies())
+    second_app = make_nested_app(second)
 
-    with second.override(Database, FakeDatabase()), TestClient(first_app) as a, TestClient(second_app) as b:
-        assert served(a) == ["Hello, user-1!", "Hello, user-2!", "user-3", "Hello, user-1!: Hello, user-4!"]
-        assert served(b) == ["Hello, alice!", "Hello, alice!", "alice", "Hello, alice!: Hello, alice!"]
-        assert served(a) == ["Hello, user-1!", "Hello, user-2!", "user-3", "Hello, user-1!: Hello, user-4!"]
+    with second.override(Database, FakeDatabase()):
+        with TestClient(first_app) as client_a, TestClient(second_app) as client_b:
+            assert served(client_a) == ["Hello, user-1!", "Hello, user-2!", "user-3", "Hello, user-1!: Hello, user-4!"]
+            assert served(client_b) == ["Hello, alice!", "Hello, alice!", "alice", "Hello, alice!: Hello, alice!"]
+            assert served(client_a) == ["Hello, user-1!", "Hello, user-2!", "user-3", "Hello, user-1!: Hello, user-4!"]
 
-    audits = [event for event in events if event.startswith("audit")]
-    assert audits == ["audit: Database"] * 4 + ["audit: FakeDatabase"] * 4 + ["audit: Database"] * 4
+    assert audits() == audited("Database", "FakeDatabase", "Database")
 
 
 def make_api(deps: Dependencies) -> FastAPI:
@@ -683,7 +709,9 @@ def make_api(deps: Dependencies) -> FastAPI:
 
 
 def served_by_api(client: TestClient) -> list[str]:
-    return [client.get("/users/1").json(), client.get("/me", headers={"X-User-Id": "2"}).json()]
+    user = client.get("/users/1").json()
+    me = client.get("/me", headers={"X-User-Id": "2"}).json()
+    return [user, me]
 
 
 @pytest.mark.skipif(not MERGES_LIFESPANS, reason="FastAPI runs the lifespan of an included router")
@@ -735,12 +763,14 @@ def test_app_without_setup_on_a_running_container() -> None:
 
 def test_app_without_setup_while_two_containers_run_explains() -> None:
     # Two apps fill the function, each from its container: an app without setup() cannot tell which is its own
-    first, second = Dependencies(), Dependencies()
     plain = FastAPI()
     plain.get("/users/{user_id}")(greet)
 
-    with TestClient(make_api(first)), TestClient(make_api(second)), TestClient(plain) as client:
-        with pytest.raises(RuntimeError, match=r"UserService is not connected: start the app with its lifespan"):
+    with TestClient(make_api(Dependencies())), TestClient(make_api(Dependencies())):
+        with (
+            TestClient(plain) as client,
+            pytest.raises(RuntimeError, match=r"UserService is not connected: start the app with its lifespan"),
+        ):
             client.get("/users/1")
 
 
@@ -754,16 +784,18 @@ async def own_user(user: Annotated[str, Depends(overriding_user)]) -> str:
 
 def test_dependency_overrides_on_two_containers_at_once() -> None:
     # FastAPI reads the signature of an override on every request, after the second container bound it too
-    first, second = Dependencies(), Dependencies()
-    first_app, second_app = make_api(first), make_api(second)
-    for app in (first_app, second_app):
-        app.get("/own")(own_user)
+    second = Dependencies()
+    first_app = make_api(Dependencies())
+    second_app = make_api(second)
+    first_app.get("/own")(own_user)
+    second_app.get("/own")(own_user)
     first_app.dependency_overrides[header_user] = overriding_user
 
-    with second.override(Database, FakeDatabase()), TestClient(first_app) as a, TestClient(second_app) as b:
-        assert a.get("/me").json() == "Database"
-        assert b.get("/own").json() == "FakeDatabase"
-        assert b.get("/me", headers={"X-User-Id": "2"}).json() == "alice"
+    with second.override(Database, FakeDatabase()):
+        with TestClient(first_app) as client_a, TestClient(second_app) as client_b:
+            assert client_a.get("/me").json() == "Database"
+            assert client_b.get("/own").json() == "FakeDatabase"
+            assert client_b.get("/me", headers={"X-User-Id": "2"}).json() == "alice"
 
 
 def test_setup_refuses_foreign_route_class() -> None:
@@ -821,10 +853,11 @@ async def greeting_of(users: UserService) -> str:
     return await users.greet(5)
 
 
-async def merged_context(request: fastapi.Request, greeting: str = Depends(greeting_of)) -> Decimal:
+async def merged_context(request: Request, greeting: str = Depends(greeting_of)) -> Decimal:  # noqa: WPS404
     # The shape of Strawberry's GraphQLRouter, which wraps the user's context getter in a dependency whose
-    # return type is imported only under TYPE_CHECKING
-    return f"{request.url.path}: {greeting}"  # type: ignore[return-value]
+    # return type is imported only under TYPE_CHECKING; the Depends() default is the one bind() reads there
+    path = request.url.path
+    return f"{path}: {greeting}"  # type: ignore[return-value]
 
 
 async def with_context(context: Annotated[str, Depends(merged_context)]) -> str:
@@ -859,8 +892,8 @@ async def with_deferred(context: Annotated[str, Depends(deferred_context)]) -> s
 
 @pytest.mark.skipif(sys.version_info < (3, 14), reason="annotations evaluated when read, Python 3.14")
 def test_dependency_with_a_deferred_unevaluable_hint_still_reaches_its_dependencies() -> None:
-    namespace: dict[str, Any] = {"Request": fastapi.Request, "Depends": Depends, "greeting_of": greeting_of}
-    exec(compile(DEFERRED, "<deferred>", "exec", dont_inherit=True), namespace)  # noqa: S102
+    namespace: dict[str, Any] = {"Request": Request, "Depends": Depends, "greeting_of": greeting_of}
+    exec(compile(DEFERRED, "<deferred>", "exec", dont_inherit=True), namespace)  # noqa: S102, WPS421
 
     app = make_app(Dependencies())
     app.get("/deferred")(namespace["with_deferred"])
@@ -897,7 +930,7 @@ def test_routes_outside_the_app_are_not_connected() -> None:
     unused.get("/")(two_pooled)
 
     with TestClient(app):
-        pass
+        ...
 
     assert "pooled: connected" not in events
 
@@ -911,7 +944,8 @@ class Prefix:
 
 
 async def addressed(prefix: Annotated[str, Depends(Prefix())], users: UserService) -> str:
-    return f"{prefix} {await users.greet(1)}"
+    greeting = await users.greet(1)
+    return f"{prefix} {greeting}"
 
 
 def test_callable_object_dependency_is_left_to_fastapi() -> None:
@@ -935,6 +969,10 @@ def test_app_router_include_router_is_tracked_too() -> None:
     assert "include audit" in events
 
 
+# The error of a route reached only through a plain APIRouter
+NOT_STARTED = r"UserService was not started with the app: include the router of its route .* plain APIRouter"
+
+
 def test_route_the_app_does_not_know_explains() -> None:
     deps = Dependencies()
     app = make_app(deps)
@@ -949,8 +987,7 @@ def test_route_the_app_does_not_know_explains() -> None:
             # Older FastAPI copies the routes through the route class, so nuke-di sees them
             assert client.get("/users/1").json() == "Hello, user-1!"
             return
-        expected = r"UserService was not started with the app: include the router of its route .* plain APIRouter"
-        with pytest.raises(RuntimeError, match=expected):
+        with pytest.raises(RuntimeError, match=NOT_STARTED):
             client.get("/users/1")
 
 
@@ -994,7 +1031,8 @@ def test_dependency_with_header_and_client() -> None:
 async def chat(websocket: WebSocket, user: Annotated[str, Depends(current_user)], users: UserService) -> None:
     await websocket.accept()
     user_id = int(await websocket.receive_text())
-    await websocket.send_text(f"{user}: {await users.greet(user_id)}")
+    greeting = await users.greet(user_id)
+    await websocket.send_text(f"{user}: {greeting}")
     await websocket.close()
 
 
@@ -1003,11 +1041,19 @@ def test_websocket_endpoint_gets_clients() -> None:
     app = make_app(deps, dependencies=[Depends(app_audit)])
     app.websocket("/chat", dependencies=[Depends(route_audit)])(chat)
 
-    with deps.override(Database, FakeDatabase()), TestClient(app) as client, client.websocket_connect("/chat") as ws:
-        ws.send_text("2")
-        assert ws.receive_text() == "Hello, alice!: Hello, alice!"
+    with deps.override(Database, FakeDatabase()), TestClient(app) as client:
+        assert chatted(client, "/chat", "2") == "Hello, alice!: Hello, alice!"
 
     assert sorted(events) == ["app audit", "route audit"]
+
+
+def chatted(client: TestClient, path: str, text: str) -> str:
+    """
+    What the chat at `path` answers to `text`.
+    """
+    with client.websocket_connect(path) as ws:
+        ws.send_text(text)
+        return ws.receive_text()
 
 
 def test_websocket_of_included_routers_gets_clients() -> None:
@@ -1019,9 +1065,8 @@ def test_websocket_of_included_routers_gets_clients() -> None:
     outer.include_router(inner, prefix="/in", dependencies=[Depends(include_audit)])
     app.include_router(outer, prefix="/out")
 
-    with TestClient(app) as client, client.websocket_connect("/out/in/chat") as ws:
-        ws.send_text("2")
-        assert ws.receive_text() == "Hello, user-1!: Hello, user-2!"
+    with TestClient(app) as client:
+        assert chatted(client, "/out/in/chat", "2") == "Hello, user-1!: Hello, user-2!"
 
     assert sorted(events[1:-1]) == ["include audit", "outer audit", "router audit"]
 
@@ -1036,9 +1081,7 @@ def test_websocket_added_without_decorator_gets_clients() -> None:
 
     with TestClient(app) as client:
         for path in ("/chat", "/app-chat"):
-            with client.websocket_connect(path) as ws:
-                ws.send_text("3")
-                assert ws.receive_text() == "Hello, user-1!: Hello, user-3!"
+            assert chatted(client, path, "3") == "Hello, user-1!: Hello, user-3!"
 
 
 def test_websocket_of_a_router_the_app_does_not_include_starts_nothing() -> None:

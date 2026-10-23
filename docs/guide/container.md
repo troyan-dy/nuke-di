@@ -7,13 +7,13 @@ when you need isolation, e.g. in tests.
 
 | Method               | Description                                                             |
 |----------------------|-------------------------------------------------------------------------|
-| `resolve(cls)`       | Build `cls` and its dependency tree. Idempotent for `Client`.           |
+| `resolve(client_class)`       | Build `client_class` and its dependency tree. Idempotent for `Client`.           |
 | `inject(func)`       | Return `functools.partial(func, ...)` with client arguments bound. Every argument of `func` except `*args` / `**kwargs` must have a type hint. |
 | `connect()`          | Call `connect()` on every resolved client, each after its dependencies. |
 | `disconnect()`       | Call `disconnect()` on every client, each after its consumers, then `flush()` the container. |
 | `async with`         | `connect()` on enter, `disconnect()` on exit.                           |
-| `mock(cls, new=None)`| Register a Replacement for `cls` (an autospec mock by default) until the next `flush()`. Must come before `cls` is resolved. |
-| `override(cls, new=None)` | A Replacement for the duration of a `with` block, then `flush()`; see [Testing](testing.md). |
+| `mock(client_class, new=None)`| Register a Replacement for `client_class` (an autospec mock by default) until the next `flush()`. Must come before `client_class` is resolved. |
+| `override(client_class, new=None)` | A Replacement for the duration of a `with` block, then `flush()`; see [Testing](testing.md). |
 | `flush()`            | Forget every resolved client.                                           |
 | `timings`            | One `ClientTiming` per client of the last `connect()`; see [Startup timings](clients.md#startup-timings). |
 | `graph()`            | A `Graph` of the resolved clients with their dependencies, `to_mermaid()` included; see [The graph](clients.md#the-graph). |

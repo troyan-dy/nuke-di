@@ -37,8 +37,9 @@ class Ledger(Client):
         print(f"ledger: disconnected, totals {self.totals()}")
 
     def record(self, customer: str, amount: Decimal) -> Decimal:
-        self._totals[customer] = self._totals.get(customer, Decimal(0)) + amount
-        return self._totals[customer]
+        total = self._totals.get(customer, Decimal(0)) + amount
+        self._totals[customer] = total
+        return total
 
     def totals(self) -> dict[str, str]:
         return {customer: str(total) for customer, total in self._totals.items()}

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -18,12 +19,12 @@ pytest.importorskip("mypy")
 # The blocks that the "Testing" blocks build on, by content, at the file each one names in its first line:
 # the Quick start of README.md, which has no name, and the modules of the "Workers and jobs" page
 QUICK_START = "quick_start.py"
-MODULES = [
+MODULES: Final = (
     "class UserService(Client):",  # Quick start: Database, UserService, handler
     "class Warehouse(Client):",  # app/clients.py: Postgres, Warehouse, Queue
     "Option(help=",  # app/jobs/sync.py with its Parameters: sync(pg, warehouse, day=..., tables=...)
     "async def consumer(queue: Queue, shutdown: Shutdown)",  # app/workers/consumer.py
-]
+)
 # Every "Testing" block says in prose what it takes from the Quick start or the jobs; a fragment imports nothing
 QUICK_START_HEADER = """
 from nuke_di import DI, Dependencies
@@ -101,49 +102,77 @@ def python_blocks(text: str) -> list[str]:
     for block in split(text)[1]:
         lines = textwrap.dedent(block).splitlines()
         if lines[0] == "```python":
-            blocks.append("\n".join(lines[1:-1]) + "\n")
+            code = "\n".join(lines[1:-1])
+            blocks.append(f"{code}\n")
     return blocks
 
 
 def strict_mypy(root: Path) -> subprocess.CompletedProcess[str]:
     # No config file in `root`: the flags are the whole configuration
-    command = [sys.executable, "-m", "mypy", "--strict", "--cache-dir", str(root / ".mypy_cache"), "."]
+    command = [
+        sys.executable,
+        "-m",
+        "mypy",
+        "--strict",
+        "--cache-dir",
+        str(root / ".mypy_cache"),
+        ".",
+    ]
     return subprocess.run(command, capture_output=True, text=True, check=False, cwd=root)  # noqa: S603 - fixed command
 
 
-def test_testing_guide_examples_pass_strict_mypy(tmp_path: Path) -> None:
+def lay_out(root: Path, block: str) -> None:
+    """
+    A block the "Testing" blocks build on, at the file its first line names; the Quick start at quick_start.py.
+    """
+    first = block.splitlines()[0]
+    name = first.removeprefix("# ") if first.startswith("# app/") else QUICK_START
+    path = root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(block)
+
+
+def lay_out_modules(root: Path) -> None:
+    """
+    The blocks that MODULES names, laid out under `root` with an `__init__.py` in every package.
+    """
     # The guide page first: README.md has blocks with the same markers, in a single-file sync.py, which would
     # otherwise be found first and laid out at the wrong path
     blocks = python_blocks(document(page="workers-and-jobs")) + python_blocks(document())
     for marker in MODULES:
-        block = next(block for block in blocks if marker in block)
-        first = block.splitlines()[0]
-        path = tmp_path / (first.removeprefix("# ") if first.startswith("# app/") else QUICK_START)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(block)
-    for package in tmp_path.glob("app/**/"):
+        lay_out(root, next(block for block in blocks if marker in block))
+    for package in root.glob("app/**/"):
         (package / "__init__.py").touch()
 
+
+def header(block: str) -> str:
+    """
+    The imports a "Testing" block needs on top of its own.
+    """
+    if "from app." in block:
+        return ""  # a whole test module, with its own imports from the app laid out above
+    if "Database" in block:
+        return QUICK_START_HEADER
+    if re.search(r"\b(sync|consumer)\b", block):
+        return JOBS_HEADER
+    return ""
+
+
+def test_testing_guide_examples_pass_strict_mypy(tmp_path: Path) -> None:
+    lay_out_modules(tmp_path)
     examples = python_blocks(document(page="testing"))
     assert examples
     for number, block in enumerate(examples, start=1):
-        header = ""
-        if "from app." in block:
-            pass  # a whole test module, with its own imports from the app laid out above
-        elif "Database" in block:
-            header = QUICK_START_HEADER
-        elif re.search(r"\b(sync|consumer)\b", block):
-            header = JOBS_HEADER
-        (tmp_path / f"testing_{number}.py").write_text(header + block)
+        (tmp_path / f"testing_{number}.py").write_text(header(block) + block)
 
-    result = strict_mypy(tmp_path)
+    checked = strict_mypy(tmp_path)
 
-    assert result.returncode == 0, result.stdout
+    assert checked.returncode == 0, checked.stdout
 
 
 def test_public_api_passes_strict_mypy(tmp_path: Path) -> None:
     (tmp_path / "test_snippet.py").write_text(SNIPPET)
 
-    result = strict_mypy(tmp_path)
+    checked = strict_mypy(tmp_path)
 
-    assert result.returncode == 0, result.stdout
+    assert checked.returncode == 0, checked.stdout

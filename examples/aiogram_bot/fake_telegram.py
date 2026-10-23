@@ -40,7 +40,8 @@ class FakeTelegram(BaseSession):
             return User(id=bot.id, is_bot=True, first_name="Demo", username="demo_bot")
         if isinstance(method, GetUpdates):
             if self.updates:
-                updates, self.updates = self.updates, []
+                updates = self.updates
+                self.updates = []
                 return updates
             # Nothing more to come: stop the polling, as Ctrl+C would, and wait as a long poll does
             self.stopping = asyncio.create_task(self.dp.stop_polling())
@@ -48,14 +49,15 @@ class FakeTelegram(BaseSession):
         if isinstance(method, SendMessage):
             print(f"bot -> chat {method.chat_id}: {method.text}")
             self.sent.append(method.text)
+            chat = Chat(id=int(method.chat_id), type="private")
             return Message(
-                message_id=len(self.sent), date=datetime.now(UTC), chat=Chat(id=int(method.chat_id), type="private")
+                message_id=len(self.sent),
+                date=datetime.now(UTC),
+                chat=chat,
             )
         raise NotImplementedError(type(method).__name__)
 
-    async def stream_content(self, *args: Any, **kwargs: Any) -> AsyncGenerator[bytes, None]:
+    def stream_content(self, *args: Any, **kwargs: Any) -> AsyncGenerator[bytes, None]:
         raise NotImplementedError
-        yield b""
 
-    async def close(self) -> None:
-        pass
+    async def close(self) -> None: ...

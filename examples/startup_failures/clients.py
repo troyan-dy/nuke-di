@@ -2,6 +2,9 @@ import asyncio
 
 from nuke_di import Client
 
+# Longer than any connect timeout
+HOUR_SECONDS = 3600
+
 
 class Postgres(Client):
     async def connect(self) -> None:
@@ -26,7 +29,7 @@ class Search(Client):
     """A cluster behind a firewall that drops the packets: connect() never returns."""
 
     async def connect(self) -> None:
-        await asyncio.sleep(3600)
+        await asyncio.sleep(HOUR_SECONDS)
 
 
 class Orders(Client):

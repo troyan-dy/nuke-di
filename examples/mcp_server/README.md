@@ -17,7 +17,7 @@ A bookshop as an MCP server, twice: on the official SDK's `MCPServer` with `nuke
 $ cd examples
 $ uv run python -m mcp_server.ask
 database: connected
-[10/10/26 18:43:49] INFO     Connected 2 clients in 0.00s (slowest:   core.py:177
+[10/10/26 18:43:49] INFO     Connected 2 clients in 0.00s (slowest:   core.py:111
                              Database 0.00s, Catalog 0.00s)
 tool count_books(genre): How many books of a genre the shop has.
 tool list_books(genre): The titles of a genre.

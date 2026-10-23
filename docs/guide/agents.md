@@ -116,7 +116,7 @@ class Checkout(Client):
 
 
 def qualified(node: Node) -> str:
-    return f"{node.cls.__module__}.{node.cls.__qualname__}"
+    return f"{node.client_class.__module__}.{node.client_class.__qualname__}"
 
 
 def graph_json(deps: Dependencies) -> str:

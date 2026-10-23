@@ -14,20 +14,28 @@ from pathlib import Path
 from nuke_di import Dependencies, Shutdown
 
 
+class Messages:
+    """
+    m1, m2 and m3, one per get().
+    """
+
+    def __init__(self, shutdown: Shutdown) -> None:
+        self.shutdown = shutdown
+        self.left = iter(["m1", "m2", "m3"])
+
+    async def get(self) -> str:
+        message = next(self.left)
+        if message == "m2":
+            self.shutdown.set()  # what SIGTERM would do, while m2 is in hand
+        return message
+
+
 async def test_stops_after_the_current_message() -> None:
     module = importlib.import_module("consumer")
     deps = Dependencies()
     queue = deps.mock(module.Queue)
     shutdown = deps.resolve(Shutdown)
-    messages = iter(["m1", "m2", "m3"])
-
-    async def get() -> str:
-        message = next(messages)
-        if message == "m2":
-            shutdown.set()  # what SIGTERM would do, while m2 is in hand
-        return message
-
-    queue.get.side_effect = get
+    queue.get.side_effect = Messages(shutdown).get
     injected = deps.inject(module.consume)
     async with deps:
         await asyncio.wait_for(injected(), timeout=5)

@@ -9,16 +9,16 @@ import os
 import sqlite3
 import tempfile
 from collections.abc import Iterator
-from dataclasses import dataclass
 from typing import Any
 
 from nuke_di import Client
-from pydantic import BaseModel
+
+from service_layout.models import Order, OutboxRow
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    item TEXT NOT NULL,
+    product TEXT NOT NULL,
     quantity INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS outbox (
@@ -41,11 +41,11 @@ class Settings(Client):
     """
 
     def __init__(self, db_path: str | None = None, poll_seconds: float | None = None) -> None:
-        default_path = os.path.join(tempfile.gettempdir(), "service_layout.db")
-        self.db_path = db_path if db_path is not None else os.environ.get("SERVICE_DB", default_path)
-        self.poll_seconds = (
-            poll_seconds if poll_seconds is not None else float(os.environ.get("OUTBOX_POLL_SECONDS", "1"))
-        )
+        default_path = os.path.join(tempfile.gettempdir(), "service_layout_orders.db")
+        self.db_path = os.environ.get("SERVICE_DB", default_path) if db_path is None else db_path
+        if poll_seconds is None:
+            poll_seconds = float(os.environ.get("OUTBOX_POLL_SECONDS", "1"))
+        self.poll_seconds = poll_seconds
 
 
 class Database(Client):
@@ -89,21 +89,7 @@ class Broker(Client):
     async def disconnect(self) -> None:
         print("broker: disconnected")
 
-    async def publish(self, topic: str, payload: dict[str, Any]) -> None:
-        pass
-
-
-class Order(BaseModel):
-    id: int
-    item: str
-    quantity: int
-
-
-@dataclass(frozen=True)
-class OutboxRow:
-    id: int
-    topic: str
-    payload: dict[str, Any]
+    async def publish(self, topic: str, payload: dict[str, Any]) -> None: ...
 
 
 class Outbox(Client):
@@ -118,16 +104,15 @@ class Outbox(Client):
         """
         Called inside the caller's transaction, so the event is stored if and only if the change is.
         """
-        conn.execute(
-            "INSERT INTO outbox (topic, payload, created_at) VALUES (?, ?, ?)", (topic, json.dumps(payload), _now())
-        )
+        row = (topic, json.dumps(payload), _now())
+        conn.execute("INSERT INTO outbox (topic, payload, created_at) VALUES (?, ?, ?)", row)
 
     async def pending(self, limit: int) -> list[OutboxRow]:
         with self._db.transaction() as conn:
             rows = conn.execute(
                 "SELECT id, topic, payload FROM outbox WHERE sent_at IS NULL ORDER BY id LIMIT ?", (limit,)
             ).fetchall()
-        return [OutboxRow(id=row[0], topic=row[1], payload=json.loads(row[2])) for row in rows]
+        return [_outbox_row(row) for row in rows]
 
     async def mark_sent(self, row_id: int) -> None:
         with self._db.transaction() as conn:
@@ -139,20 +124,28 @@ class Outbox(Client):
             return conn.execute("DELETE FROM outbox WHERE sent_at IS NOT NULL AND sent_at <= ?", (before,)).rowcount
 
 
+def _outbox_row(row: tuple[Any, ...]) -> OutboxRow:
+    row_id, topic, payload = row
+    return OutboxRow(id=row_id, topic=topic, payload=json.loads(payload))
+
+
 class Orders(Client):
     def __init__(self, db: Database, outbox: Outbox) -> None:
         self._db = db
         self._outbox = outbox
 
-    async def create(self, item: str, quantity: int) -> Order:
+    async def create(self, product: str, quantity: int) -> Order:
         with self._db.transaction() as conn:
-            cursor = conn.execute("INSERT INTO orders (item, quantity) VALUES (?, ?)", (item, quantity))
+            cursor = conn.execute("INSERT INTO orders (product, quantity) VALUES (?, ?)", (product, quantity))
             assert cursor.lastrowid is not None
-            order = Order(id=cursor.lastrowid, item=item, quantity=quantity)
+            order = Order(id=cursor.lastrowid, product=product, quantity=quantity)
             self._outbox.add(conn, "orders", {"event": "order_created", "order_id": order.id})
         return order
 
     async def get(self, order_id: int) -> Order | None:
         with self._db.transaction() as conn:
-            row = conn.execute("SELECT id, item, quantity FROM orders WHERE id = ?", (order_id,)).fetchone()
-        return None if row is None else Order(id=row[0], item=row[1], quantity=row[2])
+            row = conn.execute("SELECT id, product, quantity FROM orders WHERE id = ?", (order_id,)).fetchone()
+        if row is None:
+            return None
+        found_id, product, quantity = row
+        return Order(id=found_id, product=product, quantity=quantity)

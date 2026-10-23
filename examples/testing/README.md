@@ -18,10 +18,10 @@ test function with a one-line docstring.
 
 | Technique | Test | When to use |
 |-----------|------|-------------|
-| `di.mock(cls)`: an autospec mock, `return_value`, `await_args_list` | `test_mock_autospec` | The default: replace a client in a fresh container and check how it was called |
+| `di.mock(client_class)`: an autospec mock, `return_value`, `await_args_list` | `test_mock_autospec` | The default: replace a client in a fresh container and check how it was called |
 | The autospec follows the real class | `test_mock_follows_the_real_signatures` | A typo in a method name or a wrong call fails the test instead of passing silently |
-| `DI.override(cls, Fake())` with a hand-written subclass | `test_override_with_fake` | A fake with behavior (records, stores) is clearer than a configured mock; the other clients stay real |
-| `override(cls)` without `new`, as a context manager | `test_override_autospec_across_two_runs` | The test connects the container more than once: a `mock()` would be dropped by the first `disconnect()` |
+| `DI.override(client_class, Fake())` with a hand-written subclass | `test_override_with_fake` | A fake with behavior (records, stores) is clearer than a configured mock; the other clients stay real |
+| `override(client_class)` without `new`, as a context manager | `test_override_autospec_across_two_runs` | The test connects the container more than once: a `mock()` would be dropped by the first `disconnect()` |
 | The `global_di` fixture | `test_code_that_calls_global_di` | The code under test calls `DI.inject()` / `async with DI` itself |
 | A `@job` called directly with `AsyncMock`s and parameters | `test_job_directly` | Unit-test the logic of a job; parameters are keyword arguments |
 | A `@job` through a container: `di.inject(job)` | `test_job_through_container` | Check the job with the clients wired as in production |

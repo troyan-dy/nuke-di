@@ -32,4 +32,5 @@ class UserService(Client):
         return f"Hello, {name}! This is your visit {visits}."
 
     async def stats(self) -> str:
-        return f"{await self._db.count_users()} users so far"
+        count = await self._db.count_users()
+        return f"{count} users so far"

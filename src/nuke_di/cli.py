@@ -1,18 +1,13 @@
 import argparse
-import datetime
-import enum
 import inspect
-import types
 from collections.abc import Callable, Sequence
-from pathlib import Path
-from typing import Annotated, Any, NoReturn, Union, get_args, get_origin, get_type_hints
+from typing import Any, NoReturn, get_args, get_origin, get_type_hints
 
-from nuke_di.core import isnotsingleton
+from nuke_di._converters import converter, help_text, strip_annotated, strip_optional
 from nuke_di.errors import InvalidSignatureError, UsageError
+from nuke_di.naming import sname
 from nuke_di.options import Option
-from nuke_di.utils import sname
-
-Converter = Callable[[str], Any]
+from nuke_di.types import isnotsingleton
 
 
 class HelpRequested(Exception):  # noqa: N818 - not an error, argparse already printed the help
@@ -33,6 +28,38 @@ class Parser(argparse.ArgumentParser):
         # Only the help action exits: errors go through `error()`
         raise HelpRequested
 
+    def add_parameter(
+        self,
+        func: Callable[..., Any],
+        argument: inspect.Parameter,
+        hint: Any,
+        option: Option | None,
+    ) -> None:
+        """
+        Add the option of the Parameter `argument` of `func`.
+        """
+        option = option or Option()
+        dashed = argument.name.replace("_", "-")
+        flags = [f"--{dashed}"]
+        if option.short is not None:
+            if len(option.short) != 1 or not option.short.isalnum():
+                raise _signature_error(
+                    func, argument, f"has Option(short={option.short!r}), expected one letter or digit"
+                )
+            flags.insert(0, f"-{option.short}")
+
+        kwargs: dict[str, Any] = {
+            "dest": argument.name,
+            "default": argparse.SUPPRESS,
+            "required": argument.default is argument.empty,
+            "help": help_text(option, argument),
+        }
+        kwargs |= _action(func, argument, hint)
+        try:
+            self.add_argument(*flags, **kwargs)
+        except argparse.ArgumentError as exc:
+            raise _signature_error(func, argument, f"clashes with another option: {exc}") from exc
+
 
 def build_parser(func: Callable[..., Any], prog: str | None = None) -> Parser:
     """
@@ -41,21 +68,10 @@ def build_parser(func: Callable[..., Any], prog: str | None = None) -> Parser:
     parser = Parser(prog=prog, description=inspect.getdoc(func), allow_abbrev=False)
     hints = get_type_hints(func, include_extras=True)
 
-    for param in inspect.signature(func).parameters.values():
-        if param.kind in {param.VAR_POSITIONAL, param.VAR_KEYWORD}:
-            continue
-        if param.name not in hints:
-            raise _signature_error(func, param, "has no type hint")
-
-        hint, option = _strip_annotated(hints[param.name], None)
-        if isnotsingleton(hint):
-            if option is not None:
-                raise _signature_error(func, param, "is a client and cannot have an Option")
-            continue
-        if param.kind is param.POSITIONAL_ONLY:
-            raise _signature_error(func, param, "is positional-only, a Parameter is passed by keyword")
-
-        _add_option(parser, func, param, *_strip_optional(hint, option))
+    for argument in inspect.signature(func).parameters.values():
+        parameter = _parameter(func, argument, hints)
+        if parameter is not None:
+            parser.add_parameter(func, argument, *parameter)
 
     return parser
 
@@ -64,104 +80,51 @@ def parse_parameters(parser: argparse.ArgumentParser, argv: Sequence[str]) -> di
     """
     Return the Parameters given on the command line; the ones left out keep the defaults of the function.
     """
-    return vars(parser.parse_args(argv))
+    return parser.parse_args(argv).__dict__
 
 
-def _add_option(
-    parser: argparse.ArgumentParser,
+def _parameter(
     func: Callable[..., Any],
-    param: inspect.Parameter,
+    argument: inspect.Parameter,
+    hints: dict[str, Any],
+) -> tuple[Any, Option | None] | None:
+    """
+    The hint and the Option of the Parameter `argument` is, or `None` for `*args`, `**kwargs` and clients.
+    """
+    if argument.kind in {argument.VAR_POSITIONAL, argument.VAR_KEYWORD}:
+        return None
+    if argument.name not in hints:
+        raise _signature_error(func, argument, "has no type hint")
+
+    hint, option = strip_annotated(hints[argument.name], None)
+    if isnotsingleton(hint):
+        if option is not None:
+            raise _signature_error(func, argument, "is a client and cannot have an Option")
+        return None
+    if argument.kind is argument.POSITIONAL_ONLY:
+        raise _signature_error(func, argument, "is positional-only, a Parameter is passed by keyword")
+    return strip_optional(hint, option)
+
+
+def _action(
+    func: Callable[..., Any],
+    argument: inspect.Parameter,
     hint: Any,
-    option: Option | None,
-) -> None:
-    option = option or Option()
-    flags = ["--" + param.name.replace("_", "-")]
-    if option.short is not None:
-        if len(option.short) != 1 or not option.short.isalnum():
-            raise _signature_error(func, param, f"has Option(short={option.short!r}), expected one letter or digit")
-        flags.insert(0, "-" + option.short)
-
-    kwargs: dict[str, Any] = {
-        "dest": param.name,
-        "default": argparse.SUPPRESS,
-        "required": param.default is param.empty,
-        "help": _help(option, param),
-    }
-
+) -> dict[str, Any]:
+    """
+    The arguments of `add_argument()` that give the value of a Parameter: a flag for a bool, the option given
+    once per element for a list.
+    """
     if hint is bool:
-        kwargs["action"] = argparse.BooleanOptionalAction
-    elif get_origin(hint) is list and len(get_args(hint)) == 1 and get_args(hint)[0] is not bool:
-        kwargs |= {"action": "append", **_converter(func, param, get_args(hint)[0])}
-    else:
-        kwargs |= _converter(func, param, hint)
-
-    try:
-        parser.add_argument(*flags, **kwargs)
-    except argparse.ArgumentError as exc:
-        raise _signature_error(func, param, f"clashes with another option: {exc}") from exc
+        return {"action": argparse.BooleanOptionalAction}
+    elements: tuple[Any, ...] = get_args(hint) if get_origin(hint) is list else ()
+    appended = len(elements) == 1 and elements[0] is not bool
+    target = elements[0] if appended else hint
+    converted = converter(target)
+    if converted is None:
+        raise _signature_error(func, argument, f"has an unsupported type {target!r}")
+    return {"action": "append", **converted} if appended else converted
 
 
-def _converter(func: Callable[..., Any], param: inspect.Parameter, hint: Any) -> dict[str, Any]:
-    if hint in (str, int, float, Path):
-        return {"type": hint}
-    if hint in (datetime.date, datetime.datetime):
-        return {"type": _from_isoformat(hint)}
-    if get_origin(hint) is None and isinstance(hint, type) and issubclass(hint, enum.Enum):
-        return {"type": _by_name(hint), "metavar": "{" + ",".join(member.name for member in hint) + "}"}
-    raise _signature_error(func, param, f"has an unsupported type {hint!r}")
-
-
-def _from_isoformat(cls: type[datetime.date]) -> Converter:
-    def convert(value: str) -> datetime.date:
-        return cls.fromisoformat(value)
-
-    # argparse names the type in its error: "invalid date value: 'x'"
-    convert.__name__ = cls.__name__
-    return convert
-
-
-def _by_name(cls: type[enum.Enum]) -> Converter:
-    def convert(value: str) -> enum.Enum:
-        try:
-            return cls[value]
-        except KeyError:
-            names = ", ".join(member.name for member in cls)
-            raise argparse.ArgumentTypeError(f"invalid choice: {value!r} (choose from {names})") from None
-
-    return convert
-
-
-def _help(option: Option, param: inspect.Parameter) -> str | None:
-    parts = [] if option.help is None else [option.help]
-    # A default of None means "not given", showing it says nothing
-    if param.default is not param.empty and param.default is not None:
-        parts.append(f"(default: {_format_default(param.default)})")
-    # argparse expands %-formatting in help texts
-    return " ".join(parts).replace("%", "%%") or None
-
-
-def _format_default(value: Any) -> str:
-    if isinstance(value, enum.Enum):
-        return value.name
-    if isinstance(value, list | tuple):
-        return " ".join(map(_format_default, value))
-    return str(value)
-
-
-def _strip_annotated(hint: Any, option: Option | None) -> tuple[Any, Option | None]:
-    if get_origin(hint) is Annotated:
-        hint, *metadata = get_args(hint)
-        option = next((item for item in metadata if isinstance(item, Option)), option)
-    return hint, option
-
-
-def _strip_optional(hint: Any, option: Option | None) -> tuple[Any, Option | None]:
-    if get_origin(hint) in {Union, types.UnionType}:
-        args = [arg for arg in get_args(hint) if arg is not type(None)]
-        if len(args) == 1:
-            return _strip_annotated(args[0], option)
-    return hint, option
-
-
-def _signature_error(func: Callable[..., Any], param: inspect.Parameter, reason: str) -> InvalidSignatureError:
-    return InvalidSignatureError(f'Argument "{param.name}" of "{sname(func)}" {reason}')
+def _signature_error(func: Callable[..., Any], argument: inspect.Parameter, reason: str) -> InvalidSignatureError:
+    return InvalidSignatureError(f'Argument "{argument.name}" of "{sname(func)}" {reason}')

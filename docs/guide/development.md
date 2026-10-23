@@ -4,13 +4,27 @@
 
 ```bash
 make install   # uv sync --locked
-make check     # ruff, mypy, pyright and tests, as in CI
+make check     # ruff, flake8, mypy, pyright and tests, as in CI
 make cov       # tests with a coverage report (terminal + htmlcov/)
 make test-all  # tests on Python 3.11-3.14
 ```
 
 Line and branch coverage is 100%, and CI fails if it drops below that
 (`fail_under = 100` in `pyproject.toml`).
+
+## Style
+
+The code follows [wemake-python-styleguide](https://github.com/wemake-services/wemake-python-styleguide)
+(WPS) on top of ruff: `ruff check` and `ruff format` first, then `flake8`, which runs only the WPS
+rules (`select = WPS, E999`). flake8 reads no `pyproject.toml`, so its configuration lives in
+`setup.cfg`, where every option and every `per-file-ignores` entry carries its reason. Fix the code,
+not the configuration: a `# noqa: WPS...` names its code and is the exception, and ruff keeps those
+comments because `WPS` is declared `external`.
+
+```bash
+uv run flake8 .                      # the whole repository, as CI does
+uv run flake8 src/nuke_di/core.py    # one file
+```
 
 ## Releases
 

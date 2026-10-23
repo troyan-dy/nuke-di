@@ -20,7 +20,7 @@ async def test_metrics_of_a_failed_run(capsys: pytest.CaptureFixture[str]) -> No
         finished_at=started + datetime.timedelta(seconds=1.5),
         exit_code=1,
         clients=[
-            ClientTiming("Postgres", connect=0.1, connect_outcome="ok", disconnect=0.0, disconnect_outcome="ok"),
+            ClientTiming("Postgres", connect=0.1, connect_outcome="ok", disconnect=0, disconnect_outcome="ok"),
             ClientTiming("Kafka", connect=1.0, connect_outcome="timed_out"),
             ClientTiming("Orders"),  # never started: no line
         ],

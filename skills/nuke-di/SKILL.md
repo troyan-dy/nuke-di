@@ -19,7 +19,7 @@ Full manual in one file: https://raw.githubusercontent.com/troyan-dy/nuke-di/mas
   `async def disconnect()`. Both are optional.
 - **One instance per container**: a `Client` lives as long as its container. `DI` is the global
   container; `Dependencies()` is a fresh one.
-- **Lifecycle**: build the tree (`DI.resolve(cls)`, `DI.inject(func)`, `@job`, `@worker` or a
+- **Lifecycle**: build the tree (`DI.resolve(client_class)`, `DI.inject(func)`, `@job`, `@worker` or a
   framework `setup()`), then `async with DI:` connects every client, dependencies first, and
   disconnects them in reverse on exit. Nothing is resolved while the container is connected.
 - **A function takes clients by type hint** too: `DI.inject(handler)` binds every argument whose
@@ -53,7 +53,8 @@ class UserService(Client):
         self._db = db
 
     async def greet(self, user_id: int) -> str:
-        return f"Hello, {await self._db.fetch_user(user_id)}!"
+        name = await self._db.fetch_user(user_id)
+        return f"Hello, {name}!"
 
 
 async def handler(user_id: int, users: UserService) -> str: ...
@@ -204,7 +205,7 @@ Each of these was proposed and rejected; the container has no API for them and w
   ```
 
 - **The graph as data**: `deps.graph().nodes` lists every client a container built, dependencies
-  first; `node.cls` is the class and `node.dependencies` maps each `__init__` argument to its
+  first; `node.client_class` is the class and `node.dependencies` maps each `__init__` argument to its
   node. Answer "does `OrderService` depend on `Database`" from it, or print
   `deps.graph().to_mermaid()`. A JSON form is a recipe in the guide:
   https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/agents.md#the-graph-as-json

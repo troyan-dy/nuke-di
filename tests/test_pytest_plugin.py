@@ -38,7 +38,7 @@ def run(pytester: pytest.Pytester) -> Run:
 
 
 def test_di_is_a_fresh_container_per_test(run: Run) -> None:
-    result = run(
+    session = run(
         """
 seen = []
 
@@ -55,11 +55,11 @@ def test_second(di: Dependencies) -> None:
 """
     )
 
-    result.assert_outcomes(passed=2)
+    session.assert_outcomes(passed=2)
 
 
 def test_di_left_connected_errors(run: Run) -> None:
-    result = run(
+    session = run(
         """
 async def test_forgets_to_disconnect(di: Dependencies) -> None:
     di.resolve(Users)
@@ -67,12 +67,12 @@ async def test_forgets_to_disconnect(di: Dependencies) -> None:
 """
     )
 
-    result.assert_outcomes(passed=1, errors=1)
-    result.stdout.fnmatch_lines(['*the test left the container of the "di" fixture connected*'])
+    session.assert_outcomes(passed=1, errors=1)
+    session.stdout.fnmatch_lines(['*the test left the container of the "di" fixture connected*'])
 
 
 def test_global_di_is_flushed_before_and_after_test(run: Run) -> None:
-    result = run(
+    session = run(
         """
 def test_leaks_into_global_di() -> None:
     DI.resolve(Users)
@@ -90,11 +90,11 @@ def test_after_global_di() -> None:
 """
     )
 
-    result.assert_outcomes(passed=3)
+    session.assert_outcomes(passed=3)
 
 
 def test_global_di_left_connected_errors(run: Run) -> None:
-    result = run(
+    session = run(
         """
 async def test_forgets_to_disconnect(global_di: Dependencies) -> None:
     DI.resolve(Users)
@@ -107,12 +107,12 @@ def test_next_test_starts_clean(global_di: Dependencies) -> None:
 """
     )
 
-    result.assert_outcomes(passed=2, errors=1)
-    result.stdout.fnmatch_lines(["*the test left the global DI connected*"])
+    session.assert_outcomes(passed=2, errors=1)
+    session.stdout.fnmatch_lines(["*the test left the global DI connected*"])
 
 
 def test_global_di_left_connected_by_previous_test_errors(run: Run) -> None:
-    result = run(
+    session = run(
         """
 async def test_connects_global_di_without_fixture() -> None:
     DI.resolve(Users)
@@ -129,5 +129,5 @@ def test_next_test_starts_clean(global_di: Dependencies) -> None:
 """
     )
 
-    result.assert_outcomes(passed=2, errors=1)
-    result.stdout.fnmatch_lines(["*a previous test left the global DI connected*"])
+    session.assert_outcomes(passed=2, errors=1)
+    session.stdout.fnmatch_lines(["*a previous test left the global DI connected*"])

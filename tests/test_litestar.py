@@ -6,9 +6,9 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Annotated, Any, TypeVar
 
-import litestar.di
 import pytest
 from litestar import Controller, Litestar, Router, WebSocket, asgi, get, websocket, websocket_listener
+from litestar import di as litestar_di
 from litestar.di import Provide
 from litestar.handlers import WebsocketListener
 from litestar.response.base import ASGIResponse
@@ -17,19 +17,20 @@ from litestar.types import Receive, Scope, Send
 
 from nuke_di import DI, BackgroundTasks, Client, Dependencies, NotSingletonClient, Shutdown
 from nuke_di.integration.testing import check
-from nuke_di.litestar import _LITESTAR, ClientPlugin
+from nuke_di.litestar import ClientPlugin
+from nuke_di.litestar.plugin import _LITESTAR
 
 if TYPE_CHECKING:
     from decimal import Decimal
 
-T = TypeVar("T")
+DependencyT = TypeVar("DependencyT")
 
-if hasattr(litestar.di, "NamedDependency"):
+if hasattr(litestar_di, "NamedDependency"):
     from litestar.di import NamedDependency
 else:  # Litestar before 2.23
     from litestar.params import Dependency
 
-    NamedDependency = Annotated[T, Dependency()]  # type: ignore[misc]
+    NamedDependency = Annotated[DependencyT, Dependency()]  # type: ignore[misc]
 
 events: list[str] = []
 
@@ -64,7 +65,8 @@ class UserService(Client):
         self.db = db
 
     async def greet(self, user_id: int) -> str:
-        return f"Hello, {await self.db.fetch_user(user_id)}!"
+        name = await self.db.fetch_user(user_id)
+        return f"Hello, {name}!"
 
 
 class FakeDatabase(Database):
@@ -73,11 +75,11 @@ class FakeDatabase(Database):
 
 
 class Billing(Client):
-    pass
+    """A second client, for handlers that take two."""
 
 
 class Session(NotSingletonClient):
-    pass
+    """A client built for every argument that takes it."""
 
 
 class Broken(Client):
@@ -132,8 +134,8 @@ async def test_handler_stays_callable_directly() -> None:
 def test_clients_stay_out_of_openapi() -> None:
     app = make_app(Dependencies(), [get_user])
 
-    parameters = app.openapi_schema.to_schema()["paths"]["/users/{user_id}"]["get"]["parameters"]
-    assert [parameter["name"] for parameter in parameters] == ["user_id"]
+    documented = app.openapi_schema.to_schema()["paths"]["/users/{user_id}"]["get"]["parameters"]
+    assert [parameter["name"] for parameter in documented] == ["user_id"]
 
 
 @get("/sessions", sync_to_thread=False)
@@ -166,7 +168,8 @@ async def current_user(user_id: int, db: Database) -> str:
 
 @get("/me", dependencies={"user": Provide(current_user)})
 async def me(user: NamedDependency[str], users: UserService) -> str:
-    return f"{user}: {await users.greet(2)}"
+    greeting = await users.greet(2)
+    return f"{user}: {greeting}"
 
 
 def test_provider_gets_clients() -> None:
@@ -292,11 +295,15 @@ def on_shutdown() -> None:
 
 def test_app_lifespan_and_hooks_run_inside_connected_clients() -> None:
     app = Litestar(
-        [get_user], plugins=[ClientPlugin()], lifespan=[lifespan], on_startup=[on_startup], on_shutdown=[on_shutdown]
+        [get_user],
+        plugins=[ClientPlugin()],
+        lifespan=[lifespan],
+        on_startup=[on_startup],
+        on_shutdown=[on_shutdown],
     )
 
     with TestClient(app):
-        pass
+        ...
 
     assert events == [
         "database: connected",
@@ -335,23 +342,25 @@ def test_failed_connect_fails_startup_and_forgets_clients() -> None:
     app = make_app(deps, [broken])
 
     # Litestar's test client raises the failed startup inside an exception group
-    with pytest.raises(BaseExceptionGroup) as info:
+    with pytest.raises(BaseExceptionGroup) as excinfo:
         with TestClient(app):
-            pass
+            ...
 
-    assert info.group_contains(RuntimeError, match=r"nuke-di clients failed to start: Broken.connect\(\) raised")
+    assert excinfo.group_contains(RuntimeError, match=r"nuke-di clients failed to start: Broken.connect\(\) raised")
 
     assert not deps.connected
     assert deps.connect_clients == []
 
 
 def test_two_apps_with_their_own_containers() -> None:
-    first, second = Dependencies(), Dependencies()
-    first_app, second_app = make_app(first, [get_user]), make_app(second, [get_user])
+    second = Dependencies()
+    first_app = make_app(Dependencies(), [get_user])
+    second_app = make_app(second, [get_user])
 
-    with second.override(Database, FakeDatabase()), TestClient(first_app) as a, TestClient(second_app) as b:
-        assert a.get("/users/1").text == "Hello, user-1!"
-        assert b.get("/users/1").text == "Hello, alice!"
+    with second.override(Database, FakeDatabase()):
+        with TestClient(first_app) as client_a, TestClient(second_app) as client_b:
+            assert client_a.get("/users/1").text == "Hello, user-1!"
+            assert client_b.get("/users/1").text == "Hello, alice!"
 
 
 def test_request_without_lifespan_explains() -> None:
@@ -394,14 +403,14 @@ def test_client_under_a_reserved_name_is_refused() -> None:
 
 
 @websocket_listener("/listener")
-async def listener(data: str, users: UserService) -> str:
+async def listener(data: str, users: UserService) -> str:  # noqa: WPS110 - Litestar's name of the message
     return data
 
 
 class Listener(WebsocketListener):
     path = "/listener-class"
 
-    async def on_receive(self, data: str, users: UserService) -> str:
+    async def on_receive(self, data: str, users: UserService) -> str:  # noqa: WPS110 - Litestar's name of the message
         return data
 
 
@@ -430,7 +439,7 @@ async def raw(scope: Scope, receive: Receive, send: Send) -> None:
 
 
 @websocket_listener("/echo")
-async def echo(data: str) -> str:
+async def echo(data: str) -> str:  # noqa: WPS110 - Litestar's name of the message
     return data
 
 

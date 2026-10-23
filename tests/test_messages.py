@@ -21,7 +21,7 @@ from nuke_di import (
 
 
 class Database(Client):
-    pass
+    """A client with nothing to connect."""
 
 
 class Users(Client):
@@ -47,26 +47,34 @@ class Strict(Client):
 
 class Outer:
     class Inner(Client):
-        pass
+        """A client nested in a plain class."""
 
 
 def other_module_client(name: str, module: str = "app.billing") -> type[Client]:
     """
     A client class with the name of another one, as a wrapper per package would be.
     """
-    cls = type(name, (Client,), {})
-    cls.__module__ = module
-    cls.__qualname__ = name
-    return cls
+    client_class = type(name, (Client,), {})
+    client_class.__module__ = module
+    client_class.__qualname__ = name
+    return client_class
+
+
+async def connected(client_class: type[Client]) -> Dependencies:
+    """
+    A container that resolved `client_class` and connected.
+    """
+    deps = Dependencies()
+    deps.resolve(client_class)
+    await deps.connect()
+    return deps
 
 
 # #54: the state in the message
 
 
 async def test_resolve_inject_mock_override_name_the_call_and_the_state() -> None:
-    deps = Dependencies()
-    deps.resolve(Users)
-    await deps.connect()
+    deps = await connected(Users)
 
     def handler(users: Users) -> None: ...
 
@@ -81,7 +89,7 @@ async def test_resolve_inject_mock_override_name_the_call_and_the_state() -> Non
     with pytest.raises(ConnectError, match=rf"^mock\(Database\): {expected}$"):
         deps.mock(Database)
     with pytest.raises(ConnectError, match=rf"^override\(Database\): {expected}$"), deps.override(Database):
-        pass
+        ...
     with pytest.raises(ConnectError, match=r"^flush\(\): already connected, call disconnect\(\) first$"):
         deps.flush()
     with pytest.raises(ConnectError, match=r"^connect\(\): already connected, call disconnect\(\) first$"):
@@ -102,10 +110,10 @@ async def test_timeout_names_the_limit(caplog: pytest.LogCaptureFixture) -> None
     deps = Dependencies(settings=DependenciesSettings(connect_timeout=2.5))
     deps.resolve(Hanging)
 
-    with caplog.at_level(logging.ERROR, logger="nuke_di.core"), pytest.raises(ConnectTimeoutError) as info:
+    with caplog.at_level(logging.ERROR, logger="nuke_di.core"), pytest.raises(ConnectTimeoutError) as excinfo:
         await deps.connect()
 
-    assert str(info.value) == "Hanging did not connect within 2.5s (CONNECT_TIMEOUT_SECONDS)"
+    assert str(excinfo.value) == "Hanging did not connect within 2.5s (CONNECT_TIMEOUT_SECONDS)"
     assert "Hanging did not connect within 2.5s (CONNECT_TIMEOUT_SECONDS)" in caplog.text
 
 
@@ -117,11 +125,11 @@ async def test_failed_connect_names_the_exception(caplog: pytest.LogCaptureFixtu
     deps = Dependencies()
     deps.resolve(Broken)
 
-    with caplog.at_level(logging.ERROR, logger="nuke_di.core"), pytest.raises(ConnectError) as info:
+    with caplog.at_level(logging.ERROR, logger="nuke_di.core"), pytest.raises(ConnectError) as excinfo:
         await deps.connect()
 
-    assert str(info.value) == "Broken.connect() raised OSError: broker unreachable"
-    assert isinstance(info.value.__cause__, OSError)
+    assert str(excinfo.value) == "Broken.connect() raised OSError: broker unreachable"
+    assert isinstance(excinfo.value.__cause__, OSError)
     assert "Broken.connect() raised OSError: broker unreachable" in caplog.text
 
 
@@ -144,11 +152,11 @@ def test_init_error_names_the_exception_and_the_path() -> None:
         def __init__(self, strict: Strict) -> None:
             self.strict = strict
 
-    with pytest.raises(InitializeDependencyError) as info:
+    with pytest.raises(InitializeDependencyError) as excinfo:
         Dependencies().resolve(Root)
 
-    assert str(info.value) == "Strict.__init__ raised ValueError (resolving Root -> Strict): pool: field required"
-    assert isinstance(info.value.__cause__, ValueError)
+    assert str(excinfo.value) == "Strict.__init__ raised ValueError (resolving Root -> Strict): pool: field required"
+    assert isinstance(excinfo.value.__cause__, ValueError)
 
 
 def test_init_error_of_a_root_has_no_path() -> None:
@@ -160,14 +168,20 @@ def test_init_error_of_a_root_has_no_path() -> None:
 
 
 @pytest.mark.parametrize(
-    ("cls", "name"),
-    [(Settings, "Settings"), (int, "int"), (type(None), "None"), ("Database", "'Database'"), ({}, r"\{\}")],
+    ("not_a_client", "name"),
+    [
+        (Settings, "Settings"),
+        (int, "int"),
+        (type(None), "None"),
+        ("Database", "'Database'"),
+        ({}, r"\{\}"),
+    ],
 )
-def test_resolve_refuses_what_is_not_a_client(cls: Any, name: str) -> None:
+def test_resolve_refuses_what_is_not_a_client(not_a_client: Any, name: str) -> None:
     with pytest.raises(
         InvalidSignatureError, match=rf"^{name} is not a client: subclass Client or NotSingletonClient$"
     ):
-        Dependencies().resolve(cls)
+        Dependencies().resolve(not_a_client)
 
 
 def test_inject_leaves_a_non_client_argument_to_the_caller() -> None:
@@ -208,7 +222,7 @@ def test_mock_and_override_refuse_what_is_not_a_client() -> None:
     ):
         deps.mock(Settings)  # type: ignore[type-var]
     with pytest.raises(InvalidSignatureError, match=r"^int is not a client"), deps.override(int):  # type: ignore[type-var]
-        pass
+        ...
     assert not deps.clients
 
 
@@ -227,7 +241,8 @@ async def test_two_clients_with_one_name_are_told_apart_by_module(caplog: pytest
 
     class Root(Client):
         def __init__(self, orders: Database, billing: billing) -> None:  # type: ignore[valid-type]
-            self.orders, self.billing = orders, billing
+            self.orders = orders
+            self.billing = billing
 
     deps = Dependencies()
     deps.resolve(Root)
@@ -249,10 +264,10 @@ def test_two_clients_with_one_name_are_told_apart_in_the_path() -> None:
     class Root(Client):
         def __init__(self, orders: Database, broken: Broken) -> None: ...
 
-    with pytest.raises(InvalidSignatureError) as info:
+    with pytest.raises(InvalidSignatureError) as excinfo:
         Dependencies().resolve(Root)  # type: ignore[nuke-di]
 
-    assert str(info.value) == (
+    assert str(excinfo.value) == (
         'Argument "pool" of "Broken.__init__" is int, which is not a client (resolving Root -> Broken)'
     )
     # The container holds the Replacement of the other `Database`, so the resolved one is named in full
@@ -260,7 +275,7 @@ def test_two_clients_with_one_name_are_told_apart_in_the_path() -> None:
     deps.resolve(Database)
     deps.mock(billing)
     with pytest.raises(ConnectError) as error, deps.override(billing):
-        pass
+        ...
     assert str(error.value) == (
         f"override(app.billing.Database) needs a container without resolved clients, found: {__name__}.Database"
     )
@@ -277,7 +292,7 @@ async def test_a_nested_class_keeps_its_outer_class() -> None:
 
 async def test_a_class_local_to_a_function_drops_the_function() -> None:
     class Local(NotSingletonClient):
-        pass
+        """A client local to the test function."""
 
     deps = Dependencies()
     deps.resolve(Local)
@@ -290,13 +305,13 @@ async def test_a_class_local_to_a_function_drops_the_function() -> None:
 async def test_two_local_classes_with_one_name_are_told_apart_in_full() -> None:
     def first() -> type[Client]:
         class Local(Client):
-            pass
+            """A client local to a function, with the name of the other one."""
 
         return Local
 
     def second() -> type[Client]:
         class Local(Client):
-            pass
+            """A client local to a function, with the name of the other one."""
 
         return Local
 

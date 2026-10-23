@@ -19,7 +19,8 @@ class UserService(Client):
         self._db = db
 
     async def greet(self, user_id: int) -> str:
-        return f"Hello, {await self._db.fetch_user(user_id)}!"
+        name = await self._db.fetch_user(user_id)
+        return f"Hello, {name}!"
 
 
 async def handler(user_id: int, users: UserService) -> str:
@@ -28,8 +29,9 @@ async def handler(user_id: int, users: UserService) -> str:
 
 async def main() -> None:
     injected = DI.inject(handler)  # resolves UserService -> Database
+    user_id = 42
     async with DI:  # connect() every client, disconnect() on exit
-        print(await injected(42))
+        print(await injected(user_id))
 
 
 if __name__ == "__main__":

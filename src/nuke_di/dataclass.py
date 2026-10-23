@@ -5,21 +5,29 @@ from typing import Any, TypeVar, cast, dataclass_transform, overload
 
 from nuke_di.types import Client
 
-C = TypeVar("C")
+ClassT = TypeVar("ClassT")
+
+# The attributes of a class that the client class made from it gets of its own
+_NOT_COPIED = frozenset(("__dict__", "__weakref__"))
 
 
 @overload
 @dataclass_transform()
-def client_dataclass(_cls: type[C]) -> type[C]: ...
+def client_dataclass(_cls: type[ClassT]) -> type[ClassT]: ...
 
 
 @overload
 @dataclass_transform()
-def client_dataclass(_cls: None = None, **dataclass_kwargs: Any) -> Callable[[type[C]], type[C]]: ...
+def client_dataclass(
+    _cls: None = None,
+    **dataclass_kwargs: Any,
+) -> Callable[[type[ClassT]], type[ClassT]]: ...
 
 
 @dataclass_transform()
-def client_dataclass(_cls: type[C] | None = None, **dataclass_kwargs: Any) -> type[C] | Callable[[type[C]], type[C]]:
+def client_dataclass(
+    _cls: type[ClassT] | None = None, **dataclass_kwargs: Any
+) -> type[ClassT] | Callable[[type[ClassT]], type[ClassT]]:
     """
     Decorator that makes a class a `Client` subclass and a dataclass.
 
@@ -28,18 +36,23 @@ def client_dataclass(_cls: type[C] | None = None, **dataclass_kwargs: Any) -> ty
     type checkers to see it.
     """
 
-    def decorator(cls: type[C]) -> type[C]:
-        if not issubclass(cls, Client):
-            attrs = {name: value for name, value in cls.__dict__.items() if name not in {"__dict__", "__weakref__"}}
-            # A type checker cannot order the methods of `type[C]` and `Client`: the bases are plain types to it
-            bases = cast(tuple[type, ...], (cls, Client))
-            new_cls = type(cls.__name__, bases, attrs)
-        else:
-            new_cls = cls
-
-        return cast(type[C], dataclass(**dataclass_kwargs)(new_cls))
+    def decorator(target: type[ClassT]) -> type[ClassT]:
+        return cast(type[ClassT], dataclass(**dataclass_kwargs)(_as_client(target)))
 
     if inspect.isclass(_cls):
         return decorator(_cls)
 
     return decorator
+
+
+def _as_client(target: type) -> type:
+    """
+    `target` if it is a client already, otherwise a client class made of it.
+    """
+    if issubclass(target, Client):
+        return target
+    attributes = target.__dict__.items()
+    own = {name: attribute for name, attribute in attributes if name not in _NOT_COPIED}
+    # A type checker cannot order the methods of `type[ClassT]` and `Client`: the bases are plain types to it
+    bases = cast(tuple[type, ...], (target, Client))
+    return type(target.__name__, bases, own)

@@ -25,7 +25,7 @@ async def count_books(genre: str, catalog: Catalog) -> int:
 
 
 @mcp.tool
-async def recommend(title: str = Depends(bestseller)) -> str:
+async def recommend(title: str = Depends(bestseller)) -> str:  # noqa: WPS404 - FastMCP reads markers from defaults
     """The book to start with."""
     return f"Start with {title}."
 
@@ -37,7 +37,8 @@ async def genres(catalog: Catalog) -> list[str]:
 
 @mcp.prompt
 async def review(genre: str, catalog: Catalog) -> str:
-    return f"Write a short review of our {await catalog.count(genre)} {genre} books."
+    count = await catalog.count(genre)
+    return f"Write a short review of our {count} {genre} books."
 
 
 if __name__ == "__main__":

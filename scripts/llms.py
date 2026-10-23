@@ -5,18 +5,18 @@ of the README and the guide, and llms-full.txt, the README and the guide in one 
     python scripts/llms.py          write llms.txt and llms-full.txt
     python scripts/llms.py --check  fail when the checked-in files differ from what the pages give
 
-Only the standard library. tests/test_llms.py fails when the files drift from the pages.
+Only the standard library. tests/test_llms.py fails when the files drift from the pages. How a page is read is
+scripts/llms_pages.py.
 """
 
-import re
 import sys
-from pathlib import Path, PurePosixPath
+from pathlib import Path
+from typing import Final
 
-ROOT = Path(__file__).resolve().parent.parent
-BLOB_URL = "https://github.com/troyan-dy/nuke-di/blob/master/"
-RAW_URL = "https://raw.githubusercontent.com/troyan-dy/nuke-di/master/"
+from llms_pages import BLOB_URL, RAW_URL, README, ROOT, documentation, full_page, page_text, without_navigation
+
 # The guide in reading order; tests/test_llms.py fails when a page of docs/guide/ is missing here
-GUIDE = [
+GUIDE: Final = (
     "clients",
     "container",
     "workers-and-jobs",
@@ -34,69 +34,24 @@ GUIDE = [
     "errors",
     "agents",
     "development",
-]
+)
 
-INTRO = """\
+INTRO: Final = """\
 Before writing code with nuke-di, know what it deliberately lacks. A dependency is a `Client` subclass with a
 type-hinted `__init__` and async `connect()` / `disconnect()`; the type hint is the only registration. There are no
 provider or factory functions (ADR-0005), no binding of a Protocol to an implementation, qualifiers or multibinding
 (ADR-0008), no per-request or per-message scopes (ADR-0006) and no retries in `connect()` (ADR-0009): the
 recipes in the guide reach the same results with plain clients, `mock()` and `override()`."""
 
-
-def pages() -> list[str]:
-    """Every source, relative to the root: the README, then the guide."""
-    return ["README.md", *(f"docs/guide/{page}.md" for page in GUIDE)]
-
-
-def _read(source: str) -> str:
-    return (ROOT / source).read_text(encoding="utf-8")
-
-
-def _absolute(target: str, source: str) -> str:
-    """A link of `source` as an absolute URL: GitHub resolves a relative one against the file that holds it."""
-    if re.match(r"[a-z]+:", target):
-        return target
-    file, hash_, anchor = target.partition("#")
-    if not file:
-        return f"{BLOB_URL}{source}#{anchor}"
-    parts: list[str] = []
-    for part in (PurePosixPath(source).parent / file).parts:
-        if part == "..":
-            parts.pop()
-        elif part != ".":
-            parts.append(part)
-    return f"{BLOB_URL}{'/'.join(parts)}{hash_}{anchor}"
-
-
-def _without_navigation(source: str, text: str) -> list[str]:
-    """
-    The lines of a page without what only a reader on GitHub needs: the badges of the README and the way back to
-    the README of a guide page.
-    """
-    lines = text.splitlines()
-    if source == "README.md":
-        # The title, then the badges and the blank lines around them up to the pitch
-        start = next(number for number, line in enumerate(lines) if number > 0 and line and line[0] != "[")
-        return [lines[0], "", *lines[start:]]
-    # The title, then the way back to the README and the blank line under it (tests/test_docs.py keeps them there)
-    return [*lines[:2], *lines[4:]]
-
-
-def full_page(source: str) -> str:
-    """A page for llms-full.txt: no navigation, every link outside the code blocks absolute."""
-    lines: list[str] = []
-    fenced = False
-    for line in _without_navigation(source, _read(source)):
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
-        elif not fenced:
-            line = re.sub(r"\]\(([^)\s]+)\)", lambda match: f"]({_absolute(match.group(1), source)})", line)
-        lines.append(line)
-    # One blank line between pages, whatever a page ends with
-    while lines and not lines[-1]:
-        lines.pop()
-    return "\n".join(lines) + "\n"
+# Every source, relative to the root: the README, then the guide
+SOURCES: Final = (README, *(f"docs/guide/{page}.md" for page in GUIDE))
+# The entries of the index beyond the documentation: the title, the path and what it is
+OPTIONAL: Final = (
+    ("The whole documentation in one file", "llms-full.txt", "the README and the guide above, concatenated"),
+    ("Agent Skill", "skills/nuke-di/SKILL.md", "the model, the recipes and what not to write, on one page"),
+    ("Examples", "examples/README.md", "runnable applications, each with its output and tests"),
+    ("Changelog", "CHANGELOG.md", ""),
+)
 
 
 def full() -> str:
@@ -105,50 +60,14 @@ def full() -> str:
         "The README and every page of the guide, generated from the pages by scripts/llms.py.\n"
         f"Index: {RAW_URL}llms.txt\n"
     )
-    sections = [f"<!-- Source: {BLOB_URL}{source} -->\n\n{full_page(source)}" for source in pages()]
+    sections = [f"<!-- Source: {BLOB_URL}{source} -->\n\n{full_page(source)}" for source in SOURCES]
     return "\n".join([header, *sections])
 
 
-def _documentation() -> dict[str, str]:
-    """
-    The description of each guide page in the README "Documentation" list, by page: the text after the link of an
-    item that links one page, nothing for a page that shares its item with others.
-    """
-    readme = _read("README.md")
-    listing = readme.split("## Documentation\n", 1)[1].split("\n## ", 1)[0]
-    items = re.split(r"\n(?=- )", listing.strip())
-    descriptions: dict[str, str] = {}
-    for item in items:
-        text = " ".join(line.strip() for line in item.splitlines())
-        linked = re.findall(r"\]\(" + re.escape(BLOB_URL) + r"docs/guide/([\w-]+)\.md\)", text)
-        match = re.match(r"- \[[^\]]+\]\([^)]+\): (.+)", text)
-        # A link inside a description keeps only its text: an item of the index is one link
-        description = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", match.group(1)) if match else ""
-        for page in linked:
-            descriptions[page] = description if len(linked) == 1 else ""
-    return descriptions
-
-
-def _title(source: str) -> str:
-    return _read(source).splitlines()[0].removeprefix("# ")
-
-
 def index() -> str:
+    lines = without_navigation(README, page_text(README))
     # The first line of the pitch
-    summary = next(line for line in _without_navigation("README.md", _read("README.md"))[1:] if line)
-    descriptions = _documentation()
-
-    def item(title: str, path: str, description: str = "") -> str:
-        return f"- [{title}]({RAW_URL}{path})" + (f": {description}" if description else "")
-
-    docs = [item("README", "README.md", "the pitch, the Quick start, the principles and two examples")]
-    docs += [item(_title(source), source, descriptions.get(Path(source).stem, "")) for source in pages()[1:]]
-    optional = [
-        item("The whole documentation in one file", "llms-full.txt", "the README and the guide above, concatenated"),
-        item("Agent Skill", "skills/nuke-di/SKILL.md", "the model, the recipes and what not to write, on one page"),
-        item("Examples", "examples/README.md", "runnable applications, each with its output and tests"),
-        item("Changelog", "CHANGELOG.md"),
-    ]
+    summary = next(filter(None, lines[1:]))
     return "\n".join(
         [
             "# nuke-di",
@@ -159,32 +78,56 @@ def index() -> str:
             "",
             "## Docs",
             "",
-            *docs,
+            *_docs(),
             "",
             "## Optional",
             "",
-            *optional,
+            *(_entry(*entry) for entry in OPTIONAL),
             "",
         ]
     )
+
+
+def _docs() -> list[str]:
+    """
+    The entries of the README and of every page of the guide, with the description the README gives a page.
+    """
+    descriptions = documentation()
+    docs = [_entry("README", README, "the pitch, the Quick start, the principles and two examples")]
+    for source in SOURCES[1:]:
+        title = page_text(source).splitlines()[0].removeprefix("# ")
+        description = descriptions.get(Path(source).stem, "")
+        docs.append(_entry(title, source, description))
+    return docs
+
+
+def _entry(title: str, path: str, description: str = "") -> str:
+    link = f"- [{title}]({RAW_URL}{path})"
+    return f"{link}: {description}" if description else link
 
 
 def outputs() -> dict[str, str]:
     return {"llms.txt": index(), "llms-full.txt": full()}
 
 
-def _current(name: str, text: str) -> bool:
-    path = ROOT / name
-    return path.is_file() and path.read_text(encoding="utf-8") == text
+def _stale(generated: dict[str, str]) -> list[str]:
+    """The files that differ from what the pages give, or are missing."""
+    stale = []
+    for name, text in generated.items():
+        path = ROOT / name
+        if not path.is_file() or path.read_text(encoding="utf-8") != text:
+            stale.append(name)
+    return stale
 
 
 def main(argv: list[str]) -> int:  # pragma: no cover - exercised by tests/test_llms.py through outputs()
+    generated = outputs()
     if argv == ["--check"]:
-        stale = [name for name, text in outputs().items() if not _current(name, text)]
+        stale = _stale(generated)
         for name in stale:
-            print(f"error: {name} is out of date, run `python scripts/llms.py`", file=sys.stderr)
+            sys.stderr.write(f"error: {name} is out of date, run `python scripts/llms.py`\n")
         return 1 if stale else 0
-    for name, text in outputs().items():
+    for name, text in generated.items():
         (ROOT / name).write_text(text, encoding="utf-8")
     return 0
 

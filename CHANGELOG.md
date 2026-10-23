@@ -6,6 +6,50 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-23
+
+The whole repository follows [wemake-python-styleguide](https://github.com/wemake-services/wemake-python-styleguide)
+now: `flake8` runs its rules next to ruff, in `make lint` and in CI. The container, the integrations, the CLI and
+the mypy and pytest plugins behave as in 1.19.0; the names below changed to satisfy the style guide.
+
+### Changed (breaking)
+
+- `Dependencies.resolve()`, `mock()`, `override()` and `nuke_di.asgi` `Lifespan.get()` take `client_class`
+  instead of `cls`: a call that passes it by keyword (`mock(cls=Db)`) passes `client_class=Db`.
+- `Node.cls` is `Node.client_class`, both the field and the constructor keyword.
+- `nuke_di.integration.Binding(cls, container, framework)` is `Binding(client_class, container, framework)`, and
+  `Binding.cls` is `Binding.client_class`. `Binding.require()` returns the client without awaiting, `get()`
+  delegates to it.
+- `nuke_di.run.run_entrypoint(func, *, kind, name, hooks, container, settings, params, error)` is
+  `run_entrypoint(request, *, parameter_values, error)`, where `request` is a new `nuke_di.run.RunRequest(func,
+  kind, name, hooks, container, settings)`. `nuke_di.run.SIGNALS` is gone.
+- `nuke_di.utils` is `nuke_di.naming`; `isa`, `isclient` and `isnotsingleton` live in `nuke_di.types`.
+- A name a module imported for its own use, outside its `__all__`, is no longer importable from it: e.g.
+  `nuke_di.core.Node`, `nuke_di.run.Shutdown`, `nuke_di.integration.Dependencies`, `nuke_di.fastapi.bind`. Import
+  them from `nuke_di` or `nuke_di.integration`, which export them.
+- The constants of the mypy plugin (`NUKE_DI`, `INDIRECT_DEPS_HOOK`, `CLIENT`, `CONTAINER`, `DATACLASS`,
+  `DECORATOR`, `ENTRYPOINTS`, `METADATA`) live in `nuke_di.mypy.names`; `nuke_di.mypy` exports `NukeDIPlugin`,
+  `plugin` and `__version__`, a digest of the plugin's modules, so mypy's cache is cleared when any of them changes.
+- The TypeVars are named by role: `ReturnT` (was `R`), `ClientT` (was `CT`), `ClassT` (was `C`), `FuncT` (was `F`).
+- The container's machinery moved from `nuke_di.core` into the private package `nuke_di._container`;
+  `nuke_di.aiogram`, `fastapi`, `fastmcp`, `litestar`, `mypy`, `integration` and `integration.testing` are
+  packages with the same import paths, so the `__module__` of their classes is a submodule now. The logger names
+  are unchanged (`nuke_di.core`, `nuke_di.run`, ...); the `module` and `funcName` of the container's records,
+  apart from the startup summary, name the `_container` module that logs them, and the records of a Run about
+  signals and the shutdown grace come from `nuke_di._runner` (`module` `_runner`, the grace warning's `funcName`
+  `wait_grace`). `plugins = nuke_di.mypy` keeps working.
+- `Dependencies._abandon()` is gone: the pytest plugin marks the container disconnected and flushes it itself.
+
+### Added
+
+- `setup.cfg` configures flake8 with wemake-python-styleguide; every option and `per-file-ignores` entry carries
+  its reason. `make lint` and the CI lint job run `flake8 .` after ruff, and ruff declares `WPS` as `external`,
+  so `# noqa: WPS...` comments survive `ruff --fix`.
+
+### Documentation
+
+- [Development](docs/guide/development.md#style) describes the style guide and how to run it.
+
 ## [1.19.0] - 2026-10-18
 
 ### Added
@@ -882,7 +926,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v1.19.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/troyan-dy/nuke-di/compare/v1.19.0...v2.0.0
 [1.19.0]: https://github.com/troyan-dy/nuke-di/compare/v1.18.5...v1.19.0
 [1.18.5]: https://github.com/troyan-dy/nuke-di/compare/v1.18.4...v1.18.5
 [1.18.4]: https://github.com/troyan-dy/nuke-di/compare/v1.18.3...v1.18.4

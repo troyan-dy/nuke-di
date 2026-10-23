@@ -5,47 +5,47 @@ from nuke_di.errors import ConnectError
 
 
 class InnerDeps(NotSingletonClient):
-    pass
+    """A dependency every consumer gets its own instance of."""
 
 
 class PublicClient(Client):
     def __init__(self, inner: InnerDeps):
         self.inner = inner
 
-    async def add(self, a: int, b: int) -> int:
-        return a + b
+    async def add(self, left: int, right: int) -> int:
+        return left + right
 
 
 class NewPublicClient(PublicClient):
-    pass
+    """A second client class with the same dependency, for an instance of InnerDeps of its own."""
 
 
 async def test_cached_client() -> None:
     dep = Dependencies()
 
-    client_1 = dep.resolve(PublicClient)
-    client_2 = dep.resolve(PublicClient)
+    first_client = dep.resolve(PublicClient)
+    second_client = dep.resolve(PublicClient)
 
-    assert client_1 is client_2
+    assert first_client is second_client
 
 
 async def test_not_singleton_client() -> None:
     dep = Dependencies()
 
-    client_1 = dep.resolve(PublicClient)
-    client_2 = dep.resolve(NewPublicClient)
+    first_client = dep.resolve(PublicClient)
+    second_client = dep.resolve(NewPublicClient)
 
-    assert client_1.inner is not client_2.inner
+    assert first_client.inner is not second_client.inner
 
 
 async def test_flush() -> None:
     dep = Dependencies()
 
-    client_1 = dep.resolve(PublicClient)
+    first_client = dep.resolve(PublicClient)
     dep.flush()
-    client_2 = dep.resolve(PublicClient)
+    second_client = dep.resolve(PublicClient)
 
-    assert client_1 is not client_2
+    assert first_client is not second_client
 
 
 async def test_flush_on_connected() -> None:

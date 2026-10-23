@@ -22,7 +22,8 @@ class Notifications(Client):
         self.kafka = kafka
 
     async def order_created(self, user_id: int, order_id: int) -> None:
-        await self.kafka.send("notifications", f"order {order_id} for {await self.users.get(user_id)}")
+        user = await self.users.get(user_id)
+        await self.kafka.send("notifications", f"order {order_id} for {user}")
 
 
 class Checkout(Client):

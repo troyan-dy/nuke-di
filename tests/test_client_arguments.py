@@ -15,11 +15,11 @@ ENTRY = "__nuke_di_arguments__"
 
 
 class Database(Client):
-    pass
+    """A client without an `__init__` of its own."""
 
 
 class Cache(Client):
-    pass
+    """A second client without an `__init__`."""
 
 
 class Repository(Client):
@@ -28,7 +28,7 @@ class Repository(Client):
 
 
 class Inherits(Repository):
-    pass
+    """The `__init__` of `Repository`, inherited."""
 
 
 class Redefines(Repository):
@@ -38,7 +38,9 @@ class Redefines(Repository):
 
 class KeywordOnly(Client):
     def __init__(self, *, db: Database, retries: int = 3, cache: Cache) -> None:
-        self.db, self.retries, self.cache = db, retries, cache
+        self.db = db
+        self.retries = retries
+        self.cache = cache
 
 
 class SelfInArgs(Client):
@@ -50,7 +52,8 @@ class SelfInArgs(Client):
 
 class PositionalOnlyDefault(Client):
     def __init__(self, label: str = "main", /, *, db: Database) -> None:
-        self.label, self.db = label, db
+        self.label = label
+        self.db = db
 
 
 def passthrough(init: Any) -> Any:
@@ -64,7 +67,8 @@ def passthrough(init: Any) -> Any:
 class Decorated(Client):
     @passthrough
     def __init__(self, db: Database, retries: int = 3) -> None:
-        self.db, self.retries = db, retries
+        self.db = db
+        self.retries = retries
 
 
 class DeclaredSignature(Client):
@@ -97,13 +101,15 @@ class DataclassClient:
 
 def test_arguments_are_read_once_per_class() -> None:
     first = Dependencies().resolve(Repository)
-    entry = vars(Repository)[ENTRY]
+    entry = Repository.__dict__[ENTRY]
 
     second = Dependencies().resolve(Repository)
 
-    assert vars(Repository)[ENTRY] is entry
+    assert Repository.__dict__[ENTRY] is entry
     assert entry == (Repository.__init__, {"db": Database})
-    assert isinstance(first.db, Database) and isinstance(second.db, Database) and first is not second
+    assert isinstance(first.db, Database)
+    assert isinstance(second.db, Database)
+    assert first is not second
 
 
 def test_inherited_init_shares_the_entry_of_the_base_class() -> None:
@@ -111,13 +117,13 @@ def test_inherited_init_shares_the_entry_of_the_base_class() -> None:
     client = Dependencies().resolve(Inherits)
 
     assert isinstance(client.db, Database)
-    assert ENTRY not in vars(Inherits)
-    assert Inherits.__nuke_di_arguments__ is vars(Repository)[ENTRY]  # type: ignore[attr-defined]
+    assert ENTRY not in Inherits.__dict__
+    assert Inherits.__nuke_di_arguments__ is Repository.__dict__[ENTRY]  # type: ignore[attr-defined]
 
 
 def test_class_that_forbids_attributes_is_read_every_time() -> None:
     class Frozen(type):
-        def __setattr__(cls, name: str, value: object) -> None:
+        def __setattr__(cls, name: str, attribute: object) -> None:
             raise AttributeError(f"{cls.__name__} is read-only")
 
     class Sealed(Client, metaclass=Frozen):
@@ -126,7 +132,7 @@ def test_class_that_forbids_attributes_is_read_every_time() -> None:
 
     for _ in range(2):
         assert isinstance(Dependencies().resolve(Sealed).db, Database)
-    assert ENTRY not in vars(Sealed)
+    assert ENTRY not in Sealed.__dict__
 
 
 def test_redefined_init_gets_its_own_entry() -> None:
@@ -134,8 +140,8 @@ def test_redefined_init_gets_its_own_entry() -> None:
     client = Dependencies().resolve(Redefines)
 
     assert isinstance(client.cache, Cache)
-    assert vars(Redefines)[ENTRY] == (Redefines.__init__, {"cache": Cache})
-    assert vars(Repository)[ENTRY] == (Repository.__init__, {"db": Database})
+    assert Redefines.__dict__[ENTRY] == (Redefines.__init__, {"cache": Cache})
+    assert Repository.__dict__[ENTRY] == (Repository.__init__, {"db": Database})
 
 
 def test_replaced_init_is_read_again() -> None:
@@ -152,7 +158,7 @@ def test_replaced_init_is_read_again() -> None:
     client = Dependencies().resolve(Patched)
 
     assert isinstance(client.cache, Cache)  # type: ignore[attr-defined]
-    assert vars(Patched)[ENTRY] == (init, {"cache": Cache})
+    assert Patched.__dict__[ENTRY] == (init, {"cache": Cache})
 
 
 def test_failed_type_hints_are_not_cached() -> None:
@@ -164,7 +170,7 @@ def test_failed_type_hints_are_not_cached() -> None:
         with pytest.raises(InvalidSignatureError, match=r"^Cannot evaluate the type hints of \"Uses.__init__\""):
             Dependencies().resolve(Uses)
 
-    assert ENTRY not in vars(Uses)
+    assert ENTRY not in Uses.__dict__
 
 
 def test_failed_signature_is_not_cached() -> None:
@@ -176,18 +182,20 @@ def test_failed_signature_is_not_cached() -> None:
         with pytest.raises(InvalidSignatureError, match=r"has no type hint"):
             Dependencies().resolve(NoHint)  # type: ignore[nuke-di]
 
-    assert ENTRY not in vars(NoHint)
+    assert ENTRY not in NoHint.__dict__
 
 
 def test_class_without_init_takes_no_arguments() -> None:
     assert isinstance(Dependencies().resolve(Database), Database)
-    assert ENTRY not in vars(Database)
+    assert ENTRY not in Database.__dict__
 
 
 def test_keyword_only_arguments() -> None:
     client = Dependencies().resolve(KeywordOnly)
 
-    assert (type(client.db), client.retries, type(client.cache)) == (Database, 3, Cache)
+    arguments = (type(client.db), client.retries, type(client.cache))
+
+    assert arguments == (Database, 3, Cache)
 
 
 def test_self_through_args() -> None:
@@ -222,7 +230,7 @@ def test_keyword_only_dataclass() -> None:
 
 def test_future_annotations() -> None:
     namespace: dict[str, Any] = {"Client": Client, "Database": Database}
-    exec(  # noqa: S102 - a module written with string annotations, as real code is
+    exec(  # noqa: S102, WPS421 - a module written with string annotations, as real code is
         "from __future__ import annotations\n"
         "class Service(Client):\n"
         "    def __init__(self, db: Database, retries: int = 3) -> None:\n"
@@ -234,7 +242,7 @@ def test_future_annotations() -> None:
     client = Dependencies().resolve(service)
 
     assert (type(client.db), client.retries) == (Database, 3)
-    assert vars(service)[ENTRY] == (service.__init__, {"db": Database})
+    assert service.__dict__[ENTRY] == (service.__init__, {"db": Database})
 
 
 def test_resolve_logs_only_when_debug_is_enabled(caplog: pytest.LogCaptureFixture) -> None:

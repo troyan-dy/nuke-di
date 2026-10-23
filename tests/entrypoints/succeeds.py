@@ -1,17 +1,23 @@
+import sys
+
 from nuke_di import Client, job
 
 
 class Db(Client):
     async def connect(self) -> None:
-        print("connected", flush=True)
+        sys.stdout.write("connected\n")
+        sys.stdout.flush()
 
     async def disconnect(self) -> None:
-        print("disconnected", flush=True)
+        sys.stdout.write("disconnected\n")
+        sys.stdout.flush()
 
 
 @job
 async def succeeds(db: Db) -> None:
-    print("ran", flush=True)
+    sys.stdout.write("ran\n")
+    sys.stdout.flush()
 
 
-print("below the entrypoint", flush=True)
+sys.stdout.write("below the entrypoint\n")
+sys.stdout.flush()

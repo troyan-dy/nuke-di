@@ -6,9 +6,9 @@ from typing import Any
 import pytest
 
 from nuke_di import DI, Client, InvalidSignatureError, Run, UsageError, job, worker
-from nuke_di.entrypoint import entrypoint_name, entrypoint_prog
+from nuke_di._program import entrypoint_name, entrypoint_prog
 
-DECORATORS = [job, worker]
+DECORATORS = (job, worker)
 
 
 class Db(Client):
@@ -19,8 +19,7 @@ class Hook:
     def __init__(self) -> None:
         self.runs: list[Run] = []
 
-    async def on_start(self, run: Run) -> None:
-        pass
+    async def on_start(self, run: Run) -> None: ...
 
     async def on_finish(self, run: Run) -> None:
         self.runs.append(run)
@@ -42,8 +41,7 @@ def argv(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 @pytest.mark.parametrize("decorator", DECORATORS)
 def test_returns_function_unchanged_on_import(decorator: Any) -> None:
-    async def entry(db: Db) -> None:
-        pass
+    async def entry(db: Db) -> None: ...
 
     assert decorator(entry) is entry
     assert decorator(hooks=[Hook()])(entry) is entry
@@ -52,8 +50,7 @@ def test_returns_function_unchanged_on_import(decorator: Any) -> None:
 
 @pytest.mark.parametrize("decorator", DECORATORS)
 def test_rejects_sync_function(decorator: Any) -> None:
-    def entry() -> None:
-        pass
+    def entry() -> None: ...
 
     with pytest.raises(TypeError, match="async def"):
         decorator(entry)
@@ -94,25 +91,23 @@ def test_exit_code_of_failed_run() -> None:
 def test_grace_is_read_when_run_starts(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SHUTDOWN_GRACE_SECONDS", "-1")
 
-    async def entry() -> None:
-        pass
+    async def entry() -> None: ...
 
     with pytest.raises(ValueError, match="shutdown_grace"):
         job(as_main(entry))
 
 
-def fake_main(monkeypatch: pytest.MonkeyPatch, spec_name: str | None, file: str) -> None:
+def fake_main(monkeypatch: pytest.MonkeyPatch, spec_name: str | None, filename: str) -> None:
     main = types.ModuleType("__main__")
     main.__spec__ = types.SimpleNamespace(name=spec_name) if spec_name else None  # type: ignore[assignment]
-    main.__file__ = file
+    main.__file__ = filename
     monkeypatch.setitem(sys.modules, "__main__", main)
 
 
 def test_name_of_module_run_with_dash_m(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_main(monkeypatch, "app.jobs.sync", "/srv/app/jobs/sync.py")
 
-    async def sync() -> None:
-        pass
+    async def sync() -> None: ...
 
     assert entrypoint_name(as_main(sync)) == f"app.jobs.sync.{sync.__qualname__}"
 
@@ -120,15 +115,13 @@ def test_name_of_module_run_with_dash_m(monkeypatch: pytest.MonkeyPatch) -> None
 def test_name_of_file_run_by_path(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_main(monkeypatch, None, "/srv/app/jobs/sync.py")
 
-    async def sync() -> None:
-        pass
+    async def sync() -> None: ...
 
     assert entrypoint_name(as_main(sync)) == f"sync.{sync.__qualname__}"
 
 
 def test_name_of_imported_function() -> None:
-    async def sync() -> None:
-        pass
+    async def sync() -> None: ...
 
     assert entrypoint_name(sync) == "tests.test_entrypoint.test_name_of_imported_function.<locals>.sync"
 
@@ -162,7 +155,7 @@ def test_help_exits_without_run(argv: list[str], capsys: pytest.CaptureFixture[s
     assert "Sync one day." in capsys.readouterr().out
 
 
-def test_usage_error_exits_with_2(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+def test_usage_error_exits_with_code_two(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
     argv.append("--bogus")
 
     async def entry(db: Db) -> None:
@@ -184,8 +177,7 @@ def test_usage_error_exits_with_2(argv: list[str], capsys: pytest.CaptureFixture
 def test_signature_error_is_seen_by_hooks(argv: list[str]) -> None:
     argv.append("--help")
 
-    async def entry(day: dict[str, int]) -> None:
-        pass
+    async def entry(day: dict[str, int]) -> None: ...
 
     hook = Hook()
     with pytest.raises(SystemExit) as exc_info:
@@ -197,7 +189,7 @@ def test_signature_error_is_seen_by_hooks(argv: list[str]) -> None:
 
 def test_unresolvable_annotation_is_seen_by_hooks() -> None:
     async def entry(db: "Missing") -> None:  # type: ignore[name-defined]  # noqa: F821
-        pass
+        ...
 
     hook = Hook()
     with pytest.raises(SystemExit) as exc_info:

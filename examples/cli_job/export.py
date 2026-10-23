@@ -1,38 +1,17 @@
 import asyncio
-import csv
-import dataclasses
 import datetime
-import enum
-import io
-import json
 import sys
-from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated
 
 from nuke_di import Option, job
 
-from cli_job.clients import Order, Orders, log
-
-
-class Format(enum.Enum):
-    CSV = "csv"
-    JSON = "json"
-
-
-def render(orders: Sequence[Order], fmt: Format) -> str:
-    rows = [dataclasses.asdict(order) | {"created": order.created.isoformat()} for order in orders]
-    if fmt is Format.JSON:
-        return json.dumps(rows, indent=2) + "\n"
-    buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=[field.name for field in dataclasses.fields(Order)], lineterminator="\n")
-    writer.writeheader()
-    writer.writerows(rows)
-    return buffer.getvalue()
+from cli_job.clients import Orders, log
+from cli_job.report import Format, render
 
 
 @job
-async def export(
+async def export(  # noqa: WPS211 - every argument is a command-line Parameter, shown in --help
     orders: Orders,
     since: Annotated[datetime.date, Option(help="First day of the report, YYYY-MM-DD", short="s")],
     limit: Annotated[int, Option(help="At most this many orders, newest first", short="n")] = 100,

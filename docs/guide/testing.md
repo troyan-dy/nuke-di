@@ -23,10 +23,10 @@ async def test_greet() -> None:
     assert db.fetch_user.await_args_list == [call(1)]
 ```
 
-**A client for one block, with `override()`.** `override(cls, new=None)` registers a Replacement
-like `mock()`, but it lasts until the end of the `with` block, even across several `async with`
-cycles, and the container is flushed on exit, so nothing resolved with it leaks into the next test.
-It works with the global `DI` too:
+**A client for one block, with `override()`.** `override(client_class, new=None)` registers a
+Replacement like `mock()`, but it lasts until the end of the `with` block, even across several
+`async with` cycles, and the container is flushed on exit, so nothing resolved with it leaks into
+the next test. It works with the global `DI` too:
 
 ```python
 # test_greet.py, with Database, UserService and handler from the Quick start
@@ -73,8 +73,8 @@ after the block: OrderedDict()
 
 The rules:
 
-- **Replace before you resolve.** A Replacement registered after `cls` was resolved would reach
-  only the consumers resolved later, while the earlier ones keep the real client, so `mock()`
+- **Replace before you resolve.** A Replacement registered after `client_class` was resolved would
+  reach only the consumers resolved later, while the earlier ones keep the real client, so `mock()`
   raises instead:
 
   ```python
@@ -86,9 +86,9 @@ The rules:
   otherwise silently drop what was resolved before the block, so it raises
   `ConnectError: override(Database) needs a container without resolved clients, found: Database, UserService`.
   Call `DI.flush()` first or use the `global_di` fixture below.
-- **One Replacement per class.** `mock(cls)` called again returns the Replacement already
-  registered; `mock(cls, other)` and `override(cls)` raise `ConnectError: Database already has a
-  replacement`.
+- **One Replacement per class.** `mock(client_class)` called again returns the Replacement
+  already registered; `mock(client_class, other)` and `override(client_class)` raise
+  `ConnectError: Database already has a replacement`.
 - **Replacements are not connected.** Their `connect()` / `disconnect()` are never called, and they
   do not take part in the [connect order](clients.md#connect-order).
 - **How long a Replacement lasts.** One from `mock()` is dropped by the next `flush()`, including the
