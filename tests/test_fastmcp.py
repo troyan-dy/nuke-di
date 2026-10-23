@@ -20,7 +20,8 @@ from mcp.types import TextContent, TextResourceContents
 
 from nuke_di import DI, Client, Dependencies
 from nuke_di.fastapi import setup as fastapi_setup
-from nuke_di.fastmcp import _FASTMCP, setup
+from nuke_di.fastmcp import setup
+from nuke_di.fastmcp.signatures import _FASTMCP
 from nuke_di.integration.testing import Send, check
 
 events: list[str] = []

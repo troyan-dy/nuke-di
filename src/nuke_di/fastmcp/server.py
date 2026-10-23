@@ -73,7 +73,13 @@ def _registration(
     return wrapper
 
 
-def _mount(mount: Callable[..., None], state: _Server, child: FastMCP[Any], *args: Any, **kwargs: Any) -> None:
+def _mount(
+    mount: Callable[..., None],
+    state: _Server,
+    child: FastMCP[Any],
+    *args: Any,
+    **kwargs: Any,
+) -> None:
     state.mounted.append(child)
     mount(child, *args, **kwargs)
 

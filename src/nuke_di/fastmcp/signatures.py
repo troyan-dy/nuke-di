@@ -112,7 +112,8 @@ class _Rewrite:
         """
         # Sorted by kind, which keeps the order within each kind: the clients go after the arguments the caller
         # passes, before `**kwargs`
-        return sorted([*self.kept, *self.clients], key=operator.attrgetter("kind"))
+        arguments = [*self.kept, *self.clients]
+        return sorted(arguments, key=operator.attrgetter("kind"))
 
 
 def _read_by_fastmcp(function: Any) -> bool:
@@ -145,12 +146,14 @@ def _refuse(call: Any) -> None:
             )
 
 
-def _read(call: Any) -> tuple[dict[str, Any], Mapping[str, inspect.Parameter]]:
+def _read(
+    call: Any,
+) -> tuple[dict[str, Any], Mapping[str, inspect.Parameter]]:
     """
     The type hints of what FastMCP calls for `call`, and the arguments of `call`.
     """
-    target = _shape(call)[0]
-    return get_type_hints(target, include_extras=True), inspect.signature(call).parameters
+    hints = get_type_hints(_shape(call)[0], include_extras=True)
+    return hints, inspect.signature(call).parameters
 
 
 def _shape(call: Any) -> tuple[Any, str]:
