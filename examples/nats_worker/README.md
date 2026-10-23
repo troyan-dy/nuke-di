@@ -8,9 +8,9 @@ already delivered.
 | File             | What it holds                                                                     |
 |------------------|-----------------------------------------------------------------------------------|
 | `clients.py`     | `Nats` around a `nats-py` connection, `Orders` where handled orders go, the `Order` model |
-| `worker.py`      | `handle()` for one message and the `consume` worker that subscribes in a queue group |
+| `worker.py`      | `process_order()` for one message and the `consume` worker that subscribes in a queue group |
 | `publish.py`     | The `publish` job: `--count` orders to `nats_worker.orders`                       |
-| `test_worker.py` | `handle()` and `consume()` with fakes, and the startup failing at once without NATS; no server needed |
+| `test_worker.py` | `process_order()` and `consume()` with fakes, and the startup failing at once without NATS; no server needed |
 
 The worker subscribes in the queue group `nats_worker`: NATS delivers each message to only one member of
 a group, so several replicas of the worker share the load instead of each getting every order.
@@ -94,5 +94,5 @@ $ uv run pytest -q nats_worker
 - `nats-py` retries a failed first connection for about two minutes by default. The `error_cb` of `Nats`
   re-raises the error while the connection does not exist yet, so a startup without NATS fails at once
   like any other client; once connected, `nats-py` reconnects on its own.
-- `handle()` takes `orders` as an argument and is bound with `functools.partial`, so the tests call it
+- `process_order()` takes `orders` as an argument and is bound with `functools.partial`, so the tests call it
   with a `Msg` built in memory and no server.

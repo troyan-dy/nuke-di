@@ -11,7 +11,10 @@ from service_layout.workers.outbox import relay
 
 async def test_relay_publishes_and_marks_sent(di: Dependencies, tmp_path: Path) -> None:
     """The worker publishes every pending row, finishes its batch after Shutdown, and marks the rows sent."""
-    di.mock(Settings, Settings(db_path=str(tmp_path / "orders.db"), poll_seconds=0.01))
+    di.mock(
+        Settings,
+        Settings(db_path=str(tmp_path / "orders.db"), poll_seconds=0.01),
+    )
     broker = di.mock(Broker)
     shutdown = di.resolve(Shutdown)
     broker.publish.side_effect = lambda topic, payload: shutdown.set()  # what SIGTERM would do
@@ -22,7 +25,7 @@ async def test_relay_publishes_and_marks_sent(di: Dependencies, tmp_path: Path) 
         await orders.create("book", 2)
         await orders.create("pen", 10)
         await injected()
-        assert await outbox.pending(limit=10) == []
+        assert not await outbox.pending(limit=10)
 
     assert broker.publish.await_args_list == [
         call("orders", {"event": "order_created", "order_id": 1}),
@@ -46,12 +49,20 @@ async def test_cleanup_keeps_recent_and_pending_rows(di: Dependencies, tmp_path:
     orders, outbox = di.resolve(Orders), di.resolve(Outbox)
 
     async with di:
-        for item in ["book", "pen", "lamp"]:
-            await orders.create(item, 1)
-        rows = await outbox.pending(limit=10)
-        await outbox.mark_sent(rows[0].id)
-        await outbox.mark_sent(rows[1].id)
+        await seed(orders, outbox)
 
         assert await outbox.delete_sent(datetime.timedelta(days=1)) == 0  # sent just now: kept
         assert await outbox.delete_sent(datetime.timedelta(0)) == 2  # the pending row is never deleted
-        assert [row.payload["order_id"] for row in await outbox.pending(limit=10)] == [3]
+        pending = await outbox.pending(limit=10)
+        assert [row.payload["order_id"] for row in pending] == [3]
+
+
+async def seed(orders: Orders, outbox: Outbox) -> None:
+    """
+    Three orders, the events of the first two sent just now.
+    """
+    for product in ("book", "pen", "lamp"):
+        await orders.create(product, 1)
+    rows = await outbox.pending(limit=10)
+    await outbox.mark_sent(rows[0].id)
+    await outbox.mark_sent(rows[1].id)

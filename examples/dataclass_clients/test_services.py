@@ -15,7 +15,12 @@ async def test_place_order_without_a_container() -> None:
     gateway = AsyncMock(spec=PaymentGateway)
     gateway.charge.return_value = "ch_test"
     cache, mailer = AsyncMock(spec=Redis), AsyncMock(spec=Mailer)
-    checkout = Checkout(pg=pg, cache=cache, payments=Payments(pg=pg, gateway=gateway), mailer=mailer)
+    checkout = Checkout(
+        pg=pg,
+        cache=cache,
+        payments=Payments(pg=pg, gateway=gateway),
+        mailer=mailer,
+    )
 
     assert await checkout.place_order("bob", 50) == 7
 

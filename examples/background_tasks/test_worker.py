@@ -47,7 +47,8 @@ async def test_a_failed_task_is_reported() -> None:
     failures: list[BaseException] = []
     tasks.watch(failures.append)  # how a worker run learns that it must fail
 
-    task = tasks.spawn(refresh_cache(Cache(), interval=0, fail_after=0), name="refresh-cache")
+    refresh = refresh_cache(Cache(), interval=0, fail_after=0)
+    task = tasks.spawn(refresh, name="refresh-cache")
     await asyncio.wait({task})
 
     assert [type(exc) for exc in failures] == [ConnectionError]

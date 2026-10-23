@@ -17,7 +17,8 @@ def test_entrypoint_resolves(entrypoint: Callable[..., object]) -> None:
 
 class Audit(Client):
     def __init__(self, db: Database, table: str) -> None:  # `table` is not a client and has no default
-        self.db, self.table = db, table
+        self.db = db
+        self.table = table
 
 
 async def audited(audit: Audit) -> None: ...

@@ -1,5 +1,5 @@
 """
-Helpers for the sequences tests check: the one element of a sequence, and a sequence repeated.
+Helpers of the tests over sequences: the one element a test expects, and a sequence repeated.
 """
 
 from collections.abc import Iterable, Sequence
@@ -10,7 +10,7 @@ ElementT = TypeVar("ElementT")
 
 def single(candidates: Iterable[ElementT]) -> ElementT:
     """
-    The one element of `candidates`; fails the test when there is not exactly one.
+    The only element of `candidates`; the assertion shows them all when there is not exactly one.
     """
     found = list(candidates)
     assert len(found) == 1, found
@@ -19,6 +19,6 @@ def single(candidates: Iterable[ElementT]) -> ElementT:
 
 def repeated(elements: Sequence[ElementT], times: int) -> list[ElementT]:
     """
-    `elements` `times` times over, in order.
+    `elements` one after another `times` times, as `elements * times` makes of a list.
     """
     return [element for _ in range(times) for element in elements]

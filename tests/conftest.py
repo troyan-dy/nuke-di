@@ -2,5 +2,5 @@ import pytest
 
 pytest_plugins = ["pytester"]
 
-# The helpers of tests.sequences assert, and pytest explains a failed assert only in a rewritten module
+# The assertion of single() shows its candidates in the report, as the tests that import it do theirs
 pytest.register_assert_rewrite("tests.sequences")

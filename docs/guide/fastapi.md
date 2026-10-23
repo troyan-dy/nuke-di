@@ -32,7 +32,8 @@ class UserService(Client):
         self._db = db
 
     async def greet(self, user_id: int) -> str:
-        return f"Hello, {await self._db.fetch_user(user_id)}!"
+        name = await self._db.fetch_user(user_id)
+        return f"Hello, {name}!"
 ```
 
 The API:

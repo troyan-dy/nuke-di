@@ -58,7 +58,7 @@ async def test_override_with_fake() -> None:
 async def test_override_autospec_across_two_runs(di: Dependencies) -> None:
     """override(client_class) without `new`: an autospec mock that survives several `async with` cycles."""
     with di.override(Mailer) as mailer:
-        for email in ["dave@example.com", "erin@example.com"]:
+        for email in ("dave@example.com", "erin@example.com"):
             users = di.resolve(Signups)
             async with di:  # disconnect() flushes the container, the override stays
                 await users.register(email)

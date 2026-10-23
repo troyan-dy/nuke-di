@@ -39,14 +39,20 @@ class Sqlite(Client):
             self._conn = None
         log("sqlite: disconnected")
 
-    async def execute(self, sql: str, params: Sequence[Any] = ()) -> None:
-        await asyncio.to_thread(self._commit, lambda conn: conn.execute(sql, params))
+    async def execute(self, sql: str, arguments: Sequence[Any] = ()) -> None:
+        connection = self._connection
+        await asyncio.to_thread(_commit, connection, lambda conn: conn.execute(sql, arguments))
 
     async def executemany(self, sql: str, rows: Sequence[Sequence[Any]]) -> None:
-        await asyncio.to_thread(self._commit, lambda conn: conn.executemany(sql, rows))
+        connection = self._connection
+        await asyncio.to_thread(_commit, connection, lambda conn: conn.executemany(sql, rows))
 
-    async def fetchall(self, sql: str, params: Sequence[Any] = ()) -> list[tuple[Any, ...]]:
-        return await asyncio.to_thread(lambda: self._connection.execute(sql, params).fetchall())
+    async def fetchall(
+        self,
+        sql: str,
+        arguments: Sequence[Any] = (),
+    ) -> list[tuple[Any, ...]]:
+        return await asyncio.to_thread(lambda: self._connection.execute(sql, arguments).fetchall())
 
     @property
     def _connection(self) -> sqlite3.Connection:
@@ -54,9 +60,10 @@ class Sqlite(Client):
             raise RuntimeError("Sqlite is not connected")
         return self._conn
 
-    def _commit(self, statement: Callable[[sqlite3.Connection], object]) -> None:
-        with self._connection as conn:  # one transaction: committed on success, rolled back on error
-            statement(conn)
+
+def _commit(connection: sqlite3.Connection, statement: Callable[[sqlite3.Connection], object]) -> None:
+    with connection as conn:  # one transaction: committed on success, rolled back on error
+        statement(conn)
 
 
 @dataclass(frozen=True)
@@ -67,7 +74,7 @@ class Order:
     created: datetime.date
 
 
-DEMO_ORDERS = [
+DEMO_ORDERS = (
     ("ada", 120.0, "2026-09-28"),
     ("alan", 35.5, "2026-09-29"),
     ("grace", 990.0, "2026-09-30"),
@@ -76,7 +83,7 @@ DEMO_ORDERS = [
     ("barbara", 310.0, "2026-10-03"),
     ("alan", 64.0, "2026-10-04"),
     ("grace", 15.0, "2026-10-05"),
-]
+)
 
 
 class Orders(Client):
@@ -102,4 +109,9 @@ class Orders(Client):
             "WHERE created >= ? ORDER BY created DESC, id DESC LIMIT ?",
             (day.isoformat(), limit),
         )
-        return [Order(row[0], row[1], row[2], datetime.date.fromisoformat(row[3])) for row in rows]
+        return [_order(row) for row in rows]
+
+
+def _order(row: tuple[Any, ...]) -> Order:
+    order_id, customer, amount, created = row
+    return Order(order_id, customer, amount, datetime.date.fromisoformat(created))

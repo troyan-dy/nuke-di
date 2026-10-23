@@ -10,6 +10,11 @@ from background_tasks.clients import Cache, Inbox
 # Above the decorator, so the records of nuke_di, a failed background task included, are shown
 logging.basicConfig(level=logging.INFO, format="%(levelname)-5s %(name)s: %(message)s")
 
+# Seconds between two heartbeats, two refreshes of the cache and two messages: what the output interleaves
+HEARTBEAT_SECONDS = 1.0
+REFRESH_SECONDS = 1.25
+WORK_SECONDS = 0.7
+
 
 async def heartbeat(inbox: Inbox, interval: float) -> None:
     while True:
@@ -35,10 +40,10 @@ async def process(
     fail_after: Annotated[int | None, Option(help="Make the cache refresh fail after N refreshes")] = None,
 ) -> None:
     """Process the inbox while a heartbeat and a cache refresh run in the background."""
-    tasks.spawn(heartbeat(inbox, interval=1.0), name="heartbeat")
-    tasks.spawn(refresh_cache(cache, interval=1.25, fail_after=fail_after), name="refresh-cache")
+    tasks.spawn(heartbeat(inbox, interval=HEARTBEAT_SECONDS), name="heartbeat")
+    tasks.spawn(refresh_cache(cache, interval=REFRESH_SECONDS, fail_after=fail_after), name="refresh-cache")
     while not shutdown.is_set():
         message = await inbox.get()
         print(f"worker: {message} with cache v{cache.version}")
-        await asyncio.sleep(0.7)  # the actual work
+        await asyncio.sleep(WORK_SECONDS)  # the actual work
     print("worker: stopped")

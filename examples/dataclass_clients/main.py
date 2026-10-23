@@ -12,8 +12,9 @@ async def handler(user: str, amount: int, checkout: Checkout) -> int:
 async def main() -> None:
     injected = DI.inject(handler)
     print(DI.resolve(Checkout))  # the generated __repr__ lists the injected fields
+    amount = 120
     async with DI:
-        print("placed order", await injected("alice", 120))
+        print("placed order", await injected("alice", amount))
 
 
 if __name__ == "__main__":

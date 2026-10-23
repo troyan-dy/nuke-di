@@ -7,9 +7,11 @@ import pytest
 from nuke_di import Dependencies
 
 from cli_job.clients import Order, Orders
-from cli_job.export import Format, export
+from cli_job.export import export
+from cli_job.report import Format
 
-ADA = Order(id=1, customer="ada", amount=42.0, created=datetime.date(2026, 10, 1))
+FIRST_OF_OCTOBER = datetime.date(2026, 10, 1)
+ADA = Order(id=1, customer="ada", amount=42.0, created=FIRST_OF_OCTOBER)
 
 
 async def test_export_called_directly(tmp_path: Path) -> None:
@@ -18,9 +20,9 @@ async def test_export_called_directly(tmp_path: Path) -> None:
     orders.since.return_value = [ADA]
     report = tmp_path / "report.csv"
 
-    await export(orders, since=datetime.date(2026, 10, 1), limit=5, output=report)
+    await export(orders, since=FIRST_OF_OCTOBER, limit=5, output=report)
 
-    orders.since.assert_awaited_once_with(datetime.date(2026, 10, 1), 5)
+    orders.since.assert_awaited_once_with(FIRST_OF_OCTOBER, 5)
     assert report.read_text() == "id,customer,amount,created\n1,ada,42.0,2026-10-01\n"
 
 
@@ -30,7 +32,7 @@ async def test_dry_run_writes_nothing(tmp_path: Path) -> None:
 
     report = tmp_path / "report.csv"
 
-    await export(orders, since=datetime.date(2026, 10, 1), output=report, dry_run=True)
+    await export(orders, since=FIRST_OF_OCTOBER, output=report, dry_run=True)
 
     assert not report.exists()
 

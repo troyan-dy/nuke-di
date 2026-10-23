@@ -258,7 +258,7 @@ The figures above are what a library costs; with real connections the cost is th
 the startup is when a library starts each `connect()`, which the structure of the tree decides.
 `compare.py --only connect` starts and stops two trees: the application of the [Findings](#findings), 8
 clients whose `connect()` takes 1–60 ms, 68 ms along its longest chain to start and 16 ms to stop; and the
-backend of a product page, `PRODUCT_PAGE_TREE` in `compare.py`, as wide as a real service: an HTTP API, four
+backend of a product page, `PRODUCT_PAGE_TREE` in `compare_trees.py`, as wide as a real service: an HTTP API, four
 features, and every feature four connections of 100–300 ms, gRPC clients of other services, Kafka,
 Elasticsearch and Redis. Its 21 `connect()` take 3.37 s one after another and 0.33 s along the longest chain;
 `Checkout`, which finishes the orders in flight, and `EventsProducer`, which flushes its messages, take 300 ms

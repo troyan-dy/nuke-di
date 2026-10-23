@@ -33,7 +33,8 @@ class HttpSession(NotSingletonClient):
 
     async def get(self, path: str) -> str:
         self.requests += 1
-        return f"session #{self.number} GET {self.settings.api_url}{path} {self.headers}"
+        url = self.settings.api_url
+        return f"session #{self.number} GET {url}{path} {self.headers}"
 
 
 class Orders(Client):
@@ -64,7 +65,8 @@ async def handler(orders: Orders, payments: Payments) -> None:
 async def main() -> None:
     injected = DI.inject(handler)  # builds Orders and Payments once, each with its own HttpSession
     orders, payments = DI.resolve(Orders), DI.resolve(Payments)
-    print("same Settings: ", orders.settings is payments.settings is orders.http.settings)
+    settings = orders.settings
+    print("same Settings: ", settings is payments.settings and settings is orders.http.settings)
     print("same HttpSession:", orders.http is payments.http)
 
     async with DI:

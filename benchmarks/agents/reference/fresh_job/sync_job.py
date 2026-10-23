@@ -8,7 +8,7 @@ class Postgres(Client):
         print("postgres: connected")
 
     async def rows(self, day: datetime.date) -> list[str]:
-        return [f"{day}:{n}" for n in range(3)]
+        return [f"{day}:{number}" for number in range(3)]
 
 
 class Redis(Client):

@@ -10,7 +10,7 @@ async def test_every_client_gets_the_test_settings(di: Dependencies) -> None:
     test_settings = di.mock(Settings, Settings(database_url="sqlite://", pool_size=1))
     db, cache = di.resolve(Database), di.resolve(Cache)
     async with di:
-        assert db.settings is cache.settings is test_settings
+        assert db.settings is test_settings and cache.settings is test_settings
 
 
 async def test_the_job_with_override(di: Dependencies, capsys: pytest.CaptureFixture[str]) -> None:

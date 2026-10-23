@@ -32,14 +32,20 @@ class Sqlite(Client):
             self._conn = None
         print("sqlite: disconnected")
 
-    async def execute(self, sql: str, params: Sequence[Any] = ()) -> None:
-        await asyncio.to_thread(self._commit, lambda conn: conn.execute(sql, params))
+    async def execute(self, sql: str, arguments: Sequence[Any] = ()) -> None:
+        connection = self._connection
+        await asyncio.to_thread(_commit, connection, lambda conn: conn.execute(sql, arguments))
 
     async def executemany(self, sql: str, rows: Sequence[Sequence[Any]]) -> None:
-        await asyncio.to_thread(self._commit, lambda conn: conn.executemany(sql, rows))
+        connection = self._connection
+        await asyncio.to_thread(_commit, connection, lambda conn: conn.executemany(sql, rows))
 
-    async def fetchall(self, sql: str, params: Sequence[Any] = ()) -> list[tuple[Any, ...]]:
-        return await asyncio.to_thread(lambda: self._connection.execute(sql, params).fetchall())
+    async def fetchall(
+        self,
+        sql: str,
+        arguments: Sequence[Any] = (),
+    ) -> list[tuple[Any, ...]]:
+        return await asyncio.to_thread(lambda: self._connection.execute(sql, arguments).fetchall())
 
     @property
     def _connection(self) -> sqlite3.Connection:
@@ -47,9 +53,10 @@ class Sqlite(Client):
             raise RuntimeError("Sqlite is not connected")
         return self._conn
 
-    def _commit(self, statement: Callable[[sqlite3.Connection], object]) -> None:
-        with self._connection as conn:  # one transaction: committed on success, rolled back on error
-            statement(conn)
+
+def _commit(connection: sqlite3.Connection, statement: Callable[[sqlite3.Connection], object]) -> None:
+    with connection as conn:  # one transaction: committed on success, rolled back on error
+        statement(conn)
 
 
 class Customers(Client):
@@ -64,5 +71,5 @@ class Customers(Client):
         await self._db.executemany("INSERT INTO customers (name, email) VALUES (?, ?)", customers)
 
     async def count(self) -> int:
-        [(total,)] = await self._db.fetchall("SELECT count(*) FROM customers")
-        return int(total)
+        rows = await self._db.fetchall("SELECT count(*) FROM customers")
+        return int(rows[0][0])

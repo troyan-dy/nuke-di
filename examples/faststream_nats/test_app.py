@@ -21,7 +21,7 @@ async def test_order_is_forwarded_as_receipt(capsys: pytest.CaptureFixture[str])
     # The test broker runs no app hooks: TestApp starts the app, and with it the clients
     with DI.override(Database, FakeDatabase()):
         async with TestNatsBroker(broker) as test_broker, TestApp(app):
-            for order_id, amount in [(1, "2.50"), (2, "1.25")]:
+            for order_id, amount in ((1, "2.50"), (2, "1.25")):
                 order = Order(order_id=order_id, amount=Decimal(amount))
                 await test_broker.publish(order, "faststream_nats.orders", headers={"customer-id": "7"})
 

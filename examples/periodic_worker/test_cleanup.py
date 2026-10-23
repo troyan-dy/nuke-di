@@ -28,13 +28,12 @@ async def test_stops_at_once_on_shutdown() -> None:
 
 async def test_runs_every_interval(di: Dependencies) -> None:
     sessions, shutdown = di.resolve(Sessions), di.resolve(Shutdown)
-    calls = 0
+    calls: list[None] = []
     delete_expired = sessions.delete_expired
 
     async def count_and_stop() -> list[str]:
-        nonlocal calls
-        calls += 1
-        if calls == 3:
+        calls.append(None)
+        if len(calls) == 3:
             shutdown.set()
         return await delete_expired()
 
@@ -43,4 +42,4 @@ async def test_runs_every_interval(di: Dependencies) -> None:
     async with di:
         await run(interval=0.01)
 
-    assert calls == 3
+    assert len(calls) == 3
