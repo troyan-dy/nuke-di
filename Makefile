@@ -13,9 +13,10 @@ install: ## Install the package and dev dependencies
 	uv sync --locked
 
 .PHONY: lint
-lint: ## Run ruff (lint + format check), mypy and pyright
+lint: ## Run ruff (lint + format check), flake8 (wemake-python-styleguide), mypy and pyright
 	uv run ruff check .
 	uv run ruff format --check .
+	uv run flake8 .
 	uv run mypy
 	uvx $(PYRIGHT)
 

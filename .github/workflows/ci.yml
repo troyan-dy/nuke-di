@@ -25,6 +25,7 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - run: uv run flake8 .  # wemake-python-styleguide, configured in setup.cfg
       - run: uv run mypy
       - run: uvx pyright@1.1.414  # the pin of the Makefile
 
