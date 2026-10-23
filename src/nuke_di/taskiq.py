@@ -5,7 +5,7 @@ See docs/specs/taskiq.md and docs/adr/0003-fastapi-signature-rewrite.md.
 """
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import AsyncExitStack
 from typing import Annotated, Any, get_args, get_origin, get_type_hints
 
@@ -13,6 +13,7 @@ from taskiq import AsyncBroker, TaskiqDepends, TaskiqEvents, TaskiqState
 
 from nuke_di.core import DI, Dependencies
 from nuke_di.integration import Binding, DependsFramework, bind, client_of, running, unique
+from nuke_di.integration.hints import _first_marker, _hint_class
 
 __all__ = ("setup",)
 
@@ -75,36 +76,48 @@ def _refuse_client_classes(call: Any, seen: set[int]) -> None:
     if id(call) in seen:
         return
     seen.add(id(call))
-    init = call.__init__ if inspect.isclass(call) else call
     try:
-        hints = get_type_hints(init, include_extras=True)
-        parameters = inspect.signature(init).parameters.values()
+        hints, arguments = _read(call)
     except (NameError, TypeError, ValueError):
         # Left to bind() and taskiq, which report what they cannot read
         return
-    for param in parameters:
-        hint = hints.get(param.name, param.annotation)
-        if client_of(hint, _TASKIQ.depends) is not None:
-            if inspect.isclass(call):
-                raise TypeError(
-                    f"{call.__qualname__} takes clients in __init__ and is a taskiq dependency: taskiq builds it from "
-                    f"its own __init__, which nuke-di does not rewrite; take it by type hint without TaskiqDepends() "
-                    f"if it is a client, or take its clients in a dependency function"
-                )
-            continue
-        marker = _marker(param, hint)
-        if marker is not None:
-            dependency = marker.dependency or (get_args(hint)[0] if get_origin(hint) is Annotated else hint)
-            if inspect.isclass(dependency) or inspect.isfunction(dependency):
-                _refuse_client_classes(dependency, seen)
+    for argument in arguments:
+        hint = hints.get(argument.name, argument.annotation)
+        if inspect.isclass(call) and client_of(hint, _TASKIQ.depends) is not None:
+            raise TypeError(
+                f"{call.__qualname__} takes clients in __init__ and is a taskiq dependency: taskiq builds it from "
+                f"its own __init__, which nuke-di does not rewrite; take it by type hint without TaskiqDepends() "
+                f"if it is a client, or take its clients in a dependency function"
+            )
+        dependency = _dependency_of(argument, hint)
+        if dependency is not None:
+            _refuse_client_classes(dependency, seen)
 
 
-def _marker(param: inspect.Parameter, hint: Any) -> Any:
-    if isinstance(param.default, _TASKIQ.depends):
-        return param.default
-    if get_origin(hint) is Annotated:
-        return next((item for item in reversed(get_args(hint)[1:]) if isinstance(item, _TASKIQ.depends)), None)
-    return None
+def _read(call: Any) -> tuple[dict[str, Any], Iterable[inspect.Parameter]]:
+    """
+    The type hints and the arguments of what taskiq calls for `call`: its `__init__` for a class.
+    """
+    init = call.__init__ if inspect.isclass(call) else call
+    hints = get_type_hints(init, include_extras=True)
+    return hints, inspect.signature(init).parameters.values()
+
+
+def _dependency_of(argument: inspect.Parameter, hint: Any) -> Any:
+    """
+    The class or function an argument given a `TaskiqDepends()` depends on, or `None`; a client is no
+    dependency.
+    """
+    if client_of(hint, _TASKIQ.depends) is not None:
+        return None
+    marker: Any = None
+    if isinstance(argument.default, _TASKIQ.depends):
+        marker = argument.default
+    elif get_origin(hint) is Annotated:
+        # taskiq-dependencies reads the last of the markers
+        marker = _first_marker(reversed(get_args(hint)[1:]), _TASKIQ.depends)
+    dependency = None if marker is None else (marker.dependency or _hint_class(hint))
+    return dependency if inspect.isclass(dependency) or inspect.isfunction(dependency) else None
 
 
 class _Task:
@@ -153,21 +166,28 @@ class _Worker:
 
     async def __call__(self) -> None:
         try:
-            wait_all = getattr(self.broker, "wait_all", None)
-            if self.stack is not None and wait_all is not None:
-                # An InMemoryBroker runs a kicked task in the background, and its shutdown does not wait for it
-                await wait_all()
-            await self.shutdown()
-        finally:
-            stack, self.stack = self.stack, None
-            if stack is not None:
-                await stack.aclose()
+            await self._drain()
+        except BaseException:
+            await self._close_stack()
+            raise
+        await self._close_stack()
 
     def _bindings(self) -> list[Binding]:
         """
         The clients of every task the broker serves and of the dependencies they use, each once.
         """
-        bindings: list[Binding] = []
-        for task in self.broker.get_all_tasks().values():
-            bindings += _rewrite(task.original_func, self.container)
-        return unique(bindings)
+        tasks = self.broker.get_all_tasks().values()
+        return unique(binding for task in tasks for binding in _rewrite(task.original_func, self.container))
+
+    async def _drain(self) -> None:
+        wait_all = getattr(self.broker, "wait_all", None)
+        if self.stack is not None and wait_all is not None:
+            # An InMemoryBroker runs a kicked task in the background, and its shutdown does not wait for it
+            await wait_all()
+        await self.shutdown()
+
+    async def _close_stack(self) -> None:
+        stack = self.stack
+        self.stack = None
+        if stack is not None:
+            await stack.aclose()
