@@ -39,7 +39,7 @@ def class_name(type_info: TypeInfo) -> str:
 
 def display_names(classes: Iterable[TypeInfo]) -> dict[TypeInfo, str]:
     """
-    The names of `classes`, as `Dependencies._names` gives them: in full, with the module, for the classes that
+    The names of `classes`, as `nuke_di.naming.display_names` gives them: in full, with the module, for the classes that
     share a name.
     """
     names = {type_info: class_name(type_info) for type_info in classes}

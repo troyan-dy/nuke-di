@@ -64,7 +64,7 @@ class Tree:
 
     def _check_argument(self, type_info: TypeInfo, argument: Argument) -> None:
         """
-        The argument as `Dependencies._read_arguments` reads it, with its messages.
+        The argument as `nuke_di._container.signatures._read_arguments` reads it, with its messages.
         """
         found = None if argument.hint is None else client(argument.hint)
         if found is None:

@@ -717,6 +717,34 @@ def test_a_warm_cache_reports_the_same(tmp_path: Path) -> None:
     assert mypy(tmp_path, "calls.py", "clients.py", cache=True) == [*expected, again]
 
 
+def test_the_plugin_snapshot_covers_every_module_of_the_package() -> None:
+    from mypy.build import take_module_snapshot
+
+    from nuke_di.mypy.snapshot import fingerprint
+
+    plugin = importlib.import_module("nuke_di.mypy")
+    package = Path(plugin.__file__ or "").parent
+
+    # mypy hashes only the __init__.py of the package `plugins` names, and adds its version
+    assert take_module_snapshot(plugin).startswith(f"{fingerprint(package)}:")
+
+
+def test_a_change_to_any_module_of_the_plugin_changes_its_version(tmp_path: Path) -> None:
+    from nuke_di.mypy.snapshot import fingerprint
+
+    package = Path(importlib.import_module("nuke_di.mypy").__file__ or "").parent
+    copy = tmp_path / "mypy"
+    copy.mkdir()
+    for module in package.glob("*.py"):
+        (copy / module.name).write_bytes(module.read_bytes())
+    before = fingerprint(copy)
+
+    calls = copy / "calls.py"
+    calls.write_text(f"{calls.read_text()}\n# changed\n")
+
+    assert fingerprint(copy) != before
+
+
 @pytest.mark.parametrize("hook", [True, False], ids=["indirect-deps-hook", "module-refs"])
 def test_a_change_deep_in_the_tree_checks_the_call_again(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hook: bool

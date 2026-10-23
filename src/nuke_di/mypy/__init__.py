@@ -11,4 +11,7 @@ definitions, and a check must say the same with a cold cache and a warm one.
 
 from nuke_di.mypy.plugin import NukeDIPlugin, plugin
 
-__all__ = ("NukeDIPlugin", "plugin")
+# The version mypy's plugin snapshot reads from this module: a digest of the whole package (nuke_di.mypy.snapshot)
+from nuke_di.mypy.snapshot import version as __version__
+
+__all__ = ("NukeDIPlugin", "__version__", "plugin")

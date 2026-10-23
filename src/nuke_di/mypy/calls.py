@@ -59,7 +59,8 @@ class _Calls:
         # A bound method is "handle of Service" to mypy, `handle` to the container
         name = (func.name or "function").partition(" of ")[0]
         tree = self._tree(ctx, root=name)
-        # Every argument has a type hint before any client is resolved, as `Dependencies._inspect` checks
+        # Every argument has a type hint before any client is resolved, as
+        # `nuke_di._container.signatures.client_hints` checks
         _check_annotations(tree, func, name)
         clients = _walk_clients(tree, func)
         return None if tree.failed else clients
