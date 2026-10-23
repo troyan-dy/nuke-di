@@ -284,6 +284,36 @@ async def test_getter_replaces_what_a_marker_calls() -> None:
     assert await toy_call(handler) == "from the getter"
 
 
+def test_bind_binds_a_function_again_for_another_container() -> None:
+    async def handler(greeter: Greeter) -> str:
+        return greeter.greet()
+
+    first, second = Dependencies(), Dependencies()
+    bound = bind(handler, first, TOY)
+
+    assert bind(handler, first, TOY) is bound
+    assert [binding.container() for binding in bind(handler, second, TOY)] == [second]
+
+
+# --- running() ---------------------------------------------------------------------------------------------
+
+
+async def test_running_forgets_the_bindings_when_disconnect_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def handler(greeter: Greeter) -> str:
+        return greeter.greet()
+
+    async def failing_disconnect() -> None:
+        raise RuntimeError("disconnect failed")
+
+    container = Dependencies()
+    bindings = bind(handler, container, TOY)
+    with pytest.raises(RuntimeError, match="disconnect failed"):
+        async with running(container, bindings):
+            monkeypatch.setattr(container, "disconnect", failing_disconnect)
+
+    assert [binding.instance for binding in bindings] == [None]
+
+
 # --- the public names ------------------------------------------------------------------------------------
 
 
