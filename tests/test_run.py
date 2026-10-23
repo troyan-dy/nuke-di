@@ -18,7 +18,8 @@ from nuke_di import (
     Shutdown,
     UsageError,
 )
-from nuke_di.run import RunSettings, run_entrypoint
+from nuke_di.logs import current_run
+from nuke_di.run import RunRequest, RunSettings, run_entrypoint
 
 
 class Events:
@@ -80,19 +81,18 @@ async def start(
     hooks: Sequence[Any] = (),
     grace: float = 10,
     container: Dependencies | None = None,
-    params: dict[str, Any] | None = None,
+    parameter_values: dict[str, Any] | None = None,
     error: BaseException | None = None,
 ) -> Run:
-    return await run_entrypoint(
-        func,
+    request = RunRequest(
+        func=func,
         kind=kind,  # type: ignore[arg-type]
         name="tests.entry",
         hooks=hooks,
         container=container or Dependencies(),
         settings=RunSettings(shutdown_grace=grace),
-        params=params or {},
-        error=error,
     )
+    return await run_entrypoint(request, parameter_values=parameter_values or {}, error=error)
 
 
 async def test_job_succeeds() -> None:
@@ -169,7 +169,7 @@ async def test_parameters_reach_entrypoint() -> None:
     async def entry(db: Db, day: int, tag: str = "x") -> None:
         events.log.append(f"run:{day}:{tag}")
 
-    run = await start(entry, params={"day": 3})
+    run = await start(entry, parameter_values={"day": 3})
 
     assert run.exit_code == 0
     assert events.log == ["connect:Db", "run:3:x", "disconnect:Db"]
@@ -358,6 +358,30 @@ async def test_signal_handlers_are_removed() -> None:
     await start(entry)
 
     assert signal.getsignal(signal.SIGTERM) == before
+
+
+async def test_run_cancelled_from_outside_restores_what_it_set() -> None:
+    connecting = asyncio.Event()
+
+    class Slow(Client):
+        async def connect(self) -> None:
+            connecting.set()
+            await asyncio.Event().wait()
+
+    async def entry(slow: Slow) -> None: ...
+
+    before = signal.getsignal(signal.SIGTERM)
+    task = asyncio.create_task(start(entry))
+    await connecting.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert (signal.getsignal(signal.SIGTERM), current_run.get()) == (before, None)
+    # The connect the Run leaves behind
+    (left,) = [other for other in asyncio.all_tasks() if other.get_coro().__name__ == "_guarded"]  # type: ignore[union-attr]
+    left.cancel()
+    await asyncio.wait({left})
 
 
 async def test_falls_back_to_sigint_only(monkeypatch: pytest.MonkeyPatch) -> None:
