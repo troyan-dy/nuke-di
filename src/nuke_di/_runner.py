@@ -41,7 +41,7 @@ class _Runner:
         self._woken = asyncio.Event()
 
     async def execute(self, func: _AsyncFunction, parameter_values: Mapping[str, Any]) -> None:
-        restore = install_signal_handlers(asyncio.get_running_loop(), self._on_signal)
+        restore = signal_handlers(asyncio.get_running_loop(), self._on_signal)
         try:
             await self._execute(func, parameter_values)
         except BaseException:
@@ -74,10 +74,10 @@ class _Runner:
         """
         Run one phase as the current task and record its outcome; return whether it completed.
         """
-        task = asyncio.create_task(_guarded(coro))
+        task = asyncio.create_task(task_error(coro))
         self._current = task
         try:
-            await _settle(self, task, stoppable)
+            await wait_grace(self, task, stoppable)
         except BaseException:
             self._current = None
             raise
@@ -124,7 +124,7 @@ def exit_code(run: "Run") -> int:
     return 0
 
 
-def install_signal_handlers(
+def signal_handlers(
     loop: asyncio.AbstractEventLoop,
     on_signal: Callable[[int], None],
 ) -> Callable[[], None]:
@@ -161,7 +161,7 @@ def _resolve_entrypoint(container: Dependencies, func: _AsyncFunction) -> tuple[
     return container.resolve(Shutdown), container.resolve(BackgroundTasks), container.inject(func)
 
 
-async def _guarded(coro: Coroutine[Any, Any, Any]) -> BaseException | None:
+async def task_error(coro: Coroutine[Any, Any, Any]) -> BaseException | None:
     """
     Return the exception of `coro` instead of raising it.
 
@@ -176,7 +176,7 @@ async def _guarded(coro: Coroutine[Any, Any, Any]) -> BaseException | None:
     return None
 
 
-async def _settle(runner: _Runner, task: asyncio.Task[BaseException | None], stoppable: bool) -> None:
+async def wait_grace(runner: _Runner, task: asyncio.Task[BaseException | None], stoppable: bool) -> None:
     """
     Wait for `task` to end, or for a signal or a failed background task to wake the runner first: then give a
     stoppable task the grace of a Shutdown, and cancel it.

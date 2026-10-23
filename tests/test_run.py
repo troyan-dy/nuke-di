@@ -370,7 +370,7 @@ async def test_run_cancelled_from_outside_restores_what_it_set() -> None:
     assert (signal.getsignal(signal.SIGTERM), current_run.get()) == (before, None)
     # The connect the Run leaves behind
     tasks = asyncio.all_tasks()
-    left = single(other for other in tasks if other.get_coro().__name__ == "_guarded")  # type: ignore[union-attr]
+    left = single(other for other in tasks if other.get_coro().__name__ == "task_error")  # type: ignore[union-attr]
     left.cancel()
     await asyncio.wait({left})
 
