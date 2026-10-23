@@ -24,32 +24,37 @@ EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 NAMES = sorted(path.parent.name for path in EXAMPLES.glob("*/__init__.py"))
 TIMEOUT = 60
 # What the examples and the library read from the environment: a test sets them, never whoever runs the tests
-CONFIGURATION = {
-    "DATABASE_URL",
-    "DEBUG",
-    "HTTP_TIMEOUT_SECONDS",
-    "NATS_URL",
-    "OUTBOX_POLL_SECONDS",
-    "POOL_SIZE",
-    "PYPI_URL",
-    "QUEUE_DB",
-    "SERVICE_DB",
-    "SQLITE_PATH",
-    "CONNECT_CONCURRENCY",
-    "CONNECT_TIMEOUT_SECONDS",
-    "DISCONNECT_DEADLINE_SECONDS",
-    "DISCONNECT_TIMEOUT_SECONDS",
-    "SHUTDOWN_GRACE_SECONDS",
-}
+CONFIGURATION = frozenset(
+    (
+        "DATABASE_URL",
+        "DEBUG",
+        "HTTP_TIMEOUT_SECONDS",
+        "NATS_URL",
+        "OUTBOX_POLL_SECONDS",
+        "POOL_SIZE",
+        "PYPI_URL",
+        "QUEUE_DB",
+        "SERVICE_DB",
+        "SQLITE_PATH",
+        "CONNECT_CONCURRENCY",
+        "CONNECT_TIMEOUT_SECONDS",
+        "DISCONNECT_DEADLINE_SECONDS",
+        "DISCONNECT_TIMEOUT_SECONDS",
+        "SHUTDOWN_GRACE_SECONDS",
+    )
+)
 
 
 def environment(**extra: str) -> dict[str, str]:
     # Coverage of the outer run must not follow into the example processes either
-    env = {
-        key: value for key, value in os.environ.items() if not key.startswith("COV_CORE_") and key not in CONFIGURATION
-    }
+    settings = os.environ.items()
+    env = {name: setting for name, setting in settings if inherited(name)}
     env.update(PYTHONUNBUFFERED="1", **extra)
     return env
+
+
+def inherited(name: str) -> bool:
+    return not name.startswith("COV_CORE_") and name not in CONFIGURATION
 
 
 def nats_is_running() -> bool:
@@ -77,7 +82,7 @@ def test_every_example_is_listed() -> None:
 
 @pytest.mark.parametrize("name", NAMES)
 def test_example_tests_pass(name: str) -> None:
-    result = subprocess.run(  # noqa: S603
+    completed = subprocess.run(  # noqa: S603
         [sys.executable, "-m", "pytest", "-q", name],
         cwd=EXAMPLES,
         env=environment(),
@@ -87,7 +92,7 @@ def test_example_tests_pass(name: str) -> None:
         check=False,
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 class Program(NamedTuple):
@@ -98,11 +103,16 @@ class Program(NamedTuple):
     output: tuple[str, ...] = ()
 
 
-def run(module: str, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    module: str,
+    *args: str,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    extra = env or {}
     return subprocess.run(  # noqa: S603
         [sys.executable, "-m", module, *args],
         cwd=EXAMPLES,
-        env=environment(**(env or {})),
+        env=environment(**extra),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -112,7 +122,7 @@ def run(module: str, *args: str, env: dict[str, str] | None = None) -> subproces
 
 
 # The tmp_path of a test is not known here, so the databases of these programs go to a directory of their own
-PROGRAMS = [
+PROGRAMS = (
     Program("hello.main", output=("database: connected", "Hello, user-42!", "database: disconnected")),
     Program("plain_script.seed", env={"SQLITE_PATH": "{tmp}/seed.sqlite3"}, output=("seed: 5 customers in ",)),
     Program(
@@ -200,28 +210,45 @@ PROGRAMS = [
         exit_code=1,
         output=("Background task refresh-cache failed", "ConnectionError: the settings service is unreachable"),
     ),
-]
+)
 
 
-@pytest.mark.parametrize("program", PROGRAMS, ids=lambda p: " ".join([p.module, *p.args]))
+def in_tmp(env: dict[str, str], tmp_path: Path) -> dict[str, str]:
+    """
+    The variables of a program with {tmp} in their values made the tmp_path of the test.
+    """
+    settings = env.items()
+    return {name: setting.format(tmp=tmp_path) for name, setting in settings}
+
+
+def command_line(program: Program) -> str:
+    return " ".join([program.module, *program.args])
+
+
+@pytest.mark.parametrize("program", PROGRAMS, ids=command_line)
 def test_program(program: Program, tmp_path: Path) -> None:
-    env = {key: value.format(tmp=tmp_path) for key, value in program.env.items()}
+    env = in_tmp(program.env, tmp_path)
+    completed = run(program.module, *program.args, env=env)
 
-    result = run(program.module, *program.args, env=env)
-
-    assert result.returncode == program.exit_code, result.stdout
+    assert completed.returncode == program.exit_code, completed.stdout
     for line in program.output:
-        assert line in result.stdout
+        assert line in completed.stdout
 
 
 class Running:
     """A long-running example: its output is read as it comes, so a test can wait for a line."""
 
-    def __init__(self, module: str, *args: str, env: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        module: str,
+        *args: str,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        extra = env or {}
         self.process = subprocess.Popen(  # noqa: S603
             [sys.executable, "-m", module, *args],
             cwd=EXAMPLES,
-            env=environment(**(env or {})),
+            env=environment(**extra),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -259,7 +286,11 @@ class Running:
 
 
 @contextmanager
-def running(module: str, *args: str, env: dict[str, str] | None = None) -> Generator[Running, None, None]:
+def running(
+    module: str,
+    *args: str,
+    env: dict[str, str] | None = None,
+) -> Generator[Running, None, None]:
     program = Running(module, *args, env=env)
     try:
         yield program

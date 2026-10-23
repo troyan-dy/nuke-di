@@ -17,6 +17,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+_UNREADABLE = "cannot read pyproject.toml on {base}: {reason}"
 
 
 def parse(version: str) -> tuple[int, ...]:
@@ -30,7 +31,7 @@ def section(changelog: str, version: str) -> str | None:
     The body of the `## [version] - date` section, up to the next section or the links.
     """
     heading = rf"^## \[{re.escape(version)}\] - \d{{4}}-\d{{2}}-\d{{2}}\n"
-    match = re.search(heading + r"(.*?)(?=^## \[|^\[Unreleased\]: )", changelog, re.MULTILINE | re.DOTALL)
+    match = re.search(rf"{heading}(.*?)(?=^## \[|^\[Unreleased\]: )", changelog, re.MULTILINE | re.DOTALL)
     return match.group(1).strip() if match else None
 
 
@@ -56,45 +57,43 @@ def _version_in(pyproject: str) -> str:
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
     # git from PATH with fixed subcommands, run by CI and by `make check-version`
-    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=False)  # noqa: S603, S607
-
-
-def _tagged(version: str) -> bool:
-    return _git("rev-parse", "--quiet", "--verify", f"refs/tags/v{version}").returncode == 0
+    command = ["git", *args]
+    return subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)  # noqa: S603
 
 
 def _fail(errors: list[str]) -> int:
     for error in errors:
         # An annotation on the run page on GitHub Actions, a plain line elsewhere
         prefix = "::error::" if os.environ.get("GITHUB_ACTIONS") else "error: "
-        print(prefix + error, file=sys.stderr)
+        sys.stderr.write(f"{prefix}{error}\n")
     return 1
 
 
 def main(argv: list[str]) -> int:  # pragma: no cover - exercised by CI
     version = _version_in((ROOT / "pyproject.toml").read_text())
     changelog = (ROOT / "CHANGELOG.md").read_text()
+    tagged = _git("rev-parse", "--quiet", "--verify", f"refs/tags/v{version}").returncode == 0
 
     match argv:
         case ["check", base]:
             shown = _git("show", f"{base}:pyproject.toml")
             if shown.returncode != 0:
-                return _fail([f"cannot read pyproject.toml on {base}: {shown.stderr.strip()}"])
-            errors = problems(version, _version_in(shown.stdout), changelog, tagged=_tagged(version))
+                return _fail([_UNREADABLE.format(base=base, reason=shown.stderr.strip())])
+            errors = problems(version, _version_in(shown.stdout), changelog, tagged=tagged)
         case ["unreleased"]:
-            errors = []
-            if _tagged(version):
-                errors.append(f"v{version} is released already: a change reached master without a version bump")
+            errors = (
+                [f"v{version} is released already: a change reached master without a version bump"] if tagged else []
+            )
         case ["notes"]:
-            print(section(changelog, version) or "")
+            sys.stdout.write("{}\n".format(section(changelog, version) or ""))
             return 0
         case _:
-            print(__doc__, file=sys.stderr)
+            sys.stderr.write(f"{__doc__}\n")
             return 2
 
     if errors:
         return _fail(errors)
-    print(version)
+    sys.stdout.write(f"{version}\n")
     return 0
 
 
