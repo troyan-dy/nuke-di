@@ -8,6 +8,7 @@ import re
 import sys
 import textwrap
 from collections.abc import Iterator
+from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
@@ -190,7 +191,7 @@ class SelfInArgs(Client):
 """
 
 # Roots the container fails on, then roots it builds
-FAILING = [
+FAILING = (
     "Checkout",
     "UsesRepository",
     "Nest",
@@ -208,8 +209,8 @@ FAILING = [
     "Nested",
     "UsesNestedPlain",
     "UsesGeneric",
-]
-BUILDING = [
+)
+BUILDING = (
     "Database",
     "Fine",
     "Fresh",
@@ -220,39 +221,52 @@ BUILDING = [
     "Outer.Inner",
     "Dunder",
     "UsesBareGeneric",
-]
+)
 
 
-def mypy(root: Path, *files: str, cache: bool = False) -> list[tuple[str, int, str]]:
+def mypy(
+    root: Path,
+    *files: str,
+    cache: bool = False,
+) -> list[tuple[str, int, str]]:
     """
     Run mypy with the plugin on `files` of `root`: (file, line, message) of every error and note.
     """
     (root / "mypy.ini").write_text("[mypy]\nplugins = nuke_di.mypy\nwarn_unused_ignores = False\n")
-    options = [
-        "--config-file",
-        str(root / "mypy.ini"),
-        "--cache-dir",
-        str(root / ".mypy_cache") if cache else "/dev/null",
-    ]
+    options = mypy_options(root, cache=cache)
     stdout, stderr, _ = run(root, [*options, "--no-error-summary", *files])
     assert not stderr
-    found = []
-    for line in stdout.splitlines():
-        match = ERROR.match(line)
-        assert match is not None, line
-        found.append((match["file"], int(match["line"]), match["message"]))
-    return found
+    return [error_of(line) for line in stdout.splitlines()]
+
+
+def mypy_options(root: Path, *, cache: bool) -> list[str]:
+    cache_dir = str(root / ".mypy_cache") if cache else "/dev/null"
+    return ["--config-file", str(root / "mypy.ini"), "--cache-dir", cache_dir]
+
+
+def error_of(line: str) -> tuple[str, int, str]:
+    """
+    (file, line, message) of a line of mypy's output.
+    """
+    match = ERROR.match(line)
+    assert match is not None, line
+    return match["file"], int(match["line"]), match["message"]
 
 
 def run(root: Path, arguments: list[str]) -> tuple[str, str, int]:
     """
     `mypy.api.run()` in `root`, keeping the recursion limit, which mypy raises for the rest of the process.
     """
+    with recursion_limit_kept(), contextlib.chdir(root):
+        outcome: tuple[str, str, int] = api.run(arguments)
+    return outcome
+
+
+@contextlib.contextmanager
+def recursion_limit_kept() -> Iterator[None]:
     limit = sys.getrecursionlimit()
     try:
-        with contextlib.chdir(root):
-            result: tuple[str, str, int] = api.run(arguments)
-            return result
+        yield
     finally:
         sys.setrecursionlimit(limit)
 
@@ -274,21 +288,39 @@ def runtime_error(module: Any, root: str) -> str | None:
     return None
 
 
+def resolve_calls(roots: tuple[str, ...]) -> str:
+    """
+    A module that resolves each of `roots` of the module clients, one per line from line 3.
+    """
+    lines = "".join(f"DI.resolve(clients.{root})\n" for root in roots)
+    return f"from nuke_di import DI\nimport clients\n{lines}"
+
+
+def reported_at(errors: list[tuple[str, int, str]], line: int) -> list[str]:
+    at_line = ("calls.py", line)
+    return [message for filename, number, message in errors if (filename, number) == at_line]
+
+
+def runtime_errors(module: Any, root: str) -> list[str]:
+    """
+    What the container raises for `root`, as a list of one message or none.
+    """
+    expected = runtime_error(module, root)
+    return [] if expected is None else [expected]
+
+
 def test_plugin_reports_what_the_container_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    roots = [*FAILING, *BUILDING]
-    calls = "from nuke_di import DI\nimport clients\n" + "".join(f"DI.resolve(clients.{root})\n" for root in roots)
-    write(tmp_path, clients=CLIENTS, calls=calls)
+    roots = (*FAILING, *BUILDING)
+    write(tmp_path, clients=CLIENTS, calls=resolve_calls(roots))
 
     errors = mypy(tmp_path, "calls.py", "clients.py")
 
     monkeypatch.syspath_prepend(str(tmp_path))
     module = importlib.import_module("clients")
     for line, root in enumerate(roots, start=3):
-        reported = [message for file, at, message in errors if (file, at) == ("calls.py", line)]
-        expected = runtime_error(module, root)
         # The container stops at the first error, the plugin reports every one
-        assert reported[:1] == ([] if expected is None else [expected]), root
-    assert {file for file, _, _ in errors} == {"calls.py"}
+        assert reported_at(errors, line)[:1] == runtime_errors(module, root), root
+    assert set(map(itemgetter(0), errors)) == {"calls.py"}
 
 
 def test_clients_of_one_name_are_named_in_full(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -375,19 +407,25 @@ def test_an_alias_of_a_type_statement_is_no_client(tmp_path: Path, monkeypatch: 
 
 def test_an_alias_of_a_type_statement_is_no_client_on_every_python() -> None:
     # Python 3.11 cannot parse a `type` statement, for mypy either: its alias is made by hand
-    from mypy.nodes import Context, TypeAlias
+    from mypy.nodes import TypeAlias
+    from mypy.options import Options
     from mypy.types import AnyType, TypeAliasType, TypeOfAny
 
-    from nuke_di import mypy as plugin
+    from nuke_di.mypy.hints import client
+    from nuke_di.mypy.names import type_name
 
     alias = TypeAlias(
-        AnyType(TypeOfAny.explicit), "app.Alias", module="app", line=-1, column=-1, python_3_12_type_alias=True
+        AnyType(TypeOfAny.explicit),
+        "app.Alias",
+        module="app",
+        line=-1,
+        column=-1,
+        python_3_12_type_alias=True,
     )
     hint = TypeAliasType(alias, [])
-    tree = plugin._Tree(api=None, context=Context(), root=None, modules=set())  # type: ignore[arg-type]
 
-    assert plugin._client(hint) is None
-    assert tree._type_name(hint) == "Alias"
+    assert client(hint) is None
+    assert type_name(hint, Options()) == "Alias"
 
 
 def test_every_error_of_a_tree_is_reported_once(tmp_path: Path) -> None:
@@ -671,9 +709,12 @@ def test_a_warm_cache_reports_the_same(tmp_path: Path) -> None:
     assert mypy(tmp_path, "calls.py", "clients.py", cache=True) == expected
 
     # Only `calls` is checked again, `clients` comes from the cache without its definitions
-    (tmp_path / "calls.py").write_text((tmp_path / "calls.py").read_text() + "\nDI.resolve(PositionalOnly)\n")
+    calls = tmp_path / "calls.py"
+    source = calls.read_text()
+    calls.write_text(f"{source}\nDI.resolve(PositionalOnly)\n")
 
-    assert mypy(tmp_path, "calls.py", "clients.py", cache=True) == [*expected, ("calls.py", 6, expected[0][2])]
+    again = ("calls.py", 6, expected[0][2])
+    assert mypy(tmp_path, "calls.py", "clients.py", cache=True) == [*expected, again]
 
 
 @pytest.mark.parametrize("hook", [True, False], ids=["indirect-deps-hook", "module-refs"])
@@ -681,7 +722,7 @@ def test_a_change_deep_in_the_tree_checks_the_call_again(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hook: bool
 ) -> None:
     # mypy before 2.4 has no hook for the dependencies of a module
-    monkeypatch.setattr("nuke_di.mypy.INDIRECT_DEPS_HOOK", hook)
+    monkeypatch.setattr("nuke_di.mypy.calls.INDIRECT_DEPS_HOOK", hook)
     leaf = """
     from nuke_di import Client
 
@@ -716,7 +757,7 @@ def test_a_change_deep_in_the_tree_checks_the_call_again(
         """,
     )
     files = ["calls.py", "top.py", "middle.py", "leaf.py"]
-    assert mypy(tmp_path, *files, cache=True) == []
+    assert not mypy(tmp_path, *files, cache=True)
 
     # `calls` imports `top` only, whose interface stays the same
     write(tmp_path, leaf=leaf.format(""))
@@ -730,19 +771,34 @@ def test_a_change_deep_in_the_tree_checks_the_call_again(
     ]
 
 
-def test_the_guide_example_prints_what_the_guide_shows(tmp_path: Path) -> None:
+def guide_blocks() -> list[str]:
+    """
+    The blocks of the section of the guide on mypy.
+    """
     text = document(page="clients")
-    blocks = split(text[text.index("\n## Checking the tree with mypy\n") :])[1]
+    return split(text[text.index("\n## Checking the tree with mypy\n") :])[1]
+
+
+def guide_example() -> tuple[str, list[str]]:
+    """
+    The source of the mypy example of the guide, and the lines its console shows.
+    """
+    blocks = guide_blocks()
     source = next(block for block in blocks if "# tree.py" in block)
     console = next(block for block in blocks if "$ mypy tree.py" in block)
     # Without the fences: the `# tree.py` line is line 1
-    (tmp_path / "tree.py").write_text("\n".join(source.splitlines()[1:-1]) + "\n")
+    fenceless = "\n".join(source.splitlines()[1:-1])
+    return fenceless, console.splitlines()[2:-1]
+
+
+def test_the_guide_example_prints_what_the_guide_shows(tmp_path: Path) -> None:
+    source, console = guide_example()
+    (tmp_path / "tree.py").write_text(f"{source}\n")
     (tmp_path / "pyproject.toml").write_text('[tool.mypy]\nplugins = ["nuke_di.mypy"]\n')
 
     stdout, _, status = run(tmp_path, ["--cache-dir", "/dev/null", "tree.py"])
 
-    assert stdout.splitlines() == console.splitlines()[2:-1]
-    assert status == 1
+    assert (stdout.splitlines(), status) == (console, 1)
 
 
 @pytest.fixture(autouse=True)

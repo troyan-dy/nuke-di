@@ -4,14 +4,15 @@ that break the contract. The integrations of this package run the check in their
 """
 
 import inspect
+import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, get_args, get_origin
 
 import pytest
 
-import nuke_di.integration
 from nuke_di import Client, Dependencies
+from nuke_di import integration as integration_package
 from nuke_di.integration import Binding, DependsFramework, Framework, bind, running, unique
 from nuke_di.integration.testing import Send, check
 
@@ -46,10 +47,14 @@ async def toy_call(call: Callable[..., Any]) -> Any:
     What a framework does with a rewritten signature: fill every `Annotated[..., ToyDepends(...)]`.
     """
     kwargs = {}
-    for name, param in inspect.signature(call).parameters.items():
-        marker = next(item for item in get_args(param.annotation)[1:] if isinstance(item, ToyDepends))
-        kwargs[name] = await toy_call(marker.dependency)
+    for name, argument in inspect.signature(call).parameters.items():
+        kwargs[name] = await toy_call(toy_marker(argument.annotation).dependency)
     return await call(**kwargs)
+
+
+def toy_marker(annotation: Any) -> ToyDepends:
+    extras = get_args(annotation)[1:]
+    return next(extra for extra in extras if isinstance(extra, ToyDepends))
 
 
 @asynccontextmanager
@@ -76,7 +81,8 @@ async def test_an_integration_on_the_kit_keeps_the_contract() -> None:
 
 
 def notes(group: ExceptionGroup[Exception]) -> list[str]:
-    return [error.__notes__[0].split(":")[0].removeprefix("Toy integration, case ") for error in group.exceptions]
+    first_notes = [error.__notes__[0] for error in group.exceptions]
+    return [note.split(":")[0].removeprefix("Toy integration, case ") for note in first_notes]
 
 
 async def test_check_reports_every_broken_case() -> None:
@@ -89,10 +95,10 @@ async def test_check_reports_every_broken_case() -> None:
         bind(handler, container, TOY)
         yield lambda: toy_call(handler)
 
-    with pytest.raises(ExceptionGroup, match="the Toy integration breaks the nuke-di contract") as info:
+    with pytest.raises(ExceptionGroup, match="the Toy integration breaks the nuke-di contract") as excinfo:
         await check(TOY, toy_app, run_without_container)
 
-    assert notes(info.value) == ["handler", "dependency", "override", "failed_connect"]
+    assert notes(excinfo.value) == ["handler", "dependency", "override", "failed_connect"]
 
 
 async def test_check_reports_a_handler_that_runs_without_the_lifespan() -> None:
@@ -101,11 +107,11 @@ async def test_check_reports_a_handler_that_runs_without_the_lifespan() -> None:
         async with toy_run(toy, True) as send:
             yield send
 
-    with pytest.raises(ExceptionGroup) as info:
+    with pytest.raises(ExceptionGroup) as excinfo:
         await check(TOY, toy_app, run_always_connected)
 
-    assert notes(info.value) == ["not_connected"]
-    assert "the handler ran without the lifespan" in str(info.value.exceptions[0])
+    assert notes(excinfo.value) == ["not_connected"]
+    assert "the handler ran without the lifespan" in str(excinfo.value.exceptions[0])
 
 
 async def test_check_reports_a_framework_that_never_calls_the_handler() -> None:
@@ -113,14 +119,14 @@ async def test_check_reports_a_framework_that_never_calls_the_handler() -> None:
     async def run_nothing(toy: tuple[Toy, Dependencies], lifespan: bool) -> AsyncIterator[Send]:
         yield lambda: None
 
-    with pytest.raises(ExceptionGroup) as info:
+    with pytest.raises(ExceptionGroup) as excinfo:
         await check(TOY, toy_app, run_nothing)
 
-    assert notes(info.value) == ["handler", "dependency", "override", "not_connected", "failed_connect"]
+    assert notes(excinfo.value) == ["handler", "dependency", "override", "not_connected", "failed_connect"]
     assert "expected the events ['store: connected', 'Hello, store!', 'store: disconnected'], got []" in str(
-        info.value.exceptions[0]
+        excinfo.value.exceptions[0]
     )
-    assert "the app started; expected a RuntimeError" in str(info.value.exceptions[-1])
+    assert "the app started; expected a RuntimeError" in str(excinfo.value.exceptions[-1])
 
 
 async def test_check_reports_a_wrong_error_and_a_container_left_resolved() -> None:
@@ -140,13 +146,12 @@ async def test_check_reports_a_wrong_error_and_a_container_left_resolved() -> No
             container.resolve(binding.client_class)
         raise RuntimeError("nuke-di clients failed to start: Broken.connect() raised OSError: unreachable")
 
-    with pytest.raises(ExceptionGroup) as info:
+    with pytest.raises(ExceptionGroup) as excinfo:
         await check(TOY, toy_app, run_carelessly)
 
-    assert notes(info.value) == ["not_connected", "failed_connect"]
-    wrong, left = info.value.exceptions
-    assert "got ValueError('no lifespan, no app')" in str(wrong)
-    assert "the container was left connected or not flushed" in str(left)
+    assert notes(excinfo.value) == ["not_connected", "failed_connect"]
+    assert "got ValueError('no lifespan, no app')" in str(excinfo.value.exceptions[0])
+    assert "the container was left connected or not flushed" in str(excinfo.value.exceptions[1])
 
 
 async def test_check_reports_a_connect_error_let_out() -> None:
@@ -162,28 +167,30 @@ async def test_check_reports_a_connect_error_let_out() -> None:
         for binding in bind(app.handler, container, TOY):
             container.resolve(binding.client_class)
         await container.connect()
-        yield lambda: None  # pragma: no cover
+        yield lambda: None
 
-    with pytest.raises(ExceptionGroup) as info:
+    with pytest.raises(ExceptionGroup) as excinfo:
         await check(TOY, toy_app, run_raw)
 
-    assert notes(info.value) == ["failed_connect"]
-    assert "expected a RuntimeError" in str(info.value.exceptions[0])
+    assert notes(excinfo.value) == ["failed_connect"]
+    assert "expected a RuntimeError" in str(excinfo.value.exceptions[0])
 
 
 async def test_check_reports_a_system_exit_as_a_failed_case() -> None:
     @asynccontextmanager
     async def run_exiting(toy: tuple[Toy, Dependencies], lifespan: bool) -> AsyncIterator[Send]:
         if lifespan:
-            raise SystemExit(3)
+            sys.exit(3)
         async with toy_run(toy, lifespan) as send:
             yield send
 
-    with pytest.raises(ExceptionGroup) as info:
+    with pytest.raises(ExceptionGroup) as excinfo:
         await check(TOY, toy_app, run_exiting)
 
-    assert notes(info.value) == ["handler", "dependency", "override", "failed_connect"]
-    assert "a SystemExit escaped the app, which a server cannot report: SystemExit(3)" in str(info.value.exceptions[0])
+    assert notes(excinfo.value) == ["handler", "dependency", "override", "failed_connect"]
+    assert "a SystemExit escaped the app, which a server cannot report: SystemExit(3)" in str(
+        excinfo.value.exceptions[0]
+    )
 
 
 async def test_check_skips_the_dependency_without_depends() -> None:
@@ -226,7 +233,7 @@ async def wrapped(  # type: ignore[no-untyped-def]
     text: "str" = GREETING,  # type: ignore[assignment]
     untyped=None,
 ) -> "Missing":  # type: ignore[name-defined]  # noqa: F821
-    return text  # pragma: no cover
+    return text
 
 
 async def test_bind_evaluates_each_hint_on_its_own() -> None:
@@ -241,10 +248,10 @@ async def test_bind_evaluates_each_hint_on_its_own() -> None:
     async with running(container, bindings):
         assert await toy_call(greeting) == "hello"
     signature = inspect.signature(wrapped)
-    assert signature.parameters["missing"].annotation == "Missing"
+    left_as_written = (signature.parameters["missing"].annotation, signature.return_annotation)
+    assert left_as_written == ("Missing", "Missing")
     assert signature.parameters["text"].annotation is str
     assert get_origin(signature.parameters["greeter"].annotation) is Annotated
-    assert signature.return_annotation == "Missing"
 
 
 class _Unreadable(type):
@@ -284,11 +291,41 @@ async def test_getter_replaces_what_a_marker_calls() -> None:
     assert await toy_call(handler) == "from the getter"
 
 
+def test_bind_binds_a_function_again_for_another_container() -> None:
+    async def handler(greeter: Greeter) -> str:
+        return greeter.greet()
+
+    first, second = Dependencies(), Dependencies()
+    bound = bind(handler, first, TOY)
+
+    assert bind(handler, first, TOY) is bound
+    assert [binding.container() for binding in bind(handler, second, TOY)] == [second]
+
+
+# --- running() ---------------------------------------------------------------------------------------------
+
+
+async def test_running_forgets_the_bindings_when_disconnect_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def handler(greeter: Greeter) -> str:
+        return greeter.greet()
+
+    async def failing_disconnect() -> None:
+        raise RuntimeError("disconnect failed")
+
+    container = Dependencies()
+    bindings = bind(handler, container, TOY)
+    with pytest.raises(RuntimeError, match="disconnect failed"):
+        async with running(container, bindings):
+            monkeypatch.setattr(container, "disconnect", failing_disconnect)
+
+    assert [binding.instance for binding in bindings] == [None]
+
+
 # --- the public names ------------------------------------------------------------------------------------
 
 
 def test_public_names() -> None:
-    assert set(nuke_di.integration.__all__) == {
+    assert set(integration_package.__all__) == {
         "Binding",
         "DependsFramework",
         "Framework",
@@ -298,4 +335,4 @@ def test_public_names() -> None:
         "unique",
         "wrap_lifespan",
     }
-    assert Binding is nuke_di.integration.Binding
+    assert Binding is integration_package.Binding

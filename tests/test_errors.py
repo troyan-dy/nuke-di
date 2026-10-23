@@ -11,6 +11,9 @@ from nuke_di import (
     InitializeDependencyError,
 )
 
+# The seconds an environment variable gives in the tests of the settings
+FROM_ENV = "2.5"
+
 
 class SlowClient(Client):
     async def connect(self) -> None:
@@ -74,7 +77,7 @@ async def test_disconnect_continues_after_failure() -> None:
     dep.resolve(BrokenDisconnectClient)
 
     async with dep:
-        pass
+        ...
 
     assert TrackedClient.disconnected
     assert dep.connect_clients == []
@@ -122,16 +125,16 @@ async def test_disconnect_timeout(caplog: pytest.LogCaptureFixture) -> None:
     dep.resolve(HangingDisconnectClient)
 
     async with dep:
-        pass
+        ...
 
     assert TrackedClient.disconnected
     assert "HangingDisconnectClient did not disconnect within 0.01s (DISCONNECT_TIMEOUT_SECONDS)" in caplog.text
 
 
 def test_disconnect_timeout_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DISCONNECT_TIMEOUT_SECONDS", "2.5")
+    monkeypatch.setenv("DISCONNECT_TIMEOUT_SECONDS", FROM_ENV)
 
-    assert DependenciesSettings().disconnect_timeout == 2.5
+    assert DependenciesSettings().disconnect_timeout == float(FROM_ENV)
 
 
 def test_disconnect_timeout_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -146,9 +149,9 @@ def test_negative_disconnect_timeout() -> None:
 
 
 def test_disconnect_deadline_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DISCONNECT_DEADLINE_SECONDS", "2.5")
+    monkeypatch.setenv("DISCONNECT_DEADLINE_SECONDS", FROM_ENV)
 
-    assert DependenciesSettings().disconnect_deadline == 2.5
+    assert DependenciesSettings().disconnect_deadline == float(FROM_ENV)
 
 
 def test_disconnect_deadline_default(monkeypatch: pytest.MonkeyPatch) -> None:

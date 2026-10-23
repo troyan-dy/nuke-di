@@ -6,32 +6,32 @@ from nuke_di import Client, Dependencies, NotSingletonClient, client_dataclass
 
 
 @client_dataclass
-class A:
-    pass
+class Plain:
+    """A plain class, a client through client_dataclass."""
 
 
-class B(Client):
-    pass
+class Singleton(Client):
+    """A client the container builds once."""
 
 
-class C(NotSingletonClient):
-    pass
+class Fresh(NotSingletonClient):
+    """A client the container builds for every argument that takes it."""
 
 
 @client_dataclass(frozen=True)
 class MyClient(Client):
-    b: B
-    c: C
-    a: A
+    singleton: Singleton
+    fresh: Fresh
+    plain: Plain
 
-    def get_a(self) -> A:
-        return self.a
+    def plain_client(self) -> Plain:
+        return self.plain
 
-    def get_b(self) -> B:
-        return self.b
+    def singleton_client(self) -> Singleton:
+        return self.singleton
 
-    def get_c(self) -> C:
-        return self.c
+    def fresh_client(self) -> Fresh:
+        return self.fresh
 
 
 @pytest.fixture
@@ -41,9 +41,9 @@ def my_client() -> MyClient:
 
 
 def test_methods(my_client: MyClient) -> None:
-    assert type(my_client.get_b()) is B
-    assert type(my_client.get_c()) is C
-    assert type(my_client.get_a()) is A
+    assert my_client.singleton_client().__class__ is Singleton
+    assert my_client.fresh_client().__class__ is Fresh
+    assert my_client.plain_client().__class__ is Plain
 
 
 def test_is_dataclass(my_client: MyClient) -> None:
@@ -51,14 +51,14 @@ def test_is_dataclass(my_client: MyClient) -> None:
 
 
 def test_dataclass_init(my_client: MyClient) -> None:
-    assert type(my_client.b) is B
-    assert type(my_client.c) is C
-    assert type(my_client.a) is A
+    assert my_client.singleton.__class__ is Singleton
+    assert my_client.fresh.__class__ is Fresh
+    assert my_client.plain.__class__ is Plain
 
 
 def test_frozen(my_client: MyClient) -> None:
     with pytest.raises(FrozenInstanceError):
-        my_client.a = 9090  # type: ignore[assignment,misc]
+        my_client.plain = 9090  # type: ignore[assignment,misc]
 
 
 def test_client_inheritance(my_client: MyClient) -> None:
@@ -67,11 +67,11 @@ def test_client_inheritance(my_client: MyClient) -> None:
 
 @client_dataclass
 class AlreadyClient(Client):
-    b: B
+    singleton: Singleton
 
 
 def test_already_client_keeps_class() -> None:
     assert AlreadyClient.__bases__ == (Client,)
     client: AlreadyClient = Dependencies().resolve(AlreadyClient)
-    assert type(client.b) is B
+    assert client.singleton.__class__ is Singleton
     assert is_dataclass(client)

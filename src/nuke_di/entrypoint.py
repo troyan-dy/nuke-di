@@ -1,15 +1,16 @@
 import asyncio
 import inspect
 import sys
-from collections.abc import Callable, Coroutine, Sequence
-from pathlib import Path
+from collections.abc import Sequence
 from typing import Any, Protocol, TypeVar, cast, overload
 
+from nuke_di._program import MAIN, entrypoint_name, entrypoint_prog
+from nuke_di._runner import _AsyncFunction
 from nuke_di.core import DI
 from nuke_di.errors import UsageError
-from nuke_di.run import Kind, RunHook, RunSettings, run_entrypoint
+from nuke_di.run import Kind, RunHook, RunRequest, RunSettings, run_entrypoint
 
-FuncT = TypeVar("FuncT", bound=Callable[..., Coroutine[Any, Any, Any]])
+FuncT = TypeVar("FuncT", bound=_AsyncFunction)
 
 
 class EntrypointDecorator(Protocol):
@@ -60,34 +61,28 @@ def worker(func: FuncT | None = None, /, *, hooks: Sequence[RunHook] = ()) -> Fu
 
 
 def _entrypoint(kind: Kind, func: FuncT | None, hooks: Sequence[RunHook]) -> FuncT | EntrypointDecorator:
-    def decorate(f: FuncT) -> FuncT:
-        if not inspect.iscoroutinefunction(f):
-            raise TypeError(f'{kind} "{f.__qualname__}" must be declared with "async def"')
-        if f.__module__ == "__main__":
-            sys.exit(execute(f, kind=kind, hooks=hooks))
-        return f
+    def decorator(entrypoint: FuncT) -> FuncT:
+        if not inspect.iscoroutinefunction(entrypoint):
+            raise TypeError(f'{kind} "{entrypoint.__qualname__}" must be declared with "async def"')
+        if entrypoint.__module__ == MAIN:
+            sys.exit(execute(entrypoint, kind=kind, hooks=hooks))
+        return entrypoint
 
-    # `decorate` takes the FuncT of this call; returned without a function, it takes the FuncT of the call it is
+    # `decorator` takes the FuncT of this call; returned without a function, it takes the FuncT of the call it is
     # applied in
-    return cast(EntrypointDecorator, decorate) if func is None else decorate(func)
+    return cast(EntrypointDecorator, decorator) if func is None else decorator(func)
 
 
-def execute(func: Callable[..., Coroutine[Any, Any, Any]], *, kind: Kind, hooks: Sequence[RunHook]) -> int:
+def execute(func: _AsyncFunction, *, kind: Kind, hooks: Sequence[RunHook]) -> int:
     # argparse costs every process a few milliseconds at import, and only a process that runs an entrypoint parses
-    from nuke_di.cli import HelpRequested, build_parser, parse_parameters
+    from nuke_di.cli import HelpRequested
 
     settings = RunSettings()
-    params: dict[str, Any] = {}
+    parameter_values: dict[str, Any] = {}
     error: BaseException | None = None
 
     try:
-        parser = build_parser(func, prog=entrypoint_prog())
-        try:
-            params = parse_parameters(parser, sys.argv[1:])
-        except UsageError as exc:
-            # Only parsing raises it, so the parser exists here; the Run still fails below
-            sys.stderr.write(f"{exc.usage}{parser.prog}: error: {exc}\n")
-            raise
+        parameter_values = _parse_command_line(func, sys.argv[1:])
     except HelpRequested:
         # Printing the help is not a Run: no hook sees it
         return 0
@@ -95,35 +90,28 @@ def execute(func: Callable[..., Coroutine[Any, Any, Any]], *, kind: Kind, hooks:
         # A broken signature or command line fails the Run, so that hooks see it
         error = exc
 
-    run = asyncio.run(
-        run_entrypoint(
-            func,
-            kind=kind,
-            name=entrypoint_name(func),
-            hooks=hooks,
-            container=DI,
-            settings=settings,
-            params=params,
-            error=error,
-        )
+    request = RunRequest(
+        func=func,
+        kind=kind,
+        name=entrypoint_name(func),
+        hooks=hooks,
+        container=DI,
+        settings=settings,
     )
-    return run.exit_code or 0
+    run = run_entrypoint(request, parameter_values=parameter_values, error=error)
+    return asyncio.run(run).exit_code or 0
 
 
-def entrypoint_name(func: Callable[..., Any]) -> str:
-    module = func.__module__
-    if module == "__main__":
-        main = sys.modules["__main__"]
-        # `python -m app.jobs.sync` keeps the importable name in the spec, `python app/jobs/sync.py` has none
-        module = main.__spec__.name if main.__spec__ is not None else Path(main.__file__ or "").stem
-    return f"{module}.{func.__qualname__}"
-
-
-def entrypoint_prog() -> str | None:
+def _parse_command_line(func: _AsyncFunction, argv: list[str]) -> dict[str, Any]:
     """
-    The command shown in `--help`: `python -m <module>`, or the argparse default for a file run by path.
+    The values of the Parameters of `func` in `argv`; a usage error is printed the way argparse prints it, and raised.
     """
-    spec = sys.modules["__main__"].__spec__
-    if spec is None:
-        return None
-    return f"python -m {spec.name.removesuffix('.__main__')}"
+    from nuke_di.cli import build_parser, parse_parameters
+
+    parser = build_parser(func, prog=entrypoint_prog())
+    try:
+        return parse_parameters(parser, argv)
+    except UsageError as exc:
+        # Only parsing raises it, so the parser exists here; the Run still fails
+        sys.stderr.write(f"{exc.usage}{parser.prog}: error: {exc}\n")
+        raise

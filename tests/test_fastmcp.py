@@ -20,8 +20,10 @@ from mcp.types import TextContent, TextResourceContents
 
 from nuke_di import DI, Client, Dependencies
 from nuke_di.fastapi import setup as fastapi_setup
-from nuke_di.fastmcp import _FASTMCP, setup
+from nuke_di.fastmcp import setup
+from nuke_di.fastmcp.signatures import _FASTMCP
 from nuke_di.integration.testing import Send, check
+from tests.sequences import repeated, single
 
 events: list[str] = []
 
@@ -66,7 +68,11 @@ def make_server(container: Dependencies, **kwargs: Any) -> FastMCP[Any]:
     return server
 
 
-async def call(server: FastMCP[Any], name: str, arguments: dict[str, Any] | None = None) -> Any:
+async def call(
+    server: FastMCP[Any],
+    name: str,
+    arguments: dict[str, Any] | None = None,
+) -> Any:
     """Call a tool through an in-memory client, which runs the server's lifespan."""
     async with MCPClient(server) as client:
         return (await client.call_tool(name, arguments or {})).data
@@ -88,20 +94,21 @@ async def test_tool_gets_client_by_type_hint() -> None:
 
 async def test_client_is_left_out_of_the_schema() -> None:
     async def count_books(catalog: Catalog, genre: str, limit: int = 10) -> int:
-        return min(catalog.count(genre), limit)  # pragma: no cover
+        return min(catalog.count(genre), limit)
 
     server = make_server(Dependencies())
     server.tool(count_books)
 
     async with MCPClient(server) as client:
-        (tool,) = await client.list_tools()
+        tool = single(await client.list_tools())
 
-    assert tool.input_schema["properties"] == {"genre": {"type": "string"}, "limit": {"default": 10, "type": "integer"}}
+    expected = {"genre": {"type": "string"}, "limit": {"default": 10, "type": "integer"}}
+    assert tool.input_schema["properties"] == expected
     assert tool.input_schema["required"] == ["genre"]
     # The client goes after the arguments the caller passes, with FastMCP's marker as its default
-    parameters = inspect.signature(count_books).parameters
-    assert list(parameters) == ["genre", "limit", "catalog"]
-    assert parameters["catalog"].kind is inspect.Parameter.KEYWORD_ONLY
+    arguments = inspect.signature(count_books).parameters
+    assert list(arguments) == ["genre", "limit", "catalog"]
+    assert arguments["catalog"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 async def test_override_before_startup() -> None:
@@ -139,7 +146,9 @@ async def test_function_stays_callable_directly() -> None:
 
 async def test_sync_tool_with_context() -> None:
     def shelf(genre: str, ctx: Context, catalog: Catalog) -> str:
-        return f"{ctx.fastmcp.name}: {', '.join(catalog.db.books[genre])}"
+        server_name = ctx.fastmcp.name
+        titles = ", ".join(catalog.db.books[genre])
+        return f"{server_name}: {titles}"
 
     server = make_server(Dependencies())
     server.tool(shelf)
@@ -192,20 +201,20 @@ async def test_client_with_a_default_is_filled() -> None:
 
 def test_partial_callable_object_and_class_with_clients_are_refused() -> None:
     def count(genre: str, catalog: Catalog) -> int:
-        return catalog.count(genre)  # pragma: no cover
+        return catalog.count(genre)
 
     class Counter:
         __name__ = "counter"
 
         def __call__(self, genre: str, catalog: Catalog) -> int:
-            return catalog.count(genre)  # pragma: no cover
+            return catalog.count(genre)
 
     class Reader:
         def __init__(self, db: Database) -> None:
-            self.db = db  # pragma: no cover
+            self.db = db
 
-    async def read(reader: Reader = Depends(Reader)) -> str:
-        return ""  # pragma: no cover
+    async def read(reader: Reader = Depends(Reader)) -> str:  # noqa: WPS404 - FastMCP reads defaults only
+        return ""
 
     server = make_server(Dependencies())
 
@@ -219,7 +228,7 @@ def test_partial_callable_object_and_class_with_clients_are_refused() -> None:
 
 def test_function_read_by_fastmcp_before_setup_is_refused() -> None:
     async def count_books(genre: str, catalog: Catalog) -> int:
-        return catalog.count(genre)  # pragma: no cover
+        return catalog.count(genre)
 
     with pytest.raises(TypeError, match="not a pydantic type"):
         FastMCP("plain").tool(count_books)
@@ -230,10 +239,10 @@ def test_function_read_by_fastmcp_before_setup_is_refused() -> None:
 
 def test_one_function_for_fastapi_and_fastmcp_is_refused() -> None:
     async def for_fastapi_first(catalog: Catalog) -> int:
-        return 1  # pragma: no cover
+        return 1
 
     async def for_fastmcp_first(catalog: Catalog) -> int:
-        return 1  # pragma: no cover
+        return 1
 
     app = FastAPI()
     fastapi_setup(app, Dependencies())
@@ -251,7 +260,7 @@ async def test_own_dependency_of_a_client_type_is_kept() -> None:
     def fake() -> Catalog:
         return Catalog(FakeDatabase())
 
-    async def count_books(genre: str, catalog: Catalog = Depends(fake)) -> int:
+    async def count_books(genre: str, catalog: Catalog = Depends(fake)) -> int:  # noqa: WPS404 - see read()
         return catalog.count(genre)
 
     server = make_server(Dependencies())
@@ -292,25 +301,25 @@ async def test_dependency_takes_clients() -> None:
     def genres(catalog: Catalog, **options: Any) -> list[str]:
         return sorted(catalog.db.books)
 
-    async def first_genre(db: Database, names: list[str] = Depends(genres)) -> str:
+    async def first_genre(db: Database, names: list[str] = Depends(genres)) -> str:  # noqa: WPS404 - see read()
         return f"{names[0]} ({len(db.books[names[0]])})"
 
-    async def browse(genre: str = Depends(first_genre)) -> str:
+    async def browse(genre: str = Depends(first_genre)) -> str:  # noqa: WPS404 - FastMCP reads defaults only
         return genre
 
     server = make_server(Dependencies())
     server.tool(browse)
 
     async with MCPClient(server) as client:
-        (tool,) = await client.list_tools()
-        result = await client.call_tool("browse", {})
+        tool = single(await client.list_tools())
+        tool_result = await client.call_tool("browse", {})
 
     assert tool.input_schema["properties"] == {}
-    assert result.data == "fantasy (2)"
+    assert tool_result.data == "fantasy (2)"
     assert list(inspect.signature(genres).parameters) == ["catalog", "options"]
 
 
-async def test_resources_and_prompts_take_clients() -> None:
+async def test_resources_take_clients() -> None:
     server = make_server(Dependencies())
 
     @server.resource("books://genres")
@@ -321,20 +330,28 @@ async def test_resources_and_prompts_take_clients() -> None:
     async def shelf(genre: str, db: Database) -> str:
         return ", ".join(db.books[genre])
 
-    @server.prompt
-    async def recommend(genre: str, catalog: Catalog) -> str:
-        return f"Recommend one of the {catalog.count(genre)} {genre} books."
-
     async with MCPClient(server) as client:
-        (static,) = await client.read_resource("books://genres")
-        (template,) = await client.read_resource("books://fantasy")
-        prompt = await client.get_prompt("recommend", {"genre": "fantasy"})
-        (listed,) = await client.list_prompts()
+        static = single(await client.read_resource("books://genres"))
+        template = single(await client.read_resource("books://fantasy"))
 
     assert isinstance(static, TextResourceContents)
     assert isinstance(template, TextResourceContents)
     assert (static.text, template.text) == ("fantasy, poetry", "The Hobbit, Earthsea")
-    (message,) = prompt.messages
+
+
+async def test_prompts_take_clients() -> None:
+    server = make_server(Dependencies())
+
+    @server.prompt
+    async def recommend(genre: str, catalog: Catalog) -> str:
+        count = catalog.count(genre)
+        return f"Recommend one of the {count} {genre} books."
+
+    async with MCPClient(server) as client:
+        prompt = await client.get_prompt("recommend", {"genre": "fantasy"})
+        listed = single(await client.list_prompts())
+
+    message = single(prompt.messages)
     assert isinstance(message.content, TextContent)
     assert message.content.text == "Recommend one of the 2 fantasy books."
     assert [argument.name for argument in listed.arguments or []] == ["genre"]
@@ -362,7 +379,7 @@ async def test_mounted_server_on_the_same_container_shares_its_clients() -> None
     # On its own, the mounted server starts its clients itself
     assert await call(child, "titles", {"genre": "poetry"}) == ["Leaves of Grass"]
 
-    assert events == ["database: connected", "database: disconnected"] * 2
+    assert events == repeated(["database: connected", "database: disconnected"], 2)
 
 
 async def test_mounted_server_on_another_container_starts_its_own() -> None:
@@ -379,7 +396,7 @@ async def test_mounted_server_on_another_container_starts_its_own() -> None:
 
 async def test_server_mounted_before_setup_on_the_same_container_fails_to_start() -> None:
     async def titles(genre: str, db: Database) -> list[str]:
-        return db.books[genre]  # pragma: no cover
+        return db.books[genre]
 
     container = Dependencies()
     parent: FastMCP[Any] = FastMCP("parent")
@@ -390,7 +407,7 @@ async def test_server_mounted_before_setup_on_the_same_container_fails_to_start(
 
     with pytest.raises(RuntimeError, match=r"bookshop is mounted on a server that runs on the same container"):
         async with MCPClient(parent):
-            pass  # pragma: no cover
+            ...
     assert not container.connected
 
 
@@ -415,7 +432,7 @@ async def test_function_is_bound_once_whatever_the_container() -> None:
     async with MCPClient(server_a):
         with pytest.raises(RuntimeError, match="Catalog is filled for another app that is running"):
             async with MCPClient(server_b):
-                pass  # pragma: no cover
+                ...
 
 
 # --- errors ----------------------------------------------------------------------------------------------
@@ -423,7 +440,7 @@ async def test_function_is_bound_once_whatever_the_container() -> None:
 
 async def test_tool_called_without_the_lifespan() -> None:
     async def count_books(genre: str, catalog: Catalog) -> int:
-        return catalog.count(genre)  # pragma: no cover
+        return catalog.count(genre)
 
     server = make_server(Dependencies())
     server.tool(count_books)
@@ -438,7 +455,7 @@ async def test_tool_called_without_the_lifespan() -> None:
 
 async def test_tool_added_after_startup() -> None:
     async def late(catalog: Catalog) -> int:
-        return catalog.count("fantasy")  # pragma: no cover
+        return catalog.count("fantasy")
 
     async def count_books(genre: str, db: Database) -> int:
         return len(db.books[genre])
@@ -458,7 +475,7 @@ async def test_tool_added_after_startup() -> None:
 
 
 async def test_failed_connect_fails_the_startup() -> None:
-    async def broken(client: Broken) -> None: ...  # pragma: no cover
+    async def broken(client: Broken) -> None: ...
 
     container = Dependencies()
     server = make_server(container)
@@ -466,7 +483,7 @@ async def test_failed_connect_fails_the_startup() -> None:
 
     with pytest.raises(RuntimeError, match=r"nuke-di clients failed to start: Broken\.connect\(\) raised OSError"):
         async with MCPClient(server):
-            pass  # pragma: no cover
+            ...
 
     assert not container.connected
     assert not container.clients
@@ -475,13 +492,13 @@ async def test_failed_connect_fails_the_startup() -> None:
 def test_setup_twice_is_refused() -> None:
     server = make_server(Dependencies())
 
-    with pytest.raises(TypeError, match="setup\\(\\) was already called"):
+    with pytest.raises(TypeError, match=r"setup\(\) was already called"):
         setup(server, Dependencies())
 
 
 def test_unresolvable_annotation_is_left_to_fastmcp() -> None:
-    def tool(value: "Missing") -> int:  # type: ignore[name-defined]  # noqa: F821
-        return 1  # pragma: no cover
+    def tool(title: "Missing") -> int:  # type: ignore[name-defined]  # noqa: F821
+        return 1
 
     server = make_server(Dependencies())
     with pytest.raises(NameError, match="Missing"):
@@ -490,7 +507,7 @@ def test_unresolvable_annotation_is_left_to_fastmcp() -> None:
 
 def test_tool_declared_before_setup_names_the_fix() -> None:
     async def count_books(genre: str, catalog: Catalog) -> int:
-        return catalog.count(genre)  # pragma: no cover
+        return catalog.count(genre)
 
     server: FastMCP[Any] = FastMCP("bookshop")
 

@@ -4,7 +4,7 @@ FastStream integration: subscriber handlers and their dependencies take clients 
 See docs/specs/faststream.md and docs/adr/0003-fastapi-signature-rewrite.md.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from faststream import Depends, FastStream
@@ -75,18 +75,19 @@ def _app_bindings(app: FastStream | AsgiFastStream, container: Dependencies) -> 
     """
     The clients of every subscriber the brokers of `app` serve, routers included, each once.
     """
-    bindings: list[Binding] = []
-    for broker in app.brokers:
-        for subscriber in broker.subscribers:
-            # The dependencies of the broker and of the routers on the way
-            outer = getattr(subscriber, "_outer_config", None)
-            for depends in getattr(outer, "broker_dependencies", ()):
-                bindings += bind(depends.dependency, container, _FASTSTREAM)
-            for item in subscriber.calls:
-                bindings += bind(_declared(item.handler), container, _FASTSTREAM)
-                for depends in item.dependencies:
-                    bindings += bind(depends.dependency, container, _FASTSTREAM)
-    return unique(bindings)
+    subscribers = (subscriber for broker in app.brokers for subscriber in broker.subscribers)
+    return unique(binding for subscriber in subscribers for binding in _subscriber_bindings(subscriber, container))
+
+
+def _subscriber_bindings(subscriber: Any, container: Dependencies) -> Iterator[Binding]:
+    # The dependencies of the broker and of the routers on the way
+    outer = getattr(subscriber, "_outer_config", None)
+    for depends in getattr(outer, "broker_dependencies", ()):
+        yield from bind(depends.dependency, container, _FASTSTREAM)
+    for call in subscriber.calls:
+        yield from bind(_declared(call.handler), container, _FASTSTREAM)
+        for depends in call.dependencies:
+            yield from bind(depends.dependency, container, _FASTSTREAM)
 
 
 def _declared(handler: Any) -> Callable[..., Any]:
@@ -96,4 +97,4 @@ def _declared(handler: Any) -> Callable[..., Any]:
     # FastStream 0.7 keeps it apart from the function composed on start; 0.6 keeps only `_original_call`,
     # which is the declared function for an `async def`
     declared = getattr(handler, "_declared_call", None)
-    return declared if declared is not None else handler._original_call  # type: ignore[no-any-return]
+    return handler._original_call if declared is None else declared  # type: ignore[no-any-return]

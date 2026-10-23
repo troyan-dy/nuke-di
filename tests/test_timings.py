@@ -20,7 +20,7 @@ from nuke_di import (
     DependenciesSettings,
     Run,
 )
-from nuke_di.run import RunSettings, run_entrypoint
+from nuke_di.run import RunRequest, RunSettings, run_entrypoint
 
 
 class Postgres(Client):
@@ -337,14 +337,15 @@ async def test_failure_records_carry_client(caplog: pytest.LogCaptureFixture) ->
 
 
 async def start(func: Any, container: Dependencies, hooks: list[Any] | None = None) -> Run:
-    return await run_entrypoint(
-        func,
+    request = RunRequest(
+        func=func,
         kind="job",
         name="tests.entry",
         hooks=hooks or [],
         container=container,
         settings=RunSettings(shutdown_grace=1),
     )
+    return await run_entrypoint(request)
 
 
 class Collect:

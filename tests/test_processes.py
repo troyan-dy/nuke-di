@@ -96,7 +96,8 @@ def test_failing_background_task_fails_worker() -> None:
 
 
 def test_parameters_reach_job() -> None:
-    code, stdout, _ = finish(start("parameters", "-d", "2026-10-01", "--tables", "a", "--tables", "b", "--dry-run"))
+    argv = ("-d", "2026-10-01", "--tables", "a", "--tables", "b", "--dry-run")
+    code, stdout, _ = finish(start("parameters", *argv))
 
     assert code == 0
     assert stdout.splitlines() == ["connected", "2026-10-01 DIFF ['a', 'b'] True"]

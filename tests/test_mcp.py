@@ -19,6 +19,7 @@ from pydantic.json_schema import GenerateJsonSchema
 from nuke_di import DI, Client, Dependencies
 from nuke_di.integration.testing import Send, check
 from nuke_di.mcp import _MCP, setup
+from tests.sequences import single
 
 events: list[str] = []
 
@@ -66,9 +67,9 @@ def make_server(container: Dependencies, **kwargs: Any) -> MCPServer:
 async def call(server: MCPServer, name: str, arguments: dict[str, Any] | None = None) -> Any:
     """Call a tool through an in-memory client, which runs the server's lifespan."""
     async with MCPClient(server) as client:
-        result = await client.call_tool(name, arguments or {})
-    assert not result.is_error, result.content
-    return result.structured_content
+        tool_result = await client.call_tool(name, arguments or {})
+    assert not tool_result.is_error, tool_result.content
+    return tool_result.structured_content
 
 
 async def count_books(genre: str, catalog: Catalog) -> int:
@@ -92,7 +93,7 @@ async def test_client_is_left_out_of_the_schema() -> None:
     server.tool()(count_books)
 
     async with MCPClient(server) as client:
-        (tool,) = (await client.list_tools()).tools
+        tool = single((await client.list_tools()).tools)
 
     assert tool.input_schema["properties"] == {"genre": {"title": "Genre", "type": "string"}}
     assert tool.input_schema["required"] == ["genre"]
@@ -122,7 +123,7 @@ async def test_function_is_left_as_written() -> None:
     server.tool()(count_books)
 
     assert count_books.__annotations__ == annotations
-    assert "__signature__" not in vars(count_books)
+    assert "__signature__" not in count_books.__dict__
     if sys.version_info >= (3, 14):
         # The annotations as written, not only their values: `__annotate__` is kept
         import annotationlib
@@ -148,7 +149,9 @@ async def test_sync_tool_and_string_annotations() -> None:
 
 async def test_tool_takes_context_and_clients() -> None:
     async def report(genre: str, ctx: Context, catalog: Catalog) -> str:
-        return f"{ctx.request_id is not None}: {catalog.count(genre)}"
+        has_request = ctx.request_id is not None
+        count = catalog.count(genre)
+        return f"{has_request}: {count}"
 
     server = make_server(Dependencies())
     server.tool()(report)
@@ -181,11 +184,11 @@ async def test_callable_object_takes_clients() -> None:
     server.add_tool(Counter(), name="count")
 
     async with MCPClient(server) as client:
-        (tool,) = (await client.list_tools()).tools
-        result = await client.call_tool("count", {"genre": "fantasy"})
+        tool = single((await client.list_tools()).tools)
+        tool_result = await client.call_tool("count", {"genre": "fantasy"})
 
     assert list(tool.input_schema["properties"]) == ["genre"]
-    assert result.structured_content == {"result": 2}
+    assert tool_result.structured_content == {"result": 2}
     assert "Annotated" not in str(Counter.__call__.__annotations__)
 
 
@@ -217,7 +220,7 @@ async def test_client_with_a_default_is_filled() -> None:
 
 def test_partial_with_clients_is_refused() -> None:
     def count(genre: str, catalog: Catalog) -> int:
-        return catalog.count(genre)  # pragma: no cover
+        return catalog.count(genre)
 
     server = make_server(Dependencies())
 
@@ -227,10 +230,10 @@ def test_partial_with_clients_is_refused() -> None:
 
 def test_partial_without_clients_is_left_to_the_sdk() -> None:
     def greet(greeting: str, name: str) -> str:
-        return f"{greeting}, {name}!"  # pragma: no cover
+        return f"{greeting}, {name}!"
 
-    def missing(value: "Missing") -> str:  # type: ignore[name-defined]  # noqa: F821
-        return ""  # pragma: no cover
+    def missing(title: "Missing") -> str:  # type: ignore[name-defined]  # noqa: F821
+        return ""
 
     server = make_server(Dependencies())
     # The SDK takes no partials: it reads their `__name__`
@@ -241,7 +244,7 @@ def test_partial_without_clients_is_left_to_the_sdk() -> None:
 
 def test_input_required_result_with_clients_is_refused() -> None:
     async def ask(catalog: Catalog) -> InputRequiredResult | int:
-        return 1  # pragma: no cover
+        return 1
 
     server = make_server(Dependencies())
 
@@ -251,18 +254,21 @@ def test_input_required_result_with_clients_is_refused() -> None:
 
 
 async def test_one_function_on_two_servers_with_two_containers() -> None:
-    first, second = Dependencies(), Dependencies()
-    server_a = make_server(first)
+    second = Dependencies()
+    server_a = make_server(Dependencies())
     server_b = make_server(second)
     server_a.tool()(count_books)
     server_b.tool()(count_books)
 
     with second.override(Database, FakeDatabase()):
-        async with MCPClient(server_a) as a, MCPClient(server_b) as b:
-            result_a = await a.call_tool("count_books", {"genre": "fantasy"})
-            result_b = await b.call_tool("count_books", {"genre": "fantasy"})
+        async with MCPClient(server_a) as client_a, MCPClient(server_b) as client_b:
+            assert await fantasy_count(client_a) == {"result": 2}
+            assert await fantasy_count(client_b) == {"result": 1}
 
-    assert (result_a.structured_content, result_b.structured_content) == ({"result": 2}, {"result": 1})
+
+async def fantasy_count(client: MCPClient) -> Any:
+    tool_result = await client.call_tool("count_books", {"genre": "fantasy"})
+    return tool_result.structured_content
 
 
 async def test_server_lifespan_runs_inside_with_connected_clients() -> None:
@@ -306,12 +312,12 @@ async def test_resolver_takes_clients() -> None:
     server.tool()(browse)
 
     async with MCPClient(server) as client:
-        (tool,) = (await client.list_tools()).tools
-        result = await client.call_tool("browse", {})
+        tool = single((await client.list_tools()).tools)
+        tool_result = await client.call_tool("browse", {})
 
     assert tool.input_schema["properties"] == {}
-    assert result.structured_content == {"result": "fantasy (2)"}
-    assert "__signature__" not in vars(shelf)
+    assert tool_result.structured_content == {"result": "fantasy (2)"}
+    assert "__signature__" not in shelf.__dict__
     assert shelf.__annotations__ == {"catalog": Catalog, "return": list[str]}
 
 
@@ -330,17 +336,17 @@ async def test_own_resolver_of_a_client_type_is_kept() -> None:
     assert events == []
 
 
-async def endless(value: int) -> int:
-    return value  # pragma: no cover
+async def endless(count: int) -> int:
+    return count
 
 
 # A resolver that resolves its own argument
-endless.__annotations__["value"] = Annotated[int, Resolve(endless)]
+endless.__annotations__["count"] = Annotated[int, Resolve(endless)]
 
 
 def test_cycle_of_resolvers_is_reported_by_the_sdk() -> None:
-    async def spin(value: Annotated[int, Resolve(endless)], catalog: Catalog) -> int:
-        return value  # pragma: no cover
+    async def spin(count: Annotated[int, Resolve(endless)], catalog: Catalog) -> int:
+        return count
 
     server = make_server(Dependencies())
     with pytest.raises(InvalidSignature, match="cyclic dependency"):
@@ -368,7 +374,7 @@ async def test_tool_added_after_startup() -> None:
     server.tool()(count_books)
 
     async def late(catalog: Catalog) -> int:
-        return catalog.count("fantasy")  # pragma: no cover
+        return catalog.count("fantasy")
 
     async with MCPClient(server) as client:
         server.tool()(late)
@@ -382,7 +388,7 @@ async def test_tool_added_after_startup() -> None:
 
 
 async def test_failed_connect_fails_the_startup() -> None:
-    async def broken(client: Broken) -> None: ...  # pragma: no cover
+    async def broken(client: Broken) -> None: ...
 
     container = Dependencies()
     server = make_server(container)
@@ -390,7 +396,7 @@ async def test_failed_connect_fails_the_startup() -> None:
 
     with pytest.raises(RuntimeError, match=r"nuke-di clients failed to start: Broken\.connect\(\) raised OSError"):
         async with MCPClient(server):
-            pass  # pragma: no cover
+            ...
 
     assert not container.connected
     assert not container.clients
@@ -399,13 +405,13 @@ async def test_failed_connect_fails_the_startup() -> None:
 def test_setup_twice_is_refused() -> None:
     server = make_server(Dependencies())
 
-    with pytest.raises(TypeError, match="setup\\(\\) was already called"):
+    with pytest.raises(TypeError, match=r"setup\(\) was already called"):
         setup(server, Dependencies())
 
 
 def test_unresolvable_annotation_is_left_to_the_sdk() -> None:
-    def tool(value: "Missing") -> int:  # type: ignore[name-defined]  # noqa: F821
-        return 1  # pragma: no cover
+    def tool(title: "Missing") -> int:  # type: ignore[name-defined]  # noqa: F821
+        return 1
 
     server = make_server(Dependencies())
     with pytest.raises(Exception, match="Unable to evaluate type annotations for callable 'tool'"):
@@ -452,8 +458,8 @@ async def contract_run(server: MCPServer, lifespan: bool) -> AsyncIterator[Send]
     async with MCPClient(server) as client:
 
         async def send() -> None:
-            result = await client.call_tool("check", {})
-            assert not result.is_error, result.content
+            tool_result = await client.call_tool("check", {})
+            assert not tool_result.is_error, tool_result.content
 
         yield send
 
