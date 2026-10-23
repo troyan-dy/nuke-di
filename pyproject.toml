@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "1.19.0"
+version = "2.0.0"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
