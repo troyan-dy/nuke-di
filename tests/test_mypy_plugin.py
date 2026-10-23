@@ -264,11 +264,11 @@ def write(root: Path, **modules: str) -> None:
 
 
 def runtime_error(module: Any, root: str) -> str | None:
-    cls = module
+    target = module
     for part in root.split("."):
-        cls = getattr(cls, part)
+        target = getattr(target, part)
     try:
-        Dependencies().resolve(cls)
+        Dependencies().resolve(target)
     except InvalidSignatureError as exc:
         return str(exc)
     return None
@@ -607,11 +607,11 @@ def test_what_mypy_cannot_tell_is_left_to_the_container(tmp_path: Path) -> None:
 
 
         class Other:
-            def resolve(self, cls: type[Variable]) -> None: ...
+            def resolve(self, client_class: type[Variable]) -> None: ...
 
 
-        def resolve_any(cls: type[Overloaded]) -> None:
-            DI.resolve(cls)
+        def resolve_any(client_class: type[Overloaded]) -> None:
+            DI.resolve(client_class)
 
 
         Id = NewType("Id", Database)

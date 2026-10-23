@@ -65,7 +65,7 @@ class ClientPlugin(InitPlugin):
                 clients.add_handler(handler)
 
         container = self.container
-        bindings = {name: Binding(cls, container, _LITESTAR) for name, cls in clients.found.items()}
+        bindings = {name: Binding(client_class, container, _LITESTAR) for name, client_class in clients.found.items()}
         # On the app, so every layer below sees them, and under the dependencies of the app, which win
         app_config.dependencies = {
             **{name: Provide(binding.get) for name, binding in bindings.items()},

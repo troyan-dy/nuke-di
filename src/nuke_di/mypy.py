@@ -79,8 +79,8 @@ class NukeDIPlugin(Plugin):
     def get_method_hook(self, fullname: str) -> Callable[[MethodContext], Type] | None:
         if fullname == DECORATOR:
             return self._check_entrypoint
-        cls, _, method = fullname.rpartition(".")
-        if method not in {"resolve", "inject"} or not self._is_container(cls):
+        owner, _, method = fullname.rpartition(".")
+        if method not in {"resolve", "inject"} or not self._is_container(owner):
             return None
         return self._check_resolve if method == "resolve" else self._check_inject
 
@@ -123,10 +123,10 @@ class NukeDIPlugin(Plugin):
 
     def _check_resolve(self, ctx: MethodContext) -> Type:
         # A class named in the call: `type[Database]` may hold a subclass with another `__init__`
-        cls = _first_argument(ctx)
+        called = _first_argument(ctx)
         # A class that is no client fails the bound of `resolve()`, and mypy calls no hook for that call
-        if isinstance(cls, CallableType) and cls.is_type_obj():
-            self._tree(ctx, root=None).walk(cls.type_object())
+        if isinstance(called, CallableType) and called.is_type_obj():
+            self._tree(ctx, root=None).walk(called.type_object())
         return ctx.default_return_type
 
     def _check_inject(self, ctx: MethodContext) -> Type:

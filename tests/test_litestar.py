@@ -22,14 +22,14 @@ from nuke_di.litestar import _LITESTAR, ClientPlugin
 if TYPE_CHECKING:
     from decimal import Decimal
 
-T = TypeVar("T")
+DependencyT = TypeVar("DependencyT")
 
 if hasattr(litestar.di, "NamedDependency"):
     from litestar.di import NamedDependency
 else:  # Litestar before 2.23
     from litestar.params import Dependency
 
-    NamedDependency = Annotated[T, Dependency()]  # type: ignore[misc]
+    NamedDependency = Annotated[DependencyT, Dependency()]  # type: ignore[misc]
 
 events: list[str] = []
 

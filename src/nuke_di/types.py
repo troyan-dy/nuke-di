@@ -62,9 +62,9 @@ isclient = isa(Client)
 isnotsingleton = isa(NotSingletonClient)
 
 
-def _not_a_pydantic_type(cls: type) -> str:
+def _not_a_pydantic_type(client_class: type) -> str:
     return (
-        f"{sname(cls)} is a nuke-di client, not a pydantic type. A pydantic model takes it only with "
+        f"{sname(client_class)} is a nuke-di client, not a pydantic type. A pydantic model takes it only with "
         f"arbitrary_types_allowed, and has no JSON schema for it. A framework fills it only as a plain type hint, "
         f"not as an optional, through its nuke-di integration: e.g. in a FastAPI route declared through "
         f"nuke_di.fastapi, or in an MCP tool added after setup() of nuke_di.mcp or nuke_di.fastmcp. See "

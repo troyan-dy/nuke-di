@@ -54,10 +54,10 @@ def other_module_client(name: str, module: str = "app.billing") -> type[Client]:
     """
     A client class with the name of another one, as a wrapper per package would be.
     """
-    cls = type(name, (Client,), {})
-    cls.__module__ = module
-    cls.__qualname__ = name
-    return cls
+    client_class = type(name, (Client,), {})
+    client_class.__module__ = module
+    client_class.__qualname__ = name
+    return client_class
 
 
 # #54: the state in the message
@@ -160,14 +160,14 @@ def test_init_error_of_a_root_has_no_path() -> None:
 
 
 @pytest.mark.parametrize(
-    ("cls", "name"),
+    ("not_a_client", "name"),
     [(Settings, "Settings"), (int, "int"), (type(None), "None"), ("Database", "'Database'"), ({}, r"\{\}")],
 )
-def test_resolve_refuses_what_is_not_a_client(cls: Any, name: str) -> None:
+def test_resolve_refuses_what_is_not_a_client(not_a_client: Any, name: str) -> None:
     with pytest.raises(
         InvalidSignatureError, match=rf"^{name} is not a client: subclass Client or NotSingletonClient$"
     ):
-        Dependencies().resolve(cls)
+        Dependencies().resolve(not_a_client)
 
 
 def test_inject_leaves_a_non_client_argument_to_the_caller() -> None:

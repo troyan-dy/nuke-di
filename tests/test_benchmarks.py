@@ -211,8 +211,8 @@ async def test_dishka_without_its_lock_builds_a_shared_client_twice(monkeypatch:
             self.db = db
 
     provider = compare.Provider(scope=compare.Scope.APP)
-    for cls in (Database, Users, Orders):
-        provider.provide(compare.lifecycle(cls))
+    for client_class in (Database, Users, Orders):
+        provider.provide(compare.lifecycle(client_class))
     container = compare.make_async_container(provider, lock_factory=None)
 
     users, orders = await asyncio.gather(container.get(Users), container.get(Orders))

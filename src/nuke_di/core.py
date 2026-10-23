@@ -28,8 +28,8 @@ from nuke_di.types import NotSingletonClient, isclient, isnotsingleton
 
 logger = logging.getLogger(__name__)
 
-CT = TypeVar("CT", bound=NotSingletonClient)
-R = TypeVar("R")
+ClientT = TypeVar("ClientT", bound=NotSingletonClient)
+ReturnT = TypeVar("ReturnT")
 
 Limiter = asyncio.Semaphore | contextlib.nullcontext[None]
 
@@ -118,8 +118,8 @@ class Dependencies:
             self._dependencies = {}
             self._timings = {}
             self._replacements = {}
-            for cls, replacement in self._overrides:
-                self._register_replacement(cls, replacement)
+            for client_class, replacement in self._overrides:
+                self._register_replacement(client_class, replacement)
 
     def _abandon(self) -> None:
         """
@@ -398,53 +398,53 @@ class Dependencies:
             for client in clients
         }
 
-    def resolve(self, cls: type[CT]) -> CT:
+    def resolve(self, client_class: type[ClientT]) -> ClientT:
         """
         Idempotent operation.
         """
         if self.connected is True:
-            # `_type_name`, not `qualname`: `cls` may be no class at all
-            raise self._state_error(f"resolve({_type_name(cls)})")
+            # `_type_name`, not `qualname`: `client_class` may be no class at all
+            raise self._state_error(f"resolve({_type_name(client_class)})")
 
         # A resolved singleton is handed out without the lock: it is complete once it is in `clients`, and a lookup
         # in a dict is safe next to a writer on every build of CPython. The cold path takes the lock once for the
         # whole tree, so a tree of a thousand clients pays for one acquire, not a thousand.
         try:
-            inst = self.clients.get(cls)
+            inst = self.clients.get(client_class)
         except TypeError:
             # An unhashable argument, `resolve({})`, is no client either: it gets the message below, not a bare
             # TypeError from the lookup
             inst = None
         if inst is not None:
-            return cast(CT, inst)
+            return cast(ClientT, inst)
 
         # A plain class would be built and appended, and the process would die at connect() with an
         # AttributeError on `connect`; a type checker sees the bound, `Any` and `# type: ignore` do not. Checked
         # after the lookup, which never finds a non-client since mock() refuses one too: the check costs about
         # 60 ns, a warm hit must not pay it
-        if not isnotsingleton(cls):
-            raise _not_a_client(cls)
+        if not isnotsingleton(client_class):
+            raise _not_a_client(client_class)
 
         with self._lock:
             # Checked again under the lock, where connect() flips it
             if self.connected is True:
-                raise self._state_error(f"resolve({_type_name(cls)})")
-            return self._resolve(cls)
+                raise self._state_error(f"resolve({_type_name(client_class)})")
+            return self._resolve(client_class)
 
-    def _resolve(self, cls: type[CT]) -> CT:
+    def _resolve(self, client_class: type[ClientT]) -> ClientT:
         """
-        Build `cls` with the lock held: the caller holds it for the whole tree.
+        Build `client_class` with the lock held: the caller holds it for the whole tree.
         """
         # Checked again under the lock: another thread may have built it while this one waited
-        inst = self.clients.get(cls)
+        inst = self.clients.get(client_class)
         if inst is not None:
-            return cast(CT, inst)
+            return cast(ClientT, inst)
 
         # Not always 0: a client's `__init__` that resolves on its own runs inside its consumer's frame, and only the
         # frames opened from here are this call's to close
         opened = len(self._resolving)
         try:
-            return cast(CT, self._resolve_tree(cls))
+            return cast(ClientT, self._resolve_tree(client_class))
         except BaseException:
             # The frames a failure leaves open are off the path, as a recursion's `finally` would leave them: the next
             # resolve sees no stale cycle and names a path of its own
@@ -452,9 +452,10 @@ class Dependencies:
             del self._resolving[opened:]
             raise
 
-    def _resolve_tree(self, cls: type[NotSingletonClient]) -> NotSingletonClient:
+    def _resolve_tree(self, client_class: type[NotSingletonClient]) -> NotSingletonClient:
         """
-        Build `cls` and its dependencies, each before its consumer, on a stack of frames instead of the call stack.
+        Build `client_class` and its dependencies, each before its consumer, on a stack of frames instead of the call
+        stack.
 
         A call per client of a chain would stop it at the recursion limit, a few hundred clients long; the frames grow
         with the chain. A frame is a client whose arguments are being resolved, and `_resolving` is the class of every
@@ -464,15 +465,16 @@ class Dependencies:
         # The open frames but the innermost, outermost first, each waiting for the client of its argument `key`
         waiting: list[_Frame] = []
         while True:
-            # Open a frame for `cls`: on the path from here on, so a cycle back to it and a signature error name it
-            if cls in resolving_set:
-                raise CircularDependencyError(f"Circular dependency: {self._path(cls)}")
+            # Open a frame for `client_class`: on the path from here on, so a cycle back to it and a signature error
+            # name it
+            if client_class in resolving_set:
+                raise CircularDependencyError(f"Circular dependency: {self._path(client_class)}")
             if logger.isEnabledFor(logging.DEBUG):
-                name = qualname(cls)
+                name = qualname(client_class)
                 logger.debug('Resolving dependency "%s"', name, extra=fields(client=name))
-            resolving.append(cls)
-            resolving_set.add(cls)
-            arguments = self._client_arguments(cls)
+            resolving.append(client_class)
+            resolving_set.add(client_class)
+            arguments = self._client_arguments(client_class)
             init: dict[str, NotSingletonClient] = {}
             # Most clients of a tree take no client, and share one exhausted cursor
             pending = iter(arguments.items()) if arguments else _NO_ARGUMENTS
@@ -489,38 +491,38 @@ class Dependencies:
                     # Every argument is in `init`: the client is built and its frame closed. Off the path before
                     # `__init__`, so an `__init__` that resolves on its own sees the path of its consumers.
                     resolving.pop()
-                    resolving_set.remove(cls)
+                    resolving_set.remove(client_class)
                     try:
-                        inst = cls(**init)
+                        inst = client_class(**init)
                     except Exception as exc:
-                        raise self._init_error(cls, exc) from exc
+                        raise self._init_error(client_class, exc) from exc
 
                     self._dependencies[id(inst)] = {arg: (arguments[arg], client) for arg, client in init.items()}
                     self.connect_clients.append(inst)
                     # Published last: the lock-free lookup of resolve() hands out a singleton that the container
                     # accounts for
-                    if isclient(cls):
-                        self.clients[cls] = inst
+                    if isclient(client_class):
+                        self.clients[client_class] = inst
 
                     if not waiting:
                         return inst
                     # The consumer resumes at its next argument
-                    cls, arguments, init, pending, key = waiting.pop()
+                    client_class, arguments, init, pending, key = waiting.pop()
                     init[key] = inst
                     continue
                 # Before the arguments after it, which is the order of a recursion
-                waiting.append((cls, arguments, init, pending, key))
-                cls = dep
+                waiting.append((client_class, arguments, init, pending, key))
+                client_class = dep
                 break
 
-    def _init_error(self, cls: type[NotSingletonClient], exc: Exception) -> InitializeDependencyError:
+    def _init_error(self, client_class: type[NotSingletonClient], exc: Exception) -> InitializeDependencyError:
         """
         The error of an `__init__` that raised `exc`, logged with the path that led to it.
         """
-        # `cls` left the path when its arguments were resolved, so it is named at the end of it here
-        name = self._name(cls)
+        # `client_class` left the path when its arguments were resolved, so it is named at the end of it here
+        name = self._name(client_class)
         # The path before the cause: a cause such as a pydantic error spans lines
-        where = f"{name}.__init__ raised {type(exc).__name__}{self._path_suffix(cls)}"
+        where = f"{name}.__init__ raised {type(exc).__name__}{self._path_suffix(client_class)}"
         logger.exception("%s: %s", where, exc, extra=fields(client=name))
         return InitializeDependencyError(f"{where}: {exc}")
 
@@ -533,32 +535,32 @@ class Dependencies:
         # A Replacement is one object for every class it stands in for, and may be a resolved client too,
         # so its nodes are keyed by class and the resolved clients by `id()`
         replaced = {
-            cls: Node(cls=cls, singleton=isclient(cls), replacement=replacement)
-            for cls, replacement in self._replacements.items()
+            client_class: Node(client_class=client_class, singleton=isclient(client_class), replacement=replacement)
+            for client_class, replacement in self._replacements.items()
         }
         resolved: dict[int, Node] = {}
         # Resolution order: a client's dependencies have a node before the client does
         for client in self.connect_clients:
             dependencies = {
-                key: replaced[cls] if self._replacements.get(cls) is dep else resolved[id(dep)]
-                for key, (cls, dep) in self._dependencies.get(id(client), {}).items()
+                key: replaced[client_class] if self._replacements.get(client_class) is dep else resolved[id(dep)]
+                for key, (client_class, dep) in self._dependencies.get(id(client), {}).items()
             }
             resolved[id(client)] = Node(
-                cls=type(client),
+                client_class=type(client),
                 singleton=isclient(type(client)),
                 replacement=None,
                 dependencies=MappingProxyType(dependencies),
             )
         return Graph((*replaced.values(), *resolved.values()))
 
-    def _client_arguments(self, cls: type[NotSingletonClient]) -> dict[str, type[NotSingletonClient]]:
+    def _client_arguments(self, client_class: type[NotSingletonClient]) -> dict[str, type[NotSingletonClient]]:
         """
-        The arguments of `cls.__init__` to fill with clients; fail on any other required argument.
+        The arguments of `client_class.__init__` to fill with clients; fail on any other required argument.
 
         Read once per class in the process: the result depends on `__init__` alone, so it is kept on the class
         beside the `__init__` it was read from, and read again when the class gets another `__init__`.
         """
-        init = cls.__init__
+        init = client_class.__init__
         if init is object.__init__:
             # `inspect.signature` parses the text signature of a slot wrapper on every call
             return {}
@@ -566,27 +568,27 @@ class Dependencies:
         # A subclass that inherits `__init__` finds its base class's entry and shares it; one that redefines
         # `__init__` fails the check below and stores its own
         entry: tuple[Callable[..., Any], dict[str, type[NotSingletonClient]]] | None = getattr(
-            cls, "__nuke_di_arguments__", None
+            client_class, "__nuke_di_arguments__", None
         )
         if entry is not None and entry[0] is init:
             return entry[1]
 
         # Only a success is kept: a type hint that fails to evaluate must fail on the next resolve too
-        arguments = self._read_arguments(cls, init)
+        arguments = self._read_arguments(client_class, init)
         try:
-            cls.__nuke_di_arguments__ = (init, arguments)  # type: ignore[attr-defined]
+            client_class.__nuke_di_arguments__ = (init, arguments)  # type: ignore[attr-defined]
         except AttributeError:
             # A metaclass that forbids setting attributes: the class is read again on the next resolve
             pass
         return arguments
 
     def _read_arguments(
-        self, cls: type[NotSingletonClient], init: Callable[..., Any]
+        self, client_class: type[NotSingletonClient], init: Callable[..., Any]
     ) -> dict[str, type[NotSingletonClient]]:
         try:
             hints = get_type_hints(init)
         except NameError as exc:
-            raise self._hints_error(f"{self._name(cls)}.__init__", exc) from exc
+            raise self._hints_error(f"{self._name(client_class)}.__init__", exc) from exc
 
         clients: dict[str, type[NotSingletonClient]] = {}
         for argument in _init_arguments(init):
@@ -594,17 +596,19 @@ class Dependencies:
             hint: Any = hints.get(name)
             if isnotsingleton(hint):
                 if argument.positional_only:
-                    raise self._signature_error(cls, name, "is positional-only, a client is passed by keyword")
+                    raise self._signature_error(client_class, name, "is positional-only, a client is passed by keyword")
                 clients[name] = hint
             elif argument.has_default:
                 # Not ours to fill: the default stays
                 continue
             elif hint is None:
-                raise self._signature_error(cls, name, "has no type hint")
+                raise self._signature_error(client_class, name, "has no type hint")
             elif (client := _optional_client(hint)) is not None:
-                raise self._signature_error(cls, name, f"is {qualname(client)} | None, a client cannot be optional")
+                raise self._signature_error(
+                    client_class, name, f"is {qualname(client)} | None, a client cannot be optional"
+                )
             else:
-                raise self._signature_error(cls, name, f"is {_type_name(hint)}, which is not a client")
+                raise self._signature_error(client_class, name, f"is {_type_name(hint)}, which is not a client")
         return clients
 
     def _hints_error(self, name: str, exc: NameError) -> InvalidSignatureError:
@@ -614,8 +618,10 @@ class Dependencies:
             f"{self._path_suffix()}"
         )
 
-    def _signature_error(self, cls: type[NotSingletonClient], name: str, reason: str) -> InvalidSignatureError:
-        return InvalidSignatureError(f'Argument "{name}" of "{self._name(cls)}.__init__" {reason}{self._path_suffix()}')
+    def _signature_error(self, client_class: type[NotSingletonClient], name: str, reason: str) -> InvalidSignatureError:
+        return InvalidSignatureError(
+            f'Argument "{name}" of "{self._name(client_class)}.__init__" {reason}{self._path_suffix()}'
+        )
 
     def _state_error(self, call: str) -> ConnectError:
         """
@@ -637,14 +643,14 @@ class Dependencies:
             {*self.clients, *(type(client) for client in self.connect_clients), *self._resolving, *more}
         )
 
-    def _name(self, cls: type) -> str:
-        return self._names(cls)[cls]
+    def _name(self, client_class: type) -> str:
+        return self._names(client_class)[client_class]
 
     def _path(self, *more: type[NotSingletonClient]) -> str:
         classes = [*self._resolving, *more]
         names = self._names(*classes)
         root = [] if self._injecting is None else [sname(self._injecting)]
-        return " -> ".join([*root, *(names[cls] for cls in classes)])
+        return " -> ".join([*root, *(names[client_class] for client_class in classes)])
 
     def _path_suffix(self, *more: type[NotSingletonClient]) -> str:
         # A root alone is no path: `more` is the client that left `_resolving` before it was built
@@ -652,7 +658,7 @@ class Dependencies:
             return ""
         return f" (resolving {self._path(*more)})"
 
-    def inject(self, func: Callable[..., R]) -> Callable[..., R]:
+    def inject(self, func: Callable[..., ReturnT]) -> Callable[..., ReturnT]:
         """
         Bind the dependencies from the signature of `func`.
 
@@ -670,29 +676,29 @@ class Dependencies:
     # `return_value` and `assert_awaited_once_with` under a strict type checker; a Replacement of your own
     # keeps its type
     @overload
-    def mock(self, cls: type[CT], new: None = None) -> Any: ...
+    def mock(self, client_class: type[ClientT], new: None = None) -> Any: ...
 
     @overload
-    def mock(self, cls: type[CT], new: CT) -> CT: ...
+    def mock(self, client_class: type[ClientT], new: ClientT) -> ClientT: ...
 
-    def mock(self, cls: type[CT], new: CT | None = None) -> Any:
+    def mock(self, client_class: type[ClientT], new: ClientT | None = None) -> Any:
         """
-        Register a Replacement for `cls`, an autospec mock by default; `flush()` drops it.
+        Register a Replacement for `client_class`, an autospec mock by default; `flush()` drops it.
         """
-        if not isnotsingleton(cls):
-            raise _not_a_client(cls)
+        if not isnotsingleton(client_class):
+            raise _not_a_client(client_class)
         with self._lock:
-            name = self._name(cls)
+            name = self._name(client_class)
             if self.connected is True:
                 raise self._state_error(f"mock({name})")
 
-            current = self._replacements.get(cls)
+            current = self._replacements.get(client_class)
             if current is not None:
                 if new is not None and new is not current:
                     raise ConnectError(f"{name} already has a replacement")
                 return current
             # Consumers resolved before would keep the real client while the caller holds the Replacement
-            if self._is_resolved(cls):
+            if self._is_resolved(client_class):
                 raise ConnectError(f"{name} is already resolved, call mock() before resolve() or inject()")
 
             if new is None:
@@ -700,29 +706,29 @@ class Dependencies:
                 from unittest.mock import create_autospec
 
                 # A Replacement stands in for an instance: calling it is a TypeError, not another mock
-                replacement = create_autospec(cls, instance=True)
+                replacement = create_autospec(client_class, instance=True)
             else:
                 replacement = new
-            self._register_replacement(cls, replacement)
-            return self._replacements[cls]
+            self._register_replacement(client_class, replacement)
+            return self._replacements[client_class]
 
     @overload
-    def override(self, cls: type[CT], new: None = None) -> contextlib.AbstractContextManager[Any]: ...
+    def override(self, client_class: type[ClientT], new: None = None) -> contextlib.AbstractContextManager[Any]: ...
 
     @overload
-    def override(self, cls: type[CT], new: CT) -> contextlib.AbstractContextManager[CT]: ...
+    def override(self, client_class: type[ClientT], new: ClientT) -> contextlib.AbstractContextManager[ClientT]: ...
 
     @contextlib.contextmanager
-    def override(self, cls: type[CT], new: CT | None = None) -> Iterator[Any]:
+    def override(self, client_class: type[ClientT], new: ClientT | None = None) -> Iterator[Any]:
         """
-        Register a Replacement for `cls` that lasts until the end of the block, `flush()` included.
+        Register a Replacement for `client_class` that lasts until the end of the block, `flush()` included.
 
         The container must have no resolved clients on entry and is flushed on exit,
         so nothing resolved with the Replacement outlives the block.
         """
         # The lock covers the registration only: the block runs the caller's code, which resolves on its own
         with self._lock:
-            name = self._name(cls)
+            name = self._name(client_class)
             if self.connected is True:
                 raise self._state_error(f"override({name})")
             if self.connect_clients:
@@ -730,11 +736,11 @@ class Dependencies:
                 names = self._names()
                 resolved = ", ".join(sorted(names[type(client)] for client in self.connect_clients))
                 raise ConnectError(f"override({name}) needs a container without resolved clients, found: {resolved}")
-            if cls in self._replacements:
+            if client_class in self._replacements:
                 raise ConnectError(f"{name} already has a replacement")
 
-            replacement = self.mock(cls, new)
-            entry: tuple[type[NotSingletonClient], NotSingletonClient] = (cls, replacement)
+            replacement = self.mock(client_class, new)
+            entry: tuple[type[NotSingletonClient], NotSingletonClient] = (client_class, replacement)
             self._overrides.append(entry)
         try:
             yield replacement
@@ -754,13 +760,13 @@ class Dependencies:
             if self.connected is False:
                 self.flush()
 
-    def _is_resolved(self, cls: type[NotSingletonClient]) -> bool:
+    def _is_resolved(self, client_class: type[NotSingletonClient]) -> bool:
         # A NotSingletonClient is never cached in `clients`, only its instances are in `connect_clients`
-        return cls in self.clients or any(type(client) is cls for client in self.connect_clients)
+        return client_class in self.clients or any(type(client) is client_class for client in self.connect_clients)
 
-    def _register_replacement(self, cls: type[NotSingletonClient], replacement: NotSingletonClient) -> None:
-        self.clients[cls] = replacement
-        self._replacements[cls] = replacement
+    def _register_replacement(self, client_class: type[NotSingletonClient], replacement: NotSingletonClient) -> None:
+        self.clients[client_class] = replacement
+        self._replacements[client_class] = replacement
 
     def _inspect(self, func: Callable) -> dict[str, NotSingletonClient]:
         logger.debug('Parsing signature of func "%s"', sname(func), extra=fields())
@@ -939,13 +945,16 @@ def _display_names(classes: Iterable[type]) -> dict[type, str]:
     `__qualname__` (`app.orders.Database`, `tests.test_x.test_one.<locals>.Database`), for the classes that share
     one, so two wrappers called `Database` are told apart. A unique name stays short.
     """
-    names = {cls: qualname(cls) for cls in classes}
+    names = {client_class: qualname(client_class) for client_class in classes}
     shared = {name for name, count in Counter(names.values()).items() if count > 1}
-    return {cls: f"{cls.__module__}.{cls.__qualname__}" if name in shared else name for cls, name in names.items()}
+    return {
+        client_class: f"{client_class.__module__}.{client_class.__qualname__}" if name in shared else name
+        for client_class, name in names.items()
+    }
 
 
-def _not_a_client(cls: Any) -> InvalidSignatureError:
-    return InvalidSignatureError(f"{_type_name(cls)} is not a client: subclass Client or NotSingletonClient")
+def _not_a_client(client_class: Any) -> InvalidSignatureError:
+    return InvalidSignatureError(f"{_type_name(client_class)} is not a client: subclass Client or NotSingletonClient")
 
 
 def _count(number: int, noun: str) -> str:

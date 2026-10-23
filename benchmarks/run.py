@@ -133,19 +133,19 @@ def client(
     evaluates the strings later, so the module holds every class of the tree under its name.
     """
     if module is None:
-        fields = [(f"dep{number}", cls) for number, cls in enumerate(deps)]
+        fields = [(f"dep{number}", client_class) for number, client_class in enumerate(deps)]
         return cast(type[Client], make_dataclass(name, fields, bases=(base,), eq=False, repr=False))
 
-    strings = [(f"dep{number}", cls.__name__) for number, cls in enumerate(deps)]
+    strings = [(f"dep{number}", client_class.__name__) for number, client_class in enumerate(deps)]
     if sys.version_info >= (3, 12):
-        cls = make_dataclass(name, strings, bases=(base,), eq=False, repr=False, module=module.__name__)
+        client_class = make_dataclass(name, strings, bases=(base,), eq=False, repr=False, module=module.__name__)
     else:
         # 3.11 has no `module` argument and takes the module from the namespace
-        cls = make_dataclass(
+        client_class = make_dataclass(
             name, strings, bases=(base,), eq=False, repr=False, namespace={"__module__": module.__name__}
         )
-    setattr(module, name, cls)
-    return cast(type[Client], cls)
+    setattr(module, name, client_class)
+    return cast(type[Client], client_class)
 
 
 _modules = itertools.count()

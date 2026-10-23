@@ -112,8 +112,8 @@ def dishka_warm(tree: Tree) -> Callable[[], object]:
 
 
 def wireup_prepare(tree: Tree) -> None:
-    for cls in tree.clients:
-        wireup.injectable(cls)
+    for client_class in tree.clients:
+        wireup.injectable(client_class)
 
 
 def wireup_container(tree: Tree) -> Any:
@@ -136,13 +136,13 @@ def dependency_injector_root(tree: Tree) -> Any:
     """
     container = containers.DynamicContainer()
     made: dict[str, Any] = {}
-    for cls in tree.clients:
+    for client_class in tree.clients:
         # The library reads no annotation: the user names the provider of every argument. The type of a field
         # is the class, or its name when the annotations are strings, and the providers are keyed by name
-        dependencies = {field.name: made[name(field.type)] for field in fields(cls)}  # type: ignore[arg-type]
-        provider = providers.Singleton(cls, **dependencies)
-        setattr(container, cls.__name__, provider)
-        made[cls.__name__] = provider
+        dependencies = {field.name: made[name(field.type)] for field in fields(client_class)}  # type: ignore[arg-type]
+        provider = providers.Singleton(client_class, **dependencies)
+        setattr(container, client_class.__name__, provider)
+        made[client_class.__name__] = provider
     return made[tree.root.__name__]
 
 
@@ -161,14 +161,14 @@ def dependency_injector_warm(tree: Tree) -> Callable[[], object]:
 
 
 def injector_prepare(tree: Tree) -> None:
-    for cls in tree.clients:
-        cls.__init__ = injector_inject(cls.__init__)  # type: ignore[method-assign]
+    for client_class in tree.clients:
+        client_class.__init__ = injector_inject(client_class.__init__)  # type: ignore[method-assign]
 
 
 def injector_container(tree: Tree) -> Injector:
     def configure(binder: Binder) -> None:
-        for cls in tree.clients:
-            binder.bind(cls, to=cls, scope=singleton)
+        for client_class in tree.clients:
+            binder.bind(client_class, to=client_class, scope=singleton)
 
     return Injector([configure])
 
@@ -248,18 +248,18 @@ def product_page() -> type[Client]:
     """
     made: dict[str, type[Client]] = {}
     for name, node in PRODUCT_PAGE_TREE.items():
-        cls = client(name, [made[dependency] for dependency in node.dependencies], base=Sleeper)
-        cls.connect_seconds = node.connect  # type: ignore[attr-defined]
-        cls.disconnect_seconds = node.disconnect  # type: ignore[attr-defined]
-        made[name] = cls
+        client_class = client(name, [made[dependency] for dependency in node.dependencies], base=Sleeper)
+        client_class.connect_seconds = node.connect  # type: ignore[attr-defined]
+        client_class.disconnect_seconds = node.disconnect  # type: ignore[attr-defined]
+        made[name] = client_class
     return made["ProductPageApi"]
 
 
-def init_arguments(cls: type[Client]) -> dict[str, type[Client]]:
+def init_arguments(client_class: type[Client]) -> dict[str, type[Client]]:
     """
-    The arguments of `cls.__init__` and the client each one takes.
+    The arguments of `client_class.__init__` and the client each one takes.
     """
-    return {name: hint for name, hint in get_type_hints(cls.__init__).items() if name != "return"}
+    return {name: hint for name, hint in get_type_hints(client_class.__init__).items() if name != "return"}
 
 
 def tree_of(root: type[Client]) -> list[type[Client]]:
@@ -268,37 +268,37 @@ def tree_of(root: type[Client]) -> list[type[Client]]:
     """
     found: dict[type[Client], None] = {}
 
-    def visit(cls: type[Client]) -> None:
-        if cls not in found:
-            for dependency in init_arguments(cls).values():
+    def visit(client_class: type[Client]) -> None:
+        if client_class not in found:
+            for dependency in init_arguments(client_class).values():
                 visit(dependency)
-            found[cls] = None
+            found[client_class] = None
 
     visit(root)
     return list(found)
 
 
-def lifecycle(cls: type[Client]) -> Callable[..., AsyncIterator[Client]]:
+def lifecycle(client_class: type[Client]) -> Callable[..., AsyncIterator[Client]]:
     """
     The async generator that dishka, wireup and dependency-injector take for a resource with a lifecycle: it
     builds the client, awaits `connect()`, yields it and awaits `disconnect()` at close. A user writes one per
-    client; here its signature is the one of `cls.__init__`, so the libraries that read it find the same
+    client; here its signature is the one of `client_class.__init__`, so the libraries that read it find the same
     dependencies by type hint.
     """
 
     async def factory(**kwargs: Any) -> AsyncIterator[Client]:
-        instance = cls(**kwargs)
+        instance = client_class(**kwargs)
         await instance.connect()
         yield instance
         await instance.disconnect()
 
-    hints = init_arguments(cls)
+    hints = init_arguments(client_class)
     factory.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
         [inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY, annotation=hint) for name, hint in hints.items()],
-        return_annotation=AsyncIterator[cls],  # type: ignore[valid-type]
+        return_annotation=AsyncIterator[client_class],  # type: ignore[valid-type]
     )
-    factory.__annotations__ = {**hints, "return": AsyncIterator[cls]}  # type: ignore[valid-type]
-    factory.__name__ = factory.__qualname__ = f"make_{cls.__name__}"
+    factory.__annotations__ = {**hints, "return": AsyncIterator[client_class]}  # type: ignore[valid-type]
+    factory.__name__ = factory.__qualname__ = f"make_{client_class.__name__}"
     return factory
 
 
@@ -312,7 +312,7 @@ async def get_root(container: Any, root: type[Client], gather: bool) -> None:
     get its branches concurrently.
     """
     if gather:
-        await asyncio.gather(*(container.get(cls) for cls in init_arguments(root).values()))
+        await asyncio.gather(*(container.get(client_class) for client_class in init_arguments(root).values()))
     await container.get(root)
 
 
@@ -325,8 +325,8 @@ async def nuke_di_start(root: type[Client]) -> Stop:
 
 async def dishka_start(root: type[Client], gather: bool = False) -> Stop:
     provider = Provider(scope=Scope.APP)
-    for cls in tree_of(root):
-        provider.provide(lifecycle(cls))
+    for client_class in tree_of(root):
+        provider.provide(lifecycle(client_class))
     # The container connects nothing until a client is asked for. It serializes the `get()` calls with a lock, so
     # gathered ones run one after another unless the lock is off; without it, a client that two gathered branches
     # share is built and connected twice
@@ -337,7 +337,9 @@ async def dishka_start(root: type[Client], gather: bool = False) -> Stop:
 
 async def wireup_start(root: type[Client], gather: bool = False) -> Stop:
     # Lazy as dishka
-    container = wireup.create_async_container(injectables=[wireup.injectable(lifecycle(cls)) for cls in tree_of(root)])
+    container = wireup.create_async_container(
+        injectables=[wireup.injectable(lifecycle(client_class)) for client_class in tree_of(root)]
+    )
     await get_root(container, root, gather)
     return container.close
 
@@ -345,13 +347,13 @@ async def wireup_start(root: type[Client], gather: bool = False) -> Stop:
 async def dependency_injector_start(root: type[Client]) -> Stop:
     container = containers.DynamicContainer()
     made: dict[type[Client], Any] = {}
-    for cls in tree_of(root):
+    for client_class in tree_of(root):
         # A `Resource` per client, its arguments named by hand as every provider of the library
         resource = providers.Resource(
-            lifecycle(cls), **{name: made[hint] for name, hint in init_arguments(cls).items()}
+            lifecycle(client_class), **{name: made[hint] for name, hint in init_arguments(client_class).items()}
         )
-        setattr(container, cls.__name__, resource)
-        made[cls] = resource
+        setattr(container, client_class.__name__, resource)
+        made[client_class] = resource
     await container.init_resources()  # type: ignore[misc]
 
     async def stop() -> None:

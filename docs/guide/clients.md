@@ -380,9 +380,9 @@ its dependencies. It is a snapshot: `flush()` empties it, apart from the Replace
 | `Node` field   | Value |
 |----------------|-------|
 | `name`         | The class name of the client |
-| `cls`          | The class the consumers asked for |
+| `client_class` | The class the consumers asked for |
 | `singleton`    | `True` for a `Client`, `False` for a `NotSingletonClient` |
-| `replacement`  | The object registered with `mock()` or `override()` in place of `cls`; `None` for a real client |
+| `replacement`  | The object registered with `mock()` or `override()` in place of `client_class`; `None` for a real client |
 | `dependencies` | The clients of the `__init__` arguments, by argument name |
 
 A `NotSingletonClient` gets one node per instance, all with the same name; `to_mermaid()` numbers

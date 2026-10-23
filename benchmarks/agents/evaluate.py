@@ -292,7 +292,7 @@ def client_classes(trees: Iterable[ast.Module]) -> set[str]:
         if isinstance(node, ast.ClassDef)
     }
     clients = {"Client"}
-    while grown := {cls for cls, parents in bases.items() if parents & clients} - clients:
+    while grown := {class_name for class_name, parents in bases.items() if parents & clients} - clients:
         clients |= grown
     return clients - {"Client"}
 

@@ -793,9 +793,9 @@ its dependencies. It is a snapshot: `flush()` empties it, apart from the Replace
 | `Node` field   | Value |
 |----------------|-------|
 | `name`         | The class name of the client |
-| `cls`          | The class the consumers asked for |
+| `client_class` | The class the consumers asked for |
 | `singleton`    | `True` for a `Client`, `False` for a `NotSingletonClient` |
-| `replacement`  | The object registered with `mock()` or `override()` in place of `cls`; `None` for a real client |
+| `replacement`  | The object registered with `mock()` or `override()` in place of `client_class`; `None` for a real client |
 | `dependencies` | The clients of the `__init__` arguments, by argument name |
 
 A `NotSingletonClient` gets one node per instance, all with the same name; `to_mermaid()` numbers
@@ -1036,13 +1036,13 @@ when you need isolation, e.g. in tests.
 
 | Method               | Description                                                             |
 |----------------------|-------------------------------------------------------------------------|
-| `resolve(cls)`       | Build `cls` and its dependency tree. Idempotent for `Client`.           |
+| `resolve(client_class)`       | Build `client_class` and its dependency tree. Idempotent for `Client`.           |
 | `inject(func)`       | Return `functools.partial(func, ...)` with client arguments bound. Every argument of `func` except `*args` / `**kwargs` must have a type hint. |
 | `connect()`          | Call `connect()` on every resolved client, each after its dependencies. |
 | `disconnect()`       | Call `disconnect()` on every client, each after its consumers, then `flush()` the container. |
 | `async with`         | `connect()` on enter, `disconnect()` on exit.                           |
-| `mock(cls, new=None)`| Register a Replacement for `cls` (an autospec mock by default) until the next `flush()`. Must come before `cls` is resolved. |
-| `override(cls, new=None)` | A Replacement for the duration of a `with` block, then `flush()`; see [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md). |
+| `mock(client_class, new=None)`| Register a Replacement for `client_class` (an autospec mock by default) until the next `flush()`. Must come before `client_class` is resolved. |
+| `override(client_class, new=None)` | A Replacement for the duration of a `with` block, then `flush()`; see [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md). |
 | `flush()`            | Forget every resolved client.                                           |
 | `timings`            | One `ClientTiming` per client of the last `connect()`; see [Startup timings](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#startup-timings). |
 | `graph()`            | A `Graph` of the resolved clients with their dependencies, `to_mermaid()` included; see [The graph](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#the-graph). |
@@ -5255,7 +5255,7 @@ Temporal worker, needs no integration at all: it runs inside a `@worker`, see
 | `Framework(name, not_started, not_connected)` | What the users of a framework are told when a client is missing; `{client}` in a message is the client's class name. |
 | `DependsFramework(..., depends, make_depends, per_container=True)` | A framework that injects through `Depends(...)` markers: `depends` is the class of its markers, `make_depends` builds one for a function. |
 | `bind(call, container, framework)` | Rewrites the signature of a handler, a dependency function or a dependency class, and of the dependencies it uses: each client argument becomes `Annotated[Client, Depends(...)]`. Returns the `Binding` of each client. A type hint that cannot be evaluated, such as a name imported under `TYPE_CHECKING`, is left as written, and the other arguments are still rewritten. |
-| `Binding(cls, container, framework)` | One client argument: `cls` is the client's class, `instance` the client `running()` resolved, `None` before startup and after shutdown. `get()` returns it, or raises `not_started` / `not_connected`. `bind()` creates them; an integration without `Depends` creates one per client argument itself. |
+| `Binding(client_class, container, framework)` | One client argument: `client_class` is the client's class, `instance` the client `running()` resolved, `None` before startup and after shutdown. `get()` returns it, or raises `not_started` / `not_connected`. `bind()` creates them; an integration without `Depends` creates one per client argument itself. |
 | `running(container, bindings)` | An async context manager: resolves the clients of `bindings`, connects the container, and on exit sets `Shutdown`, stops the `BackgroundTasks` and disconnects. A `ConnectError` or `InitializeDependencyError` becomes a `RuntimeError`, which a server reports as a failed startup; an error of the client tree, such as a cycle, passes as it is. |
 | `wrap_lifespan(original, container, bindings)` | A lifespan that runs the app's own `original` lifespan inside `running()`; `bindings` is called on startup, so handlers declared after `setup()` are found. |
 | `client_of(hint, *markers)` | The client a type hint asks for, or `None`: `Client`, or `Annotated[Client, ...]` without any of `markers`. |
@@ -5474,10 +5474,10 @@ async def test_greet() -> None:
     assert db.fetch_user.await_args_list == [call(1)]
 ```
 
-**A client for one block, with `override()`.** `override(cls, new=None)` registers a Replacement
-like `mock()`, but it lasts until the end of the `with` block, even across several `async with`
-cycles, and the container is flushed on exit, so nothing resolved with it leaks into the next test.
-It works with the global `DI` too:
+**A client for one block, with `override()`.** `override(client_class, new=None)` registers a
+Replacement like `mock()`, but it lasts until the end of the `with` block, even across several
+`async with` cycles, and the container is flushed on exit, so nothing resolved with it leaks into
+the next test. It works with the global `DI` too:
 
 ```python
 # test_greet.py, with Database, UserService and handler from the Quick start
@@ -5524,8 +5524,8 @@ after the block: OrderedDict()
 
 The rules:
 
-- **Replace before you resolve.** A Replacement registered after `cls` was resolved would reach
-  only the consumers resolved later, while the earlier ones keep the real client, so `mock()`
+- **Replace before you resolve.** A Replacement registered after `client_class` was resolved would
+  reach only the consumers resolved later, while the earlier ones keep the real client, so `mock()`
   raises instead:
 
   ```python
@@ -5537,9 +5537,9 @@ The rules:
   otherwise silently drop what was resolved before the block, so it raises
   `ConnectError: override(Database) needs a container without resolved clients, found: Database, UserService`.
   Call `DI.flush()` first or use the `global_di` fixture below.
-- **One Replacement per class.** `mock(cls)` called again returns the Replacement already
-  registered; `mock(cls, other)` and `override(cls)` raise `ConnectError: Database already has a
-  replacement`.
+- **One Replacement per class.** `mock(client_class)` called again returns the Replacement
+  already registered; `mock(client_class, other)` and `override(client_class)` raise
+  `ConnectError: Database already has a replacement`.
 - **Replacements are not connected.** Their `connect()` / `disconnect()` are never called, and they
   do not take part in the [connect order](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#connect-order).
 - **How long a Replacement lasts.** One from `mock()` is dropped by the next `flush()`, including the
@@ -5853,7 +5853,7 @@ class Checkout(Client):
 
 
 def qualified(node: Node) -> str:
-    return f"{node.cls.__module__}.{node.cls.__qualname__}"
+    return f"{node.client_class.__module__}.{node.client_class.__qualname__}"
 
 
 def graph_json(deps: Dependencies) -> str:

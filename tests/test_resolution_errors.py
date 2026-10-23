@@ -206,7 +206,7 @@ def test_generic_argument_is_named_in_full() -> None:
 
 
 @pytest.mark.parametrize(
-    ("cls", "name"),
+    ("client_class", "name"),
     [
         (Retries, "int"),
         (Either, "Database \\| int"),
@@ -215,9 +215,9 @@ def test_generic_argument_is_named_in_full() -> None:
         (Mode, r"Literal\['fast'\]"),
     ],
 )
-def test_type_is_named_without_module(cls: type[Client], name: str) -> None:
+def test_type_is_named_without_module(client_class: type[Client], name: str) -> None:
     with pytest.raises(InvalidSignatureError, match=rf" is {name}, which is not a client"):
-        Dependencies().resolve(cls)
+        Dependencies().resolve(client_class)
 
 
 def test_inject_wraps_unresolvable_forward_reference() -> None:

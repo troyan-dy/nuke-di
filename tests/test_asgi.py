@@ -237,7 +237,7 @@ def contract_app(container: Dependencies, handler: Callable[..., Any]) -> Starle
     clients = lifespan(container, *arguments.values())
 
     async def endpoint(request: Request) -> Response:
-        await handler(**{name: clients.get(cls) for name, cls in arguments.items()})
+        await handler(**{name: clients.get(client_class) for name, client_class in arguments.items()})
         return PlainTextResponse("ok")
 
     return Starlette(routes=[Route("/", endpoint)], lifespan=clients)

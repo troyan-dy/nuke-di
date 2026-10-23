@@ -159,8 +159,8 @@ class _Clients(BaseMiddleware):
             if name in data:
                 raise TypeError(
                     f'"{name}" is in the data of the update already, and {sname(callback)} takes the client '
-                    f"{sname(binding.cls)} under that name: a filter, a middleware or feed_update() passed it; "
-                    f"rename the argument or the key"
+                    f"{sname(binding.client_class)} under that name: a filter, a middleware or feed_update() passed "
+                    f"it; rename the argument or the key"
                 )
             instance = binding.instance
             data[name] = instance if instance is not None else await self.late(binding)
@@ -171,7 +171,7 @@ class _Clients(BaseMiddleware):
         The client of a handler the startup did not see: connected if another client depends on it.
         """
         if self.started:
-            instance = self.container.clients.get(binding.cls)
+            instance = self.container.clients.get(binding.client_class)
             if instance is not None:
                 return instance
         return await binding.get()
@@ -197,9 +197,9 @@ class _Clients(BaseMiddleware):
                     known = found.lifecycle.setdefault(name, binding)
                     if known is not binding:
                         raise TypeError(
-                            f'Argument "{name}" of the startup and shutdown handlers is {sname(known.cls)} and '
-                            f"{sname(binding.cls)}: aiogram passes them the same arguments by name, so give "
-                            f"different clients different names"
+                            f'Argument "{name}" of the startup and shutdown handlers is '
+                            f"{sname(known.client_class)} and {sname(binding.client_class)}: aiogram passes them "
+                            f"the same arguments by name, so give different clients different names"
                         )
         return found
 
@@ -211,8 +211,9 @@ class _Clients(BaseMiddleware):
         if taken:
             name = taken[0]
             raise TypeError(
-                f'"{name}" is passed to emit_shutdown(), but it is the client {sname(self.found.lifecycle[name].cls)} '
-                f"of a startup or shutdown handler: rename the argument or the key"
+                f'"{name}" is passed to emit_shutdown(), but it is the client '
+                f"{sname(self.found.lifecycle[name].client_class)} of a startup or shutdown handler: rename the "
+                f"argument or the key"
             )
         return kwargs
 

@@ -137,7 +137,7 @@ async def test_check_reports_a_wrong_error_and_a_container_left_resolved() -> No
             return
         # Resolves the clients, then gives up before connect() and leaves them in the container
         for binding in bindings:
-            container.resolve(binding.cls)
+            container.resolve(binding.client_class)
         raise RuntimeError("nuke-di clients failed to start: Broken.connect() raised OSError: unreachable")
 
     with pytest.raises(ExceptionGroup) as info:
@@ -160,7 +160,7 @@ async def test_check_reports_a_connect_error_let_out() -> None:
             return
         # Connects without running(): the ConnectError, a SystemExit, escapes
         for binding in bind(app.handler, container, TOY):
-            container.resolve(binding.cls)
+            container.resolve(binding.client_class)
         await container.connect()
         yield lambda: None  # pragma: no cover
 
@@ -237,7 +237,7 @@ async def test_bind_evaluates_each_hint_on_its_own() -> None:
     bindings = bind(wrapped, container, TOY)
 
     # The dependency's client, then its own
-    assert [binding.cls for binding in bindings] == [Greeter, Greeter]
+    assert [binding.client_class for binding in bindings] == [Greeter, Greeter]
     async with running(container, bindings):
         assert await toy_call(greeting) == "hello"
     signature = inspect.signature(wrapped)

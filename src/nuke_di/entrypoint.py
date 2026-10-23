@@ -9,28 +9,29 @@ from nuke_di.core import DI
 from nuke_di.errors import UsageError
 from nuke_di.run import Kind, RunHook, RunSettings, run_entrypoint
 
-F = TypeVar("F", bound=Callable[..., Coroutine[Any, Any, Any]])
+FuncT = TypeVar("FuncT", bound=Callable[..., Coroutine[Any, Any, Any]])
 
 
 class EntrypointDecorator(Protocol):
     """
     What `job(hooks=...)` and `worker(hooks=...)` return: a decorator that keeps the type of the function.
 
-    A class, not a `Callable[[F], F]`: applying it is a call of `__call__`, which the mypy plugin of nuke_di checks.
+    A class, not a `Callable[[FuncT], FuncT]`: applying it is a call of `__call__`, which the mypy plugin of nuke_di
+    checks.
     """
 
-    def __call__(self, func: F, /) -> F: ...
+    def __call__(self, func: FuncT, /) -> FuncT: ...
 
 
 @overload
-def job(func: F, /) -> F: ...
+def job(func: FuncT, /) -> FuncT: ...
 
 
 @overload
 def job(*, hooks: Sequence[RunHook] = ()) -> EntrypointDecorator: ...
 
 
-def job(func: F | None = None, /, *, hooks: Sequence[RunHook] = ()) -> F | EntrypointDecorator:
+def job(func: FuncT | None = None, /, *, hooks: Sequence[RunHook] = ()) -> FuncT | EntrypointDecorator:
     """
     Declare a job: an entrypoint that runs once.
 
@@ -41,14 +42,14 @@ def job(func: F | None = None, /, *, hooks: Sequence[RunHook] = ()) -> F | Entry
 
 
 @overload
-def worker(func: F, /) -> F: ...
+def worker(func: FuncT, /) -> FuncT: ...
 
 
 @overload
 def worker(*, hooks: Sequence[RunHook] = ()) -> EntrypointDecorator: ...
 
 
-def worker(func: F | None = None, /, *, hooks: Sequence[RunHook] = ()) -> F | EntrypointDecorator:
+def worker(func: FuncT | None = None, /, *, hooks: Sequence[RunHook] = ()) -> FuncT | EntrypointDecorator:
     """
     Declare a worker: an entrypoint that runs until the process is asked to stop.
 
@@ -58,15 +59,16 @@ def worker(func: F | None = None, /, *, hooks: Sequence[RunHook] = ()) -> F | En
     return _entrypoint("worker", func, hooks)
 
 
-def _entrypoint(kind: Kind, func: F | None, hooks: Sequence[RunHook]) -> F | EntrypointDecorator:
-    def decorate(f: F) -> F:
+def _entrypoint(kind: Kind, func: FuncT | None, hooks: Sequence[RunHook]) -> FuncT | EntrypointDecorator:
+    def decorate(f: FuncT) -> FuncT:
         if not inspect.iscoroutinefunction(f):
             raise TypeError(f'{kind} "{f.__qualname__}" must be declared with "async def"')
         if f.__module__ == "__main__":
             sys.exit(execute(f, kind=kind, hooks=hooks))
         return f
 
-    # `decorate` takes the F of this call; returned without a function, it takes the F of the call it is applied in
+    # `decorate` takes the FuncT of this call; returned without a function, it takes the FuncT of the call it is
+    # applied in
     return cast(EntrypointDecorator, decorate) if func is None else decorate(func)
 
 

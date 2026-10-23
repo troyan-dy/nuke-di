@@ -69,8 +69,8 @@ class Binding:
     A client argument of one function, filled with the instance resolved on startup.
     """
 
-    def __init__(self, cls: type[NotSingletonClient], container: Dependencies, framework: Framework) -> None:
-        self.cls = cls
+    def __init__(self, client_class: type[NotSingletonClient], container: Dependencies, framework: Framework) -> None:
+        self.client_class = client_class
         # The container that resolves it, or would: it tells "not started" from "not connected"
         self.container = weakref.ref(container)
         self.framework = framework
@@ -84,8 +84,8 @@ class Binding:
         container = self.container()
         if container is not None and container.connected:
             # The app started, but its startup never saw this function
-            raise RuntimeError(self.framework.not_started.format(client=sname(self.cls)))
-        raise RuntimeError(self.framework.not_connected.format(client=sname(self.cls)))
+            raise RuntimeError(self.framework.not_started.format(client=sname(self.client_class)))
+        raise RuntimeError(self.framework.not_connected.format(client=sname(self.client_class)))
 
 
 def unique(bindings: Iterable[Binding]) -> list[Binding]:
@@ -107,7 +107,7 @@ async def running(container: Dependencies, bindings: list[Binding]) -> AsyncIter
     if busy is not None:
         # A function bound once, shared with an app that runs: filling it would hand that app our clients
         raise RuntimeError(
-            f"nuke-di clients failed to start: {sname(busy.cls)} is filled for another app that is running; "
+            f"nuke-di clients failed to start: {sname(busy.client_class)} is filled for another app that is running; "
             f"apps that share a handler function run one at a time"
         )
 
@@ -115,7 +115,7 @@ async def running(container: Dependencies, bindings: list[Binding]) -> AsyncIter
     container.timings = []
     try:
         for binding in bindings:
-            binding.instance = container.resolve(binding.cls)
+            binding.instance = container.resolve(binding.client_class)
             binding.container = weakref.ref(container)
         await container.connect()
     except BaseException as exc:

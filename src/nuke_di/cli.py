@@ -111,21 +111,21 @@ def _converter(func: Callable[..., Any], param: inspect.Parameter, hint: Any) ->
     raise _signature_error(func, param, f"has an unsupported type {hint!r}")
 
 
-def _from_isoformat(cls: type[datetime.date]) -> Converter:
+def _from_isoformat(date_type: type[datetime.date]) -> Converter:
     def convert(value: str) -> datetime.date:
-        return cls.fromisoformat(value)
+        return date_type.fromisoformat(value)
 
     # argparse names the type in its error: "invalid date value: 'x'"
-    convert.__name__ = cls.__name__
+    convert.__name__ = date_type.__name__
     return convert
 
 
-def _by_name(cls: type[enum.Enum]) -> Converter:
+def _by_name(enum_type: type[enum.Enum]) -> Converter:
     def convert(value: str) -> enum.Enum:
         try:
-            return cls[value]
+            return enum_type[value]
         except KeyError:
-            names = ", ".join(member.name for member in cls)
+            names = ", ".join(member.name for member in enum_type)
             raise argparse.ArgumentTypeError(f"invalid choice: {value!r} (choose from {names})") from None
 
     return convert

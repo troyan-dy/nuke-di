@@ -31,15 +31,15 @@ async def test_redis_connects_after_postgres(monkeypatch: pytest.MonkeyPatch) ->
     module = importlib.import_module("sync_job")
     events: list[str] = []
 
-    def recording(cls: Any, name: str) -> None:
-        original = cls.connect
+    def recording(client_class: Any, name: str) -> None:
+        original = client_class.connect
 
         async def connect(self: Any) -> None:
             events.append(f"{name} start")
             await original(self)
             events.append(f"{name} done")
 
-        monkeypatch.setattr(cls, "connect", connect)
+        monkeypatch.setattr(client_class, "connect", connect)
 
     recording(module.Postgres, "postgres")
     recording(module.Redis, "redis")

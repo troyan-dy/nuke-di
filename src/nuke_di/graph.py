@@ -17,10 +17,10 @@ class Node:
     """
 
     # The class the consumers asked for; for a Replacement, the class it stands in for
-    cls: type[NotSingletonClient]
+    client_class: type[NotSingletonClient]
     # `Client` rather than `NotSingletonClient`
     singleton: bool
-    # The object registered with `mock()` or `override()` in place of `cls`; None for a real client
+    # The object registered with `mock()` or `override()` in place of `client_class`; None for a real client
     replacement: object | None
     # The clients of the `__init__` arguments, by argument name; left out of repr(), which would otherwise
     # print the whole tree below the node, once per path that reaches a shared client
@@ -28,7 +28,7 @@ class Node:
 
     @property
     def name(self) -> str:
-        return sname(self.cls)
+        return sname(self.client_class)
 
 
 @dataclass(frozen=True, eq=False)

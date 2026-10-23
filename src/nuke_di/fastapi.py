@@ -50,7 +50,7 @@ class _AppBindings:
         """
         for binding in shared:
             if binding not in self.bindings:
-                own = self.bindings[binding] = Binding(binding.cls, self.container, _FASTAPI)
+                own = self.bindings[binding] = Binding(binding.client_class, self.container, _FASTAPI)
                 self._copies.setdefault(binding, weakref.WeakSet()).add(own)
         return [self.bindings[binding] for binding in shared]
 
@@ -69,9 +69,9 @@ class _AppBindings:
             return filled[0]
         if bindings is None:
             # None, or one per running container: an app without setup() cannot tell which is its own
-            raise RuntimeError(_FASTAPI.not_connected.format(client=sname(shared.cls)))
+            raise RuntimeError(_FASTAPI.not_connected.format(client=sname(shared.client_class)))
         # Raises "not started" while the app's container is connected, "not connected" otherwise
-        return Binding(shared.cls, bindings.container, _FASTAPI)
+        return Binding(shared.client_class, bindings.container, _FASTAPI)
 
 
 def _getter(binding: Binding) -> Callable[[HTTPConnection], Awaitable[Any]]:

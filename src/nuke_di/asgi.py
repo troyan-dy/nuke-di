@@ -16,7 +16,7 @@ from nuke_di.types import NotSingletonClient, isnotsingleton
 
 __all__ = ("Lifespan", "lifespan")
 
-CT = TypeVar("CT", bound=NotSingletonClient)
+ClientT = TypeVar("ClientT", bound=NotSingletonClient)
 
 _ASGI = Framework(
     name="ASGI",
@@ -40,13 +40,13 @@ class Lifespan:
                 f"lifespan() takes the container first, then the clients, e.g. lifespan(DI, Database); "
                 f"got {container!r}"
             )
-        for cls in clients:
+        for client_class in clients:
             # The class itself, as resolve() takes it: not `Annotated[Database, ...]`
-            if not isnotsingleton(cls):
-                raise TypeError(f"{cls!r} is not a client: subclass Client or NotSingletonClient")
+            if not isnotsingleton(client_class):
+                raise TypeError(f"{client_class!r} is not a client: subclass Client or NotSingletonClient")
         self._container = container
         # Resolved on every startup, not now: a test replaces a client with override() before the app starts
-        self._bindings = {cls: Binding(cls, container, _ASGI) for cls in clients}
+        self._bindings = {client_class: Binding(client_class, container, _ASGI) for client_class in clients}
 
     def __call__(self, app: object = None) -> AbstractAsyncContextManager[None]:
         """
@@ -55,18 +55,18 @@ class Lifespan:
         """
         return running(self._container, list(self._bindings.values()))
 
-    def get(self, cls: type[CT]) -> CT:
+    def get(self, client_class: type[ClientT]) -> ClientT:
         """
-        The client of `cls` that connected on startup, or the Replacement registered for it.
+        The client of `client_class` that connected on startup, or the Replacement registered for it.
         """
-        binding = self._bindings.get(cls)
+        binding = self._bindings.get(client_class)
         if binding is None:
             # Not looked up in the container: a client that is only a dependency of a listed one would work
             # until that one stops depending on it
-            raise RuntimeError(_ASGI.not_started.format(client=sname(cls)))
+            raise RuntimeError(_ASGI.not_started.format(client=sname(client_class)))
         if binding.instance is None:
-            raise RuntimeError(_ASGI.not_connected.format(client=sname(cls)))
-        return cast(CT, binding.instance)
+            raise RuntimeError(_ASGI.not_connected.format(client=sname(client_class)))
+        return cast(ClientT, binding.instance)
 
 
 def lifespan(container: Dependencies, *clients: type[NotSingletonClient]) -> Lifespan:

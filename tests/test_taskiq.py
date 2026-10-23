@@ -279,12 +279,14 @@ async def audit_nested(user: Annotated[str, TaskiqDepends(current_user)], auth: 
     ...  # pragma: no cover
 
 
-@pytest.mark.parametrize(("task", "cls"), [(audit_auth, "Auth"), (audit_users, "UserService"), (audit_nested, "Auth")])
-def test_dependency_class_with_clients_is_refused(task: Callable[..., Any], cls: str) -> None:
+@pytest.mark.parametrize(
+    ("task", "class_name"), [(audit_auth, "Auth"), (audit_users, "UserService"), (audit_nested, "Auth")]
+)
+def test_dependency_class_with_clients_is_refused(task: Callable[..., Any], class_name: str) -> None:
     # taskiq builds a dependency class from its own __init__, which nuke-di does not rewrite: the task would fail
     broker = make_broker(Dependencies())
 
-    with pytest.raises(TypeError, match=rf"{cls} takes clients in __init__ and is a taskiq dependency"):
+    with pytest.raises(TypeError, match=rf"{class_name} takes clients in __init__ and is a taskiq dependency"):
         broker.task("audit")(task)
 
     assert broker.find_task("audit") is None

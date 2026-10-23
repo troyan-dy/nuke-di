@@ -59,7 +59,7 @@ def test_node_knows_its_class_and_singleton() -> None:
     deps.resolve(Checkout)
     nodes = by_name(deps.graph())
 
-    assert nodes["Postgres"].cls is Postgres
+    assert nodes["Postgres"].client_class is Postgres
     assert nodes["Postgres"].singleton is True
     assert nodes["Postgres"].replacement is None
 
@@ -81,7 +81,7 @@ def test_not_singleton_client_gets_one_node_per_instance() -> None:
     deps.resolve(Reports)
     graph = deps.graph()
 
-    sessions = [node for node in graph.nodes if node.cls is Session]
+    sessions = [node for node in graph.nodes if node.client_class is Session]
     assert len(sessions) == 2
     assert sessions[0] is not sessions[1]
     assert all(node.singleton is False for node in sessions)
@@ -95,7 +95,7 @@ def test_replacement_node_shows_the_expected_class_and_the_object_in_its_place()
     deps.resolve(Payments)
     nodes = by_name(deps.graph())
 
-    assert nodes["Postgres"].cls is Postgres
+    assert nodes["Postgres"].client_class is Postgres
     assert nodes["Postgres"].replacement is pg
     assert nodes["Postgres"].singleton is True
     assert nodes["Payments"].dependencies["pg"] is nodes["Postgres"]

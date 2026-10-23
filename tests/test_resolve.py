@@ -124,7 +124,7 @@ def test_chain_deeper_than_the_recursion_limit() -> None:
         built.append(built[-1].below)
     assert [type(client) for client in reversed(built)] == links
     assert dep.connect_clients == built[::-1]
-    assert [node.cls for node in dep.graph().nodes] == links
+    assert [node.client_class for node in dep.graph().nodes] == links
 
 
 class Unbuildable(Client):
@@ -200,9 +200,9 @@ def test_failed_resolve_inside_an_init_closes_only_its_own_frames() -> None:
         def __init__(self, leaf: Leaf) -> None:
             self.errors: list[str] = []
             self.paths: list[list[type[NotSingletonClient]]] = []
-            for cls in (Loop, failing[-1]):
+            for client_class in (Loop, failing[-1]):
                 try:
-                    dep.resolve(cls)
+                    dep.resolve(client_class)
                 except BaseException as exc:
                     self.errors.append(str(exc))
                 self.paths.append(list(dep._resolving))
