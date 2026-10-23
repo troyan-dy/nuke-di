@@ -20,8 +20,9 @@ service_layout/
 
 Every process takes only the clients it needs, and the container connects only those: the API
 connects `Settings`, `Database`, `Outbox` and `Orders`; the worker adds `Broker`; the job needs
-no broker at all. The database path comes from `SERVICE_DB` (default: `service_layout.db` in the
-system temp directory); `OUTBOX_POLL_SECONDS` sets how often the idle worker looks for new rows.
+no broker at all. The database path comes from `SERVICE_DB` (default: `service_layout_orders.db`
+in the system temp directory); `OUTBOX_POLL_SECONDS` sets how often the idle worker looks for new
+rows.
 
 ## Run
 

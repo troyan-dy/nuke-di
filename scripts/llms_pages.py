@@ -35,6 +35,8 @@ def absolute(target: str, source: str) -> str:
     if not path:
         return f"{BLOB_URL}{source}#{anchor}"
     resolved = posixpath.normpath(PurePosixPath(source).parent / path)
+    # A link to the root of the repository: normpath() calls it "."
+    resolved = "" if resolved == "." else resolved
     return f"{BLOB_URL}{resolved}{hash_}{anchor}"
 
 

@@ -41,7 +41,7 @@ class Settings(Client):
     """
 
     def __init__(self, db_path: str | None = None, poll_seconds: float | None = None) -> None:
-        default_path = os.path.join(tempfile.gettempdir(), "service_layout.db")
+        default_path = os.path.join(tempfile.gettempdir(), "service_layout_orders.db")
         self.db_path = os.environ.get("SERVICE_DB", default_path) if db_path is None else db_path
         if poll_seconds is None:
             poll_seconds = float(os.environ.get("OUTBOX_POLL_SECONDS", "1"))

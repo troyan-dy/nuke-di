@@ -88,6 +88,21 @@ def test_full_text_has_no_relative_links() -> None:
     assert not re.findall(r"\]\((?![a-z]+:)([^)\s]+)\)", prose)
 
 
+@pytest.mark.parametrize(
+    ("target", "source", "url"),
+    [
+        ("./", "README.md", BLOB_URL),
+        (".", "README.md", BLOB_URL),
+        ("../../README.md#quick-start", "docs/guide/mcp.md", f"{BLOB_URL}README.md#quick-start"),
+        ("./a/../b.md", "docs/guide/mcp.md", f"{BLOB_URL}docs/guide/b.md"),
+        ("#install", "README.md", f"{BLOB_URL}README.md#install"),
+        ("https://example.com/", "README.md", "https://example.com/"),
+    ],
+)
+def test_relative_links_resolve_against_their_page(target: str, source: str, url: str) -> None:
+    assert sys.modules["llms_pages"].absolute(target, source) == url
+
+
 def test_full_text_drops_the_navigation() -> None:
     text = (ROOT / "llms-full.txt").read_text(encoding="utf-8")
 
