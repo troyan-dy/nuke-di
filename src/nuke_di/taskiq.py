@@ -157,13 +157,6 @@ class _Worker:
         self.shutdown = broker.shutdown
         self.stack: AsyncExitStack | None = None
 
-    async def startup(self, state: TaskiqState) -> None:
-        stack = AsyncExitStack()
-        # A failed start raises out of broker.startup(), which fails the worker; so does a second start before a
-        # shutdown, since the container is connected already
-        await stack.enter_async_context(running(self.container, self._bindings()))
-        self.stack = stack
-
     async def __call__(self) -> None:
         try:
             await self._drain()
@@ -171,6 +164,13 @@ class _Worker:
             await self._close_stack()
             raise
         await self._close_stack()
+
+    async def startup(self, state: TaskiqState) -> None:
+        stack = AsyncExitStack()
+        # A failed start raises out of broker.startup(), which fails the worker; so does a second start before a
+        # shutdown, since the container is connected already
+        await stack.enter_async_context(running(self.container, self._bindings()))
+        self.stack = stack
 
     def _bindings(self) -> list[Binding]:
         """
