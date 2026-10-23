@@ -1,6 +1,6 @@
 import inspect
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeVar
 
 from nuke_di.naming import sname
 
@@ -60,6 +60,9 @@ def isa(*types: type) -> Callable[[Any], bool]:
 
 isclient = isa(Client)
 isnotsingleton = isa(NotSingletonClient)
+
+# A client class given to the container, and the client it gets back
+ClientT = TypeVar("ClientT", bound=NotSingletonClient)
 
 
 def _not_a_pydantic_type(client_class: type) -> str:

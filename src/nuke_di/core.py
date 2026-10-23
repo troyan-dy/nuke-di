@@ -5,11 +5,10 @@ import logging
 import threading
 import time
 import types
-from collections import Counter, OrderedDict
-from collections.abc import Callable, Coroutine, Iterable, Iterator
+from collections import OrderedDict
+from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass, field
 from functools import partial
-from types import MappingProxyType
 from typing import Any, Literal, NamedTuple, TypeVar, Union, cast, get_args, get_origin, get_type_hints, overload
 
 from nuke_di.errors import (
@@ -19,16 +18,15 @@ from nuke_di.errors import (
     InitializeDependencyError,
     InvalidSignatureError,
 )
-from nuke_di.graph import Graph, Node
-from nuke_di.logs import fields
-from nuke_di.naming import qualname, sname
+from nuke_di.graph import Graph, snapshot
+from nuke_di.logs import client_fields, fields
+from nuke_di.naming import count, display_names, qualname, sname
 from nuke_di.options import DependenciesSettings
 from nuke_di.timings import ClientTiming, Outcome
-from nuke_di.types import NotSingletonClient, isclient, isnotsingleton
+from nuke_di.types import ClientT, NotSingletonClient, isclient, isnotsingleton
 
 logger = logging.getLogger(__name__)
 
-ClientT = TypeVar("ClientT", bound=NotSingletonClient)
 ReturnT = TypeVar("ReturnT")
 
 Limiter = asyncio.Semaphore | contextlib.nullcontext[None]
@@ -174,7 +172,7 @@ class Dependencies:
         slowest = sorted(self.timings, key=lambda timing: timing.connect or 0, reverse=True)[:3]
         logger.info(
             "Connected %s in %.2fs (slowest: %s)",
-            _count(len(self.timings), "client"),
+            count(len(self.timings), "client"),
             duration,
             ", ".join(f"{timing.name} {timing.connect or 0:.2f}s" for timing in slowest),
             extra=fields(duration=duration),
@@ -188,7 +186,7 @@ class Dependencies:
                     timing.name,
                     timing.connect,
                     timeout,
-                    extra=_fields(timing, timing.connect),
+                    extra=client_fields(timing, timing.connect),
                 )
 
     async def _connect_client(
@@ -202,7 +200,11 @@ class Dependencies:
             async with limiter:
                 if debug:
                     logger.debug(
-                        "Connecting client %s (%d/%d connected)", name, len(connected), total, extra=_fields(timing)
+                        "Connecting client %s (%d/%d connected)",
+                        name,
+                        len(connected),
+                        total,
+                        extra=client_fields(timing),
                     )
                 with _measure(timing, "connect"):
                     await _within(self.settings.connect_timeout, client.connect())
@@ -214,7 +216,7 @@ class Dependencies:
                     timing.connect,
                     len(connected),
                     total,
-                    extra=_fields(timing, timing.connect),
+                    extra=client_fields(timing, timing.connect),
                 )
 
         except TimeoutError as exc:
@@ -223,7 +225,7 @@ class Dependencies:
                 "%s did not connect within %gs (CONNECT_TIMEOUT_SECONDS)",
                 name,
                 timeout,
-                extra=_fields(timing, timing.connect),
+                extra=client_fields(timing, timing.connect),
             )
             error: ConnectError = ConnectTimeoutError(
                 f"{name} did not connect within {timeout:g}s (CONNECT_TIMEOUT_SECONDS)"
@@ -240,7 +242,7 @@ class Dependencies:
                     raise
                 timing.connect_outcome = "failed"
             raised = f"{name}.connect() raised {_described(exc)}"
-            logger.exception("%s", raised, extra=_fields(timing, timing.connect))
+            logger.exception("%s", raised, extra=client_fields(timing, timing.connect))
             error = ConnectError(raised)
             error.__cause__ = exc
             raise _ClientConnectError(error) from exc
@@ -293,7 +295,7 @@ class Dependencies:
             if skipped:
                 logger.error(
                     "Skipped disconnecting %s after DISCONNECT_DEADLINE_SECONDS (%gs): %s",
-                    _count(len(skipped), "client"),
+                    count(len(skipped), "client"),
                     self.settings.disconnect_deadline,
                     ", ".join(self._timings[id(client)].name for client in skipped),
                     extra=fields(),
@@ -331,7 +333,7 @@ class Dependencies:
                         name,
                         len(disconnected),
                         total,
-                        extra=_fields(timing),
+                        extra=client_fields(timing),
                     )
                 try:
                     with _measure(timing, "disconnect"):
@@ -345,28 +347,32 @@ class Dependencies:
                     timing.disconnect,
                     len(disconnected),
                     total,
-                    extra=_fields(timing, timing.disconnect),
+                    extra=client_fields(timing, timing.disconnect),
                 )
         except asyncio.CancelledError:
             # A CancelledError of the client's own, re-raised from a task it awaited, ends its disconnect() alone: its
             # dependencies still have to be stopped. A cancellation of disconnect() itself goes on.
             if _cancelled_from_outside():
                 raise
-            logger.exception("%s.disconnect() raised CancelledError", name, extra=_fields(timing, timing.disconnect))
+            logger.exception(
+                "%s.disconnect() raised CancelledError",
+                name,
+                extra=client_fields(timing, timing.disconnect),
+            )
         except TimeoutError:
             if cut_off:
                 logger.exception(
                     "%s did not disconnect before DISCONNECT_DEADLINE_SECONDS ran out (%gs)",
                     name,
                     self.settings.disconnect_deadline,
-                    extra=_fields(timing, timing.disconnect),
+                    extra=client_fields(timing, timing.disconnect),
                 )
             else:
                 logger.exception(
                     "%s did not disconnect within %gs (DISCONNECT_TIMEOUT_SECONDS)",
                     name,
                     timeout,
-                    extra=_fields(timing, timing.disconnect),
+                    extra=client_fields(timing, timing.disconnect),
                 )
         except Exception as exc:
             # The client failed, but the rest still have to be stopped
@@ -375,7 +381,7 @@ class Dependencies:
                 name,
                 type(exc).__name__,
                 exc,
-                extra=_fields(timing, timing.disconnect),
+                extra=client_fields(timing, timing.disconnect),
             )
 
     def _limiter(self) -> Limiter:
@@ -532,26 +538,7 @@ class Dependencies:
 
         `flush()` empties it, apart from the Replacements of the open `override()` blocks, which it keeps.
         """
-        # A Replacement is one object for every class it stands in for, and may be a resolved client too,
-        # so its nodes are keyed by class and the resolved clients by `id()`
-        replaced = {
-            client_class: Node(client_class=client_class, singleton=isclient(client_class), replacement=replacement)
-            for client_class, replacement in self._replacements.items()
-        }
-        resolved: dict[int, Node] = {}
-        # Resolution order: a client's dependencies have a node before the client does
-        for client in self.connect_clients:
-            dependencies = {
-                key: replaced[client_class] if self._replacements.get(client_class) is dep else resolved[id(dep)]
-                for key, (client_class, dep) in self._dependencies.get(id(client), {}).items()
-            }
-            resolved[id(client)] = Node(
-                client_class=type(client),
-                singleton=isclient(type(client)),
-                replacement=None,
-                dependencies=MappingProxyType(dependencies),
-            )
-        return Graph((*replaced.values(), *resolved.values()))
+        return snapshot(self._replacements, self.connect_clients, self._dependencies)
 
     def _client_arguments(self, client_class: type[NotSingletonClient]) -> dict[str, type[NotSingletonClient]]:
         """
@@ -639,7 +626,7 @@ class Dependencies:
         Built on demand, for an error or a Replacement: the clients are scanned once per call, which a resolve()
         of every client cannot afford.
         """
-        return _display_names(
+        return display_names(
             {*self.clients, *(type(client) for client in self.connect_clients), *self._resolving, *more}
         )
 
@@ -853,13 +840,6 @@ def _init_arguments(init: Callable[..., Any]) -> list[_Argument]:
     ]
 
 
-def _fields(timing: ClientTiming, duration: float | None = None) -> dict[str, Any]:
-    """
-    The structured fields of a log record about one client.
-    """
-    return fields(client=timing.name, duration=duration)
-
-
 @contextlib.contextmanager
 def _measure(timing: ClientTiming, phase: Literal["connect", "disconnect"]) -> Iterator[None]:
     """
@@ -939,26 +919,8 @@ def _described(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
-def _display_names(classes: Iterable[type]) -> dict[type, str]:
-    """
-    How errors, logs and timings name every class of `classes`: by `qualname()`, and in full, module and
-    `__qualname__` (`app.orders.Database`, `tests.test_x.test_one.<locals>.Database`), for the classes that share
-    one, so two wrappers called `Database` are told apart. A unique name stays short.
-    """
-    names = {client_class: qualname(client_class) for client_class in classes}
-    shared = {name for name, count in Counter(names.values()).items() if count > 1}
-    return {
-        client_class: f"{client_class.__module__}.{client_class.__qualname__}" if name in shared else name
-        for client_class, name in names.items()
-    }
-
-
 def _not_a_client(client_class: Any) -> InvalidSignatureError:
     return InvalidSignatureError(f"{_type_name(client_class)} is not a client: subclass Client or NotSingletonClient")
-
-
-def _count(number: int, noun: str) -> str:
-    return f"{number} {noun}" if number == 1 else f"{number} {noun}s"
 
 
 def _optional_client(hint: Any) -> type[NotSingletonClient] | None:
