@@ -375,19 +375,20 @@ def test_an_alias_of_a_type_statement_is_no_client(tmp_path: Path, monkeypatch: 
 
 def test_an_alias_of_a_type_statement_is_no_client_on_every_python() -> None:
     # Python 3.11 cannot parse a `type` statement, for mypy either: its alias is made by hand
-    from mypy.nodes import Context, TypeAlias
+    from mypy.nodes import TypeAlias
+    from mypy.options import Options
     from mypy.types import AnyType, TypeAliasType, TypeOfAny
 
-    from nuke_di import mypy as plugin
+    from nuke_di.mypy.hints import client
+    from nuke_di.mypy.names import type_name
 
     alias = TypeAlias(
         AnyType(TypeOfAny.explicit), "app.Alias", module="app", line=-1, column=-1, python_3_12_type_alias=True
     )
     hint = TypeAliasType(alias, [])
-    tree = plugin._Tree(api=None, context=Context(), root=None, modules=set())  # type: ignore[arg-type]
 
-    assert plugin._client(hint) is None
-    assert tree._type_name(hint) == "Alias"
+    assert client(hint) is None
+    assert type_name(hint, Options()) == "Alias"
 
 
 def test_every_error_of_a_tree_is_reported_once(tmp_path: Path) -> None:
@@ -681,7 +682,7 @@ def test_a_change_deep_in_the_tree_checks_the_call_again(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hook: bool
 ) -> None:
     # mypy before 2.4 has no hook for the dependencies of a module
-    monkeypatch.setattr("nuke_di.mypy.INDIRECT_DEPS_HOOK", hook)
+    monkeypatch.setattr("nuke_di.mypy.calls.INDIRECT_DEPS_HOOK", hook)
     leaf = """
     from nuke_di import Client
 
