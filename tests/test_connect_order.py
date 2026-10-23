@@ -1,11 +1,16 @@
 import asyncio
 import logging
+import re
 from collections.abc import Iterator
 
 import pytest
 
 from nuke_di import Client, ConnectError, Dependencies, DependenciesSettings
+from tests.sequences import repeated, single
 from tests.test_resolve import chain
+
+# The bound on a disconnect() the deadline cuts short: well under the timeouts that would run in turn without it
+WITHIN_DEADLINE = 0.5
 
 
 class Probe:
@@ -24,8 +29,10 @@ class Probe:
         self.peak = max(self.peak, self.running)
         try:
             await asyncio.sleep(0.01)
-        finally:
+        except BaseException:
             self.running -= 1
+            raise
+        self.running -= 1
         self.events.append(f"{event}:end")
 
     def before(self, first: str, second: str) -> bool:
@@ -50,11 +57,11 @@ class Tracked(Client):
 
 
 class Postgres(Tracked):
-    pass
+    """A database, the dependency the other tracked clients share."""
 
 
 class Redis(Tracked):
-    pass
+    """A cache that depends on nothing, independent of Postgres."""
 
 
 class Payments(Tracked):
@@ -92,7 +99,7 @@ async def test_consumer_disconnects_before_dependency() -> None:
     dep.resolve(Checkout)
 
     async with dep:
-        pass
+        ...
 
     assert probe.before("disconnect:Checkout", "disconnect:Payments")
     assert probe.before("disconnect:Payments", "disconnect:Postgres")
@@ -110,7 +117,7 @@ async def test_independent_clients_disconnect_concurrently() -> None:
 
 
 class Mocked(Client):
-    pass
+    """A client the test replaces with a mock, which has nothing to connect."""
 
 
 class UsesMock(Tracked):
@@ -160,7 +167,7 @@ async def test_failure_cancels_the_clients_still_connecting() -> None:
     assert isinstance(exc_info.value.__cause__, RuntimeError)
     assert Slow.cancelled
     # its consumer never starts
-    assert probe.events == []
+    assert not probe.events
 
 
 async def test_concurrency_limit() -> None:
@@ -310,7 +317,7 @@ async def test_consumer_of_a_failed_client_never_starts() -> None:
     with pytest.raises(ConnectError, match="Broken"):
         await dep.connect()
 
-    [timing] = [timing for timing in dep.timings if timing.name == "Blocked"]
+    timing = single(timing for timing in dep.timings if timing.name == "Blocked")
     assert timing.connect is None
     assert timing.connect_outcome is None
 
@@ -329,7 +336,7 @@ async def test_failed_disconnect_still_releases_its_dependencies() -> None:
     dep.resolve(FailsToDisconnect)
 
     async with dep:
-        pass
+        ...
 
     assert probe.before("disconnect:FailsToDisconnect", "disconnect:Postgres")
 
@@ -339,9 +346,9 @@ async def test_long_chain_connects_and_disconnects() -> None:
     dep.resolve(chain(2000)[-1])
 
     async with dep:
-        assert [timing.connect_outcome for timing in dep.timings] == ["ok"] * 2000
+        assert [timing.connect_outcome for timing in dep.timings] == repeated(["ok"], 2000)
 
-    assert [timing.disconnect_outcome for timing in dep.timings] == ["ok"] * 2000
+    assert [timing.disconnect_outcome for timing in dep.timings] == repeated(["ok"], 2000)
 
 
 async def test_progress_in_the_client_records(caplog: pytest.LogCaptureFixture) -> None:
@@ -350,22 +357,24 @@ async def test_progress_in_the_client_records(caplog: pytest.LogCaptureFixture) 
     dep.resolve(Checkout)
 
     async with dep:
-        pass
+        ...
 
     messages = [record.getMessage() for record in caplog.records if " client " in record.getMessage()]
-    assert messages == [
+    # The durations differ from run to run: a record that has one is compared up to its " in 0.0"
+    prefixes = [re.sub(r" in 0\.0.*", " in 0.0", message) for message in messages]
+    assert prefixes == [
         "Connecting client Postgres (0/3 connected)",
-        "Connected client Postgres in 0.0" + messages[1].split(" in 0.0")[1],
+        "Connected client Postgres in 0.0",
         "Connecting client Payments (1/3 connected)",
-        "Connected client Payments in 0.0" + messages[3].split(" in 0.0")[1],
+        "Connected client Payments in 0.0",
         "Connecting client Checkout (2/3 connected)",
-        "Connected client Checkout in 0.0" + messages[5].split(" in 0.0")[1],
+        "Connected client Checkout in 0.0",
         "Disconnecting client Checkout (0/3 disconnected)",
-        "Disconnected client Checkout in 0.0" + messages[7].split(" in 0.0")[1],
+        "Disconnected client Checkout in 0.0",
         "Disconnecting client Payments (1/3 disconnected)",
-        "Disconnected client Payments in 0.0" + messages[9].split(" in 0.0")[1],
+        "Disconnected client Payments in 0.0",
         "Disconnecting client Postgres (2/3 disconnected)",
-        "Disconnected client Postgres in 0.0" + messages[11].split(" in 0.0")[1],
+        "Disconnected client Postgres in 0.0",
     ]
     assert messages[1].endswith("s (1/3 connected)")
     assert messages[5].endswith("s (3/3 connected)")
@@ -395,8 +404,8 @@ async def test_client_cancelling_its_own_connect_fails_the_connect() -> None:
         with pytest.raises(ConnectError, match=r"^CancelsItself\.connect\(\) raised CancelledError$"):
             await dep.connect()
 
-    assert probe.events == []
-    [timing] = [timing for timing in dep.timings if timing.name == "CancelsItself"]
+    assert not probe.events
+    timing = single(timing for timing in dep.timings if timing.name == "CancelsItself")
     # The culprit, told apart from the clients cancelled because of it
     assert timing.connect_outcome == "failed"
 
@@ -419,7 +428,7 @@ async def test_timed_out_disconnect_still_releases_its_dependencies() -> None:
         await dep.disconnect()
 
     assert probe.before("disconnect:HangsOnDisconnect", "disconnect:Postgres")
-    [timing] = [timing for timing in dep.timings if timing.name == "HangsOnDisconnect"]
+    timing = single(timing for timing in dep.timings if timing.name == "HangsOnDisconnect")
     assert timing.disconnect_outcome == "timed_out"
 
 
@@ -458,15 +467,20 @@ async def test_deadline_bounds_a_chain_of_hung_disconnects(caplog: pytest.LogCap
         await dep.disconnect()
 
     # Not 0.6: the timeout of each of the three clients in turn
-    assert loop.time() - started < 0.5
-    outcomes = {timing.name: timing.disconnect_outcome for timing in dep.timings}
-    assert outcomes["HangingTop"] == "timed_out"
-    assert outcomes["HangingMiddle"] == "timed_out"
-    assert "HangingTop did not disconnect within 0.2s (DISCONNECT_TIMEOUT_SECONDS)" in caplog.text
-    assert "HangingMiddle did not disconnect before DISCONNECT_DEADLINE_SECONDS ran out (0.3s)" in caplog.text
+    assert loop.time() - started < WITHIN_DEADLINE
+    assert {timing.name: timing.disconnect_outcome for timing in dep.timings} == {
+        "HangingTop": "timed_out",
+        "HangingMiddle": "timed_out",
+        "HangingBottom": None,
+    }
     assert "disconnect:HangingBottom:start" not in probe.events
-    assert outcomes["HangingBottom"] is None
-    assert "Skipped disconnecting 1 client after DISCONNECT_DEADLINE_SECONDS (0.3s): HangingBottom" in caplog.text
+    errors = [
+        "HangingTop did not disconnect within 0.2s (DISCONNECT_TIMEOUT_SECONDS)",
+        "HangingMiddle did not disconnect before DISCONNECT_DEADLINE_SECONDS ran out (0.3s)",
+        "Skipped disconnecting 1 client after DISCONNECT_DEADLINE_SECONDS (0.3s): HangingBottom",
+    ]
+    missing = [error for error in errors if error not in caplog.text]
+    assert not missing
 
 
 async def test_zero_deadline_skips_every_client(caplog: pytest.LogCaptureFixture) -> None:
@@ -477,13 +491,13 @@ async def test_zero_deadline_skips_every_client(caplog: pytest.LogCaptureFixture
     with caplog.at_level(logging.ERROR, logger="nuke_di.core"):
         await dep.disconnect()
 
-    assert not [event for event in probe.events if event.startswith("disconnect:")]
+    assert not any(event.startswith("disconnect:") for event in probe.events)
     assert {timing.disconnect_outcome for timing in dep.timings} == {None}
     assert {timing.disconnect for timing in dep.timings} == {None}
-    [record] = [record for record in caplog.records if "Skipped" in record.getMessage()]
-    assert record.levelno == logging.ERROR
-    assert record.getMessage() == (
-        "Skipped disconnecting 3 clients after DISCONNECT_DEADLINE_SECONDS (0s): Checkout, Payments, Postgres"
+    record = single(record for record in caplog.records if "Skipped" in record.getMessage())
+    assert (record.levelno, record.getMessage()) == (
+        logging.ERROR,
+        "Skipped disconnecting 3 clients after DISCONNECT_DEADLINE_SECONDS (0s): Checkout, Payments, Postgres",
     )
     assert dep.connected is False
 
@@ -499,7 +513,7 @@ class HangsAlone(Tracked):
 
 
 class AlsoHangsAlone(HangsAlone):
-    pass
+    """A second client that hangs on disconnect, independent of the first."""
 
 
 async def test_client_waiting_for_the_concurrency_slot_at_the_deadline_is_skipped(
@@ -518,7 +532,7 @@ async def test_client_waiting_for_the_concurrency_slot_at_the_deadline_is_skippe
 
     outcomes = sorted(str(timing.disconnect_outcome) for timing in dep.timings)
     assert outcomes == ["None", "timed_out"]
-    [skipped] = [timing.name for timing in dep.timings if timing.disconnect_outcome is None]
+    skipped = single(timing.name for timing in dep.timings if timing.disconnect_outcome is None)
     assert f"Skipped disconnecting 1 client after DISCONNECT_DEADLINE_SECONDS (0.05s): {skipped}" in caplog.text
     assert f"disconnect:{skipped}:start" not in probe.events
 
@@ -533,7 +547,7 @@ async def test_deadline_bounds_the_rollback_of_a_failed_connect() -> None:
     with pytest.raises(ConnectError, match="FailsLater"):
         await dep.connect()
 
-    assert loop.time() - started < 0.5
+    assert loop.time() - started < WITHIN_DEADLINE
     timings = {timing.name: timing for timing in dep.timings}
     assert timings["HangsAlone"].disconnect_outcome == "timed_out"
 
@@ -547,7 +561,7 @@ async def test_deadline_shorter_than_the_timeout_names_the_deadline(caplog: pyte
         async with asyncio.timeout(1):
             await dep.disconnect()
 
-    [timing] = [timing for timing in dep.timings if timing.name == "HangsOnDisconnect"]
+    timing = single(timing for timing in dep.timings if timing.name == "HangsOnDisconnect")
     assert timing.disconnect_outcome == "timed_out"
     assert "HangsOnDisconnect did not disconnect before DISCONNECT_DEADLINE_SECONDS ran out (0.05s)" in caplog.text
     assert "DISCONNECT_TIMEOUT_SECONDS" not in caplog.text
@@ -676,7 +690,7 @@ async def test_dependency_disconnects_after_every_consumer() -> None:
     dep.resolve(SlowToStop)
 
     async with dep:
-        pass
+        ...
 
     assert probe.events.index("disconnect:SlowToStop:done") < probe.events.index("disconnect:Postgres:start")
     assert probe.before("disconnect:QuickToStop", "disconnect:Postgres")
