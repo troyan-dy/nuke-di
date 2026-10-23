@@ -46,7 +46,7 @@ class Lifespan:
                 raise TypeError(f"{client_class!r} is not a client: subclass Client or NotSingletonClient")
         self._container = container
         # Resolved on every startup, not now: a test replaces a client with override() before the app starts
-        self._bindings = {client_class: Binding(client_class, container, _ASGI) for client_class in clients}
+        self._bindings = {each: Binding(each, container, _ASGI) for each in clients}
 
     def __call__(self, app: object = None) -> AbstractAsyncContextManager[None]:
         """

@@ -40,7 +40,12 @@ class BackgroundTasks(Client):
         self._watchers: list[Callable[[BaseException], object]] = []
         self._stopping = False
 
-    def spawn(self, coro: Coroutine[Any, Any, Any], *, name: str | None = None) -> asyncio.Task[Any]:
+    def spawn(
+        self,
+        coro: Coroutine[Any, Any, Any],
+        *,
+        name: str | None = None,
+    ) -> asyncio.Task[Any]:
         if self._stopping:
             coro.close()
             raise RuntimeError("BackgroundTasks is stopping, no new tasks are accepted")
