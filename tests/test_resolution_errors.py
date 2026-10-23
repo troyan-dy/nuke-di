@@ -23,7 +23,7 @@ class Nest(Client):
 
 
 class Database(Client):
-    pass
+    """A client with nothing to connect."""
 
 
 class Repository(Protocol):
@@ -56,8 +56,8 @@ class MaybeCount(Client):
 
 
 class Anything(Client):
-    def __init__(self, value: Any) -> None:
-        self.value = value
+    def __init__(self, payload: Any) -> None:
+        self.payload = payload
 
 
 class Mode(Client):
@@ -66,8 +66,15 @@ class Mode(Client):
 
 
 class Callbacks(Client):
-    def __init__(self, on_item: Callable[[int], str], on_any: Callable[..., int], empty: tuple[()]) -> None:
-        self.on_item, self.on_any, self.empty = on_item, on_any, empty
+    def __init__(
+        self,
+        on_item: Callable[[int], str],
+        on_any: Callable[..., int],
+        empty: tuple[()],
+    ) -> None:
+        self.on_item = on_item
+        self.on_any = on_any
+        self.empty = empty
 
 
 class Handler(Client):
@@ -101,7 +108,10 @@ class PositionalOnly(Client):
 
 class WithDefaults(Client):
     def __init__(self, db: Database, retries: int = 3, label="main", cache: Database | None = None) -> None:  # type: ignore[no-untyped-def]
-        self.db, self.retries, self.label, self.cache = db, retries, label, cache
+        self.db = db
+        self.retries = retries
+        self.label = label
+        self.cache = cache
 
 
 class Variadic(Client):
@@ -161,7 +171,7 @@ def test_positional_only_client() -> None:
 def test_unresolvable_forward_reference() -> None:
     def make() -> type[Client]:
         class Local(Client):
-            pass
+            """A client local to make(), which a forward reference cannot reach."""
 
         class Uses(Client):
             def __init__(self, local: "Local") -> None:
@@ -209,8 +219,8 @@ def test_generic_argument_is_named_in_full() -> None:
     ("client_class", "name"),
     [
         (Retries, "int"),
-        (Either, "Database \\| int"),
-        (MaybeCount, "int \\| None"),
+        (Either, r"Database \| int"),
+        (MaybeCount, r"int \| None"),
         (Anything, "Any"),
         (Mode, r"Literal\['fast'\]"),
     ],
@@ -222,7 +232,7 @@ def test_type_is_named_without_module(client_class: type[Client], name: str) -> 
 
 def test_inject_wraps_unresolvable_forward_reference() -> None:
     async def handler(feed: "Missing") -> None:  # type: ignore[name-defined]  # noqa: F821
-        pass
+        ...
 
     with pytest.raises(InvalidSignatureError, match=r'^Cannot evaluate the type hints of "handler": name \'Missing\''):
         Dependencies().inject(handler)
@@ -264,7 +274,8 @@ def test_nested_inject_keeps_the_outer_path() -> None:
 
     class Outer(Client):
         def __init__(self, inner: Inner, retries: Retries) -> None:
-            self.inner, self.retries = inner, retries
+            self.inner = inner
+            self.retries = retries
 
     async def outer_handler(outer: Outer) -> None: ...
 
