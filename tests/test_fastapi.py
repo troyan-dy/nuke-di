@@ -19,7 +19,8 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from nuke_di import DI, BackgroundTasks, Client, ConnectError, Dependencies, NotSingletonClient, Shutdown
-from nuke_di.fastapi import _FASTAPI, ClientRoute, ClientRouter, setup
+from nuke_di.fastapi import ClientRoute, ClientRouter, setup
+from nuke_di.fastapi.bindings import _FASTAPI
 from nuke_di.integration.testing import check
 
 if TYPE_CHECKING:
