@@ -65,13 +65,13 @@ def resolve_tree(container: "Dependencies", client_class: type[NotSingletonClien
         while True:
             # The innermost frame takes the clients that exist; a missing one is built first, in a frame of its own.
             # The `continue` of the else resumes this `while`, skipping the `break` that opens that frame.
-            for key, dep in pending:  # noqa: WPS327
+            for key, dependency in pending:  # noqa: WPS327
                 # Not kept in a local: an `__init__` that flushes the container replaces the dict
-                inst = container.clients.get(dep)
+                inst = container.clients.get(dependency)
                 if inst is None:
                     # Before the arguments after it, which is the order of a recursion
                     waiting.append((client_class, arguments, init, pending, key))
-                    client_class = dep
+                    client_class = dependency
                     break
                 init[key] = inst
             else:
