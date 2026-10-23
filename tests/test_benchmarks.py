@@ -46,11 +46,9 @@ Lifecycle = Callable[[type[Client]], Callable[..., Any]]
 @dataclass(frozen=True)
 class Ran:
     """
-    A benchmark script run: its exit code, its stderr, the lines of its stdout and the JSON it wrote.
+    A successful benchmark script run: the lines of its stdout and the JSON it wrote.
     """
 
-    returncode: int
-    stderr: str
     lines: list[str]
     report: dict[str, Any]
 
@@ -81,11 +79,11 @@ def run(*args: str, script: Path = RUN) -> subprocess.CompletedProcess[str]:
 
 def ran(out: Path, *args: str, script: Path = RUN) -> Ran:
     """
-    `run(*args, "--json", out)`, and what it printed and wrote.
+    `run(*args, "--json", out)`, and what it printed and wrote; a failed run fails with its stderr.
     """
     process = run(*args, "--json", str(out), script=script)
-    report = json.loads(out.read_text()) if out.exists() else {}
-    return Ran(process.returncode, process.stderr, process.stdout.splitlines(), report)
+    assert process.returncode == 0, process.stderr
+    return Ran(process.stdout.splitlines(), json.loads(out.read_text()))
 
 
 @pytest.fixture
@@ -114,7 +112,6 @@ def test_prints_a_markdown_table(resolve_run: Ran) -> None:
     runtime = f"{platform.python_implementation()} {platform.python_version()}"
     columns = resolve_run.lines[2:4]
 
-    assert resolve_run.returncode == 0, resolve_run.stderr
     assert heading.startswith("nuke-di ") and runtime in heading
     assert columns[0].startswith("| Scenario ") and columns[1].startswith("|---")
 
@@ -167,7 +164,6 @@ def test_writes_the_strings_variant_of_every_tree(resolve_run: Ran, shape: str) 
 def test_connects_an_application_shaped_tree(connect_run: Ran) -> None:
     application = connect_run.application
 
-    assert connect_run.returncode == 0, connect_run.stderr
     assert [row["scenario"] for row in application] == [
         "connect() + disconnect(), wall time",
         "connect() + disconnect(), ideal: the critical path",
@@ -205,7 +201,6 @@ def test_compares_libraries_in_a_table(compare_run: Ran) -> None:
     columns = compare_run.lines[3:5]
     warm = compare_run.startswith("| dependency-injector | warm: the root again")
 
-    assert compare_run.returncode == 0, compare_run.stderr
     assert versions.startswith("nuke-di ") and "dishka " in versions and "wireup " in versions
     assert columns[0].startswith("| Library ") and columns[1].startswith("|---")
     assert any("| deep " in line for line in warm)
@@ -256,7 +251,6 @@ def product_page(slow: Ran, scenario: str) -> dict[str, Any]:
 
 
 def test_sums_the_slow_connections_up(slow_connections: Ran) -> None:
-    assert slow_connections.returncode == 0, slow_connections.stderr
     assert slow_connections.startswith("| Startup: 8 clients, connect() of 1–60 ms ")  # noqa: RUF001
     assert slow_connections.startswith("| Shutdown: the same 8 clients ")
 
@@ -396,8 +390,8 @@ def test_draws_the_product_page(tmp_path: Path) -> None:
 
     process = run(str(figures), str(out), script=BENCHMARKS / "product_page.py")
 
-    svg = out.read_text()
     assert process.returncode == 0, process.stderr
+    svg = out.read_text()
     assert svg.startswith("<svg ") and "ProductPageApi" in svg and "prefers-color-scheme: dark" in svg
     # The picture of the README is the one the committed figures give
     assert svg == (ROOT / "docs" / "product-page.svg").read_text()
