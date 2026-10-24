@@ -5931,7 +5931,7 @@ The [mypy plugin](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/cl
 make install   # uv sync --locked
 make check     # ruff, flake8, mypy, pyright and tests, as in CI
 make cov       # tests with a coverage report (terminal + htmlcov/)
-make test-all  # tests on Python 3.11-3.14
+make test-all  # tests on Python 3.11-3.15
 ```
 
 Line and branch coverage is 100%, and CI fails if it drops below that

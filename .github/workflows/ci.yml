@@ -11,17 +11,17 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # the base branch and the tags
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10.3.2
       - run: uv run --no-project python scripts/version.py check "origin/${{ github.base_ref }}"
 
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -34,15 +34,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
     services:
       # The broker of the NATS examples, which tests/test_examples.py runs when it is reachable
       nats:
         image: nats:2.10
         ports: ["4222:4222"]
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --locked
@@ -53,18 +53,18 @@ jobs:
     # yet, so the job runs the tests that need none of them
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
-          python-version: "3.14t"
+          python-version: "3.15t"
       - run: make test-free-threaded
 
   fastapi-min:
     # The lowest FastAPI the `fastapi` extra allows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: "3.11"
       - run: uv sync --locked
@@ -74,8 +74,8 @@ jobs:
     # The lowest FastStream the `faststream` extra allows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: "3.11"
       - run: uv sync --locked
@@ -85,8 +85,8 @@ jobs:
     # The lowest Litestar the `litestar` extra allows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: "3.11"
       - run: uv sync --locked
@@ -96,8 +96,8 @@ jobs:
     # The lowest MCP SDK the `mcp` extra allows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: "3.11"
       - run: uv sync --locked
@@ -107,8 +107,8 @@ jobs:
     # The lowest FastMCP the `fastmcp` extra allows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: "3.11"
       - run: uv sync --locked
@@ -118,8 +118,8 @@ jobs:
     # The lowest aiogram the `aiogram` extra allows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: "3.11"
       - run: uv sync --locked
@@ -129,8 +129,8 @@ jobs:
     # The lowest taskiq and taskiq-dependencies the `taskiq` extra allows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: "3.11"
       - run: uv sync --locked
@@ -142,8 +142,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
       - run: uv sync --locked
       - run: uv run python benchmarks/run.py --size 10 --repeat 1
       - run: uv run python benchmarks/compare.py --size 10 --repeat 1
