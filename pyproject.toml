@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "2.0.0"
+version = "2.0.1"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
@@ -51,6 +51,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
   "Topic :: Software Development :: Libraries :: Application Frameworks",
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Typing :: Typed",
@@ -95,21 +96,21 @@ compare = [
     "dishka>=1.10.1",
     "injector>=0.24.0",
     "matplotlib>=3.11.2",
-    "wireup>=2.12.1",
+    "wireup>=2.13.0",
 ]
 dev = [
   "aiogram>=3.31",
-  "fastapi>=0.142.4",
-  "fastmcp>=4.1.0",
-  "faststream[nats]>=0.7.7",
-  "httpx2>=2.13.1",
-  "litestar>=2.24",
+  "fastapi>=0.162.0",
+  "fastmcp>=4.1.3",
+  "faststream[nats]>=0.7.8",
+  "httpx2>=2.16.0",
+  "litestar>=2.25",
   "mcp>=2.3.0",
-  "mypy>=1.13",
-  "pytest>=8.3",
-  "pytest-asyncio>=0.24",
-  "pytest-cov>=6.0",
-  "ruff>=0.8",
+  "mypy>=2.4",
+  "pytest>=9.1",
+  "pytest-asyncio>=1.4",
+  "pytest-cov>=7.1",
+  "ruff>=0.17.2",
   "taskiq>=0.13.0",
   "wemake-python-styleguide>=1.8.1",
 ]
@@ -117,6 +118,8 @@ dev = [
 [tool.uv]
 # The comparison libraries of benchmarks/compare.py, which mypy checks
 default-groups = ["dev", "compare"]
+# Litestar 2.25 builds its Headers from a list, which multidict 7 rejects (500 on every request that reads them)
+constraint-dependencies = ["multidict<7"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
