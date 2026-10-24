@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-PY_VERSIONS := 3.11 3.12 3.13 3.14
+PY_VERSIONS := 3.11 3.12 3.13 3.14 3.15
 # Not a dev dependency: uvx keeps it out of uv.lock; the same pin is in .github/workflows/ci.yml
 PYRIGHT := pyright@1.1.414
 
@@ -50,8 +50,8 @@ test-all: ## Run tests on every supported Python version
 	done
 
 .PHONY: test-free-threaded
-test-free-threaded: ## Run the tests that need no framework on free-threaded Python 3.14t with the GIL off, as CI does
-	PYTHON_GIL=0 uv run --python 3.14t --isolated --no-default-groups --with pytest --with pytest-asyncio pytest -p no:cacheprovider \
+test-free-threaded: ## Run the tests that need no framework on free-threaded Python 3.15t with the GIL off, as CI does
+	PYTHON_GIL=0 uv run --python 3.15t --isolated --no-default-groups --with pytest --with pytest-asyncio pytest -p no:cacheprovider \
 		--ignore=tests/test_fastapi.py --ignore=tests/test_litestar.py --ignore=tests/test_faststream.py --ignore=tests/test_asgi.py \
 		--ignore=tests/test_mcp.py --ignore=tests/test_fastmcp.py --ignore=tests/test_aiogram.py --ignore=tests/test_taskiq.py \
 		--ignore=tests/test_benchmarks.py --ignore=tests/test_typing.py --ignore=tests/test_examples.py
