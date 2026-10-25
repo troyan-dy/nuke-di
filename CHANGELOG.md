@@ -6,6 +6,21 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-24
+
+The library is unchanged; this release tests it on Python 3.15 and refreshes the development tooling.
+
+### Added
+
+- Python 3.15 in the classifiers and the CI matrix; the free-threaded job runs on 3.15t.
+
+### Changed
+
+- The development dependencies in `uv.lock` are upgraded (FastAPI 0.162, Litestar 2.25, FastMCP 4.1.3, mypy 2.4,
+  pytest 9.1, ruff 0.17), with `multidict<7` as a lock constraint until Litestar accepts multidict 7.
+- CI uses `actions/checkout@v7`, `astral-sh/setup-uv@v10.3.2`, `actions/upload-artifact@v7` and
+  `actions/download-artifact@v8`.
+
 ## [2.0.0] - 2026-10-23
 
 The whole repository follows [wemake-python-styleguide](https://github.com/wemake-services/wemake-python-styleguide)
@@ -926,7 +941,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/troyan-dy/nuke-di/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/troyan-dy/nuke-di/compare/v1.19.0...v2.0.0
 [1.19.0]: https://github.com/troyan-dy/nuke-di/compare/v1.18.5...v1.19.0
 [1.18.5]: https://github.com/troyan-dy/nuke-di/compare/v1.18.4...v1.18.5
