@@ -6,6 +6,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-10-30
+
+The library is unchanged.
+
+### Added
+
+- `docs/research/2026-10-30-review.md`: the evidence and reasoning behind the 3.0 backlog (epic #89).
+
 ## [2.0.1] - 2026-10-24
 
 The library is unchanged; this release tests it on Python 3.15 and refreshes the development tooling.
@@ -941,7 +949,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v2.0.2...HEAD
+[2.0.2]: https://github.com/troyan-dy/nuke-di/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/troyan-dy/nuke-di/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/troyan-dy/nuke-di/compare/v1.19.0...v2.0.0
 [1.19.0]: https://github.com/troyan-dy/nuke-di/compare/v1.18.5...v1.19.0
