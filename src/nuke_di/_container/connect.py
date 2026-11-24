@@ -5,7 +5,7 @@ One connect() of a container: every client after its dependencies, a failure rol
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from nuke_di._container.disconnect import Disconnect
 from nuke_di._container.messages import names
@@ -30,14 +30,20 @@ logger = logging.getLogger(CONTAINER_LOGGER)
 
 class ClientConnectError(Exception):
     """
-    Carries a `ConnectError` out of a connect task.
+    Carries an error out of a connect task.
 
     `ConnectError` is a `SystemExit`, and a `SystemExit` raised inside a task escapes the event loop.
     """
 
-    def __init__(self, error: ConnectError) -> None:
+    def __init__(self, error: BaseException) -> None:
         super().__init__(str(error))
         self.error = error
+
+
+class ClientInterruptError(ClientConnectError):
+    """
+    Carries a client's exit or interrupt without letting it escape the event loop from a child task.
+    """
 
 
 class Connect:
@@ -78,17 +84,16 @@ class Connect:
             # and every client still waiting
             await in_dependency_order(clients, dependencies_among(container, clients), self.client)
 
-        except ExceptionGroup as eg:
+        except BaseException as exc:
             await self._rollback()
-            # Every failure is logged already, the first one stops the application
-            error = cast(ClientConnectError, eg.exceptions[0]).error
-            raise error from error.__cause__
+            error = _reported_error(exc)
+            if error is None:
+                raise
+        else:
+            return time.perf_counter() - started
 
-        except asyncio.CancelledError:
-            await self._rollback()
-            raise
-
-        return time.perf_counter() - started
+        # Keep the client's exception chain without the task group's wrapper.
+        raise error
 
     async def client(self, client: NotSingletonClient) -> None:
         timing = self._timings[id(client)]
@@ -108,12 +113,11 @@ class Connect:
                     await within(self._timeout, client.connect())
         except TimeoutError as exc:
             raise self._timeout_failure(timing, exc) from exc
-        except (Exception, asyncio.CancelledError) as exc:
-            # A cancellation of connect() itself, or by the failure of another client, goes on. One of the client's
-            # own fails the connect like an exception, its consumers would wait for it forever
-            if isinstance(exc, asyncio.CancelledError) and cancelled_from_outside():
+        except BaseException as exc:
+            failure = self._failure(timing, exc)
+            if failure is None:
                 raise
-            raise self._failure(timing, exc) from exc
+            raise failure from exc
 
         # Past the try, which every failure leaves by raising
         self._connected.append(client)
@@ -157,18 +161,38 @@ class Connect:
         error.__cause__ = exc
         return ClientConnectError(error)
 
-    def _failure(self, timing: ClientTiming, exc: BaseException) -> ClientConnectError:
+    def _failure(self, timing: ClientTiming, exc: BaseException) -> ClientConnectError | None:
         """
-        Log the exception being handled, with the traceback, and carry its ConnectError out of the task.
+        Log the failed connect with its traceback and prepare the error to report after rollback.
         """
         if isinstance(exc, asyncio.CancelledError):
-            # The timing tells the culprit apart from the clients cancelled because of it
+            # Only a client's own cancellation fails the connect. Its consumers would otherwise wait forever.
+            if cancelled_from_outside():
+                return None
             timing.connect_outcome = "failed"
         raised = f"{timing.name}.connect() raised {described(exc)}"
         logger.exception("%s", raised, extra=client_fields(timing, timing.connect))
+        if isinstance(exc, (SystemExit, KeyboardInterrupt)):
+            return ClientInterruptError(exc)
+        if not isinstance(exc, (Exception, asyncio.CancelledError)):
+            return None
         error = ConnectError(raised)
         error.__cause__ = exc
         return ClientConnectError(error)
+
+
+def _reported_error(exc: BaseException) -> BaseException | None:
+    if not isinstance(exc, BaseExceptionGroup):
+        return None
+    # TaskGroup gives exits and interrupts priority over ordinary failures.
+    for failure in exc.exceptions:
+        if isinstance(failure, ClientInterruptError):
+            return failure.error
+    first = exc.exceptions[0]
+    if isinstance(exc, ExceptionGroup) and isinstance(first, ClientConnectError):
+        # Every failure is logged already, the first one stops the application
+        return first.error
+    return None
 
 
 def already_connected(call: str) -> ConnectError:

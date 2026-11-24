@@ -40,6 +40,10 @@ class Broken(Recorded):
         raise RuntimeError("boom")
 
 
+class CompetingFailure(Broken):
+    """An independent failure that can reach the task group before Broken."""
+
+
 class Sibling(Recorded):
     def __init__(self, pg: Postgres) -> None:
         self.pg = pg
@@ -132,6 +136,67 @@ async def test_failure_resets_container() -> None:
     assert dep.connected is False
     assert not dep.connect_clients
     assert not dep.clients
+
+
+@pytest.mark.parametrize("error_type", [ConnectError, SystemExit, KeyboardInterrupt])
+@pytest.mark.parametrize("with_competing_failure", [False, True])
+def test_base_exception_rolls_back_connect(
+    error_type: type[BaseException],
+    with_competing_failure: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    dep = Dependencies()
+    dep.resolve(Hanging)
+    if with_competing_failure:
+        dep.resolve(CompetingFailure)
+    error = error_type("stopped")
+
+    async def fail() -> None:
+        try:
+            int("invalid configuration")
+        except ValueError as cause:
+            raise error from cause
+
+    async def connect() -> None:
+        with pytest.raises(error_type) as raised:
+            await dep.connect()
+        cause = error.__cause__
+        assert raised.value is error and isinstance(cause, ValueError) and error.__context__ is cause
+
+    monkeypatch.setattr(dep.resolve(Top).broken, "connect", fail)
+    try:
+        asyncio.run(connect())
+    except (SystemExit, KeyboardInterrupt) as escaped:
+        raise AssertionError("A client's exception escaped the calling coroutine") from escaped
+
+    assert recorder.disconnected == ["Postgres"]
+    assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
+    outcomes = {timing.name: timing.connect_outcome for timing in dep.timings}
+    expected = {"Postgres": "ok", "Broken": "failed", "Hanging": "cancelled", "Top": None}
+    if with_competing_failure:
+        expected["CompetingFailure"] = "failed"
+    assert outcomes == expected
+    assert f"Broken.connect() raised {error_type.__name__}: stopped" in caplog.text
+
+
+async def test_base_exception_group_rolls_back_connect(monkeypatch: pytest.MonkeyPatch) -> None:
+    dep = Dependencies()
+    broken = dep.resolve(Broken)
+    error = BaseException("stopped")
+
+    async def fail() -> None:
+        raise error
+
+    monkeypatch.setattr(broken, "connect", fail)
+    with pytest.raises(BaseExceptionGroup) as raised:
+        await dep.connect()
+
+    assert raised.value.exceptions == (error,)
+    assert recorder.disconnected == ["Postgres"]
+    assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
+    timing = single(other for other in dep.timings if other.name == "Broken")
+    assert timing.connect_outcome == "failed"
 
 
 async def test_cancellation_disconnects_connected_clients() -> None:
