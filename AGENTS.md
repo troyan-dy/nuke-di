@@ -29,3 +29,24 @@ Keep the apparent simplicity: a dependency is a class with a type-hinted `__init
 The library stays pure Python with no runtime dependencies: a Rust or compiled core was measured and is not added until a CPU-bound stage appears (`docs/adr/0010-pure-python-no-compiled-core.md`).
 
 A client lives as long as its container. Per-request or per-message clients are never added (#65, `docs/adr/0006-clients-live-as-long-as-the-container.md`), and `NotSingletonClient` is a workaround slated for removal: new features, integrations and examples do not build on it.
+
+## Эксперимент с моделями Codex
+
+- Для задач разработки основной агент отвечает за реализацию,
+  проверку и исправление подтверждённых замечаний.
+- Если точка входа неочевидна или нужно проследить поведение через
+  несколько компонентов, запусти `project_scout` до правок.
+  Передай ему конкретный вопрос и дождись его выводов.
+  Применяй это правило и к задачам на исследование кода без изменений.
+- Небольшие правки с понятной точкой входа выполняй напрямую.
+- При изменении публичного контракта, схемы данных, формата сохранений,
+  конкурентной логики или алгоритма симуляции передай план
+  `project_reviewer` до правок. После реализации передай ему diff,
+  критерии приёмки и результаты проверок.
+- Запусти релевантные проверки проекта. Исправь подтверждённые проблемы
+  и повтори затронутые проверки. Для обычных технических решений
+  продолжай самостоятельно. Если требуется решение пользователя,
+  доступ или разрешение, укажи конкретный блокер.
+- Если нужный субагент недоступен, выполни проверку в основном треде
+  и отметь это в итогах. Укажи, какие агенты реально участвовали
+  и какие проверки прошли.
