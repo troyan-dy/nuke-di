@@ -1,6 +1,6 @@
 """
 The examples in examples/ keep working: the tests of every example pass, and its programs run with the
-exit code and the key lines of output their README shows. Every example runs in a process of its own, from
+exit code and the key lines of output their README shows. Each program runs in a process of its own, from
 examples/, as its README tells a reader to run it. The examples on NATS run when a server listens on
 localhost:4222, as in CI; the web servers are left to the tests of their examples, since uvicorn is not
 installed.
@@ -17,6 +17,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import NamedTuple
+from xml.etree import ElementTree
 
 import pytest
 
@@ -55,15 +56,12 @@ def inherited(name: str) -> bool:
     return not name.startswith("COV_CORE_") and name not in CONFIGURATION
 
 
-def nats_is_running() -> bool:
+@pytest.fixture(scope="module")
+def nats_available() -> None:
     try:
         socket.create_connection(("localhost", 4222), timeout=0.5).close()
     except OSError:
-        return False
-    return True
-
-
-needs_nats = pytest.mark.skipif(not nats_is_running(), reason="no NATS server on localhost:4222")
+        pytest.skip("no NATS server on localhost:4222")
 
 
 def test_every_example_has_a_readme() -> None:
@@ -78,10 +76,10 @@ def test_every_example_is_listed() -> None:
     assert [name for name in NAMES if f"]({name}/)" not in index] == []
 
 
-@pytest.mark.parametrize("name", NAMES)
-def test_example_tests_pass(name: str) -> None:
+def test_example_tests_pass(tmp_path: Path) -> None:
+    report = tmp_path / "examples.xml"
     completed = subprocess.run(  # noqa: S603
-        [sys.executable, "-m", "pytest", "-q", name],
+        [sys.executable, "-m", "pytest", "-q", f"--junitxml={report}", *NAMES],
         cwd=EXAMPLES,
         env=environment(),
         capture_output=True,
@@ -91,6 +89,10 @@ def test_example_tests_pass(name: str) -> None:
     )
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
+    cases = ElementTree.parse(report).iter("testcase")  # noqa: S314 - written by the pytest process above
+    classes = (case.attrib["classname"] for case in cases)
+    tested = {name.split(".", 1)[0] for name in classes}
+    assert set(NAMES) <= tested
 
 
 class Program(NamedTuple):
@@ -289,7 +291,7 @@ def test_service_layout_worker(tmp_path: Path) -> None:
     assert "outbox: stopped" in relay.output
 
 
-@needs_nats
+@pytest.mark.usefixtures("nats_available")
 @pytest.mark.skipif(sys.platform == "win32", reason="the subprocess uses POSIX signal delivery")
 def test_nats_worker() -> None:
     with running("nats_worker.worker") as worker:
@@ -303,7 +305,7 @@ def test_nats_worker() -> None:
     assert "worker: stopped" in worker.output
 
 
-@needs_nats
+@pytest.mark.usefixtures("nats_available")
 @pytest.mark.skipif(sys.platform == "win32", reason="the subprocess uses POSIX signal delivery")
 def test_faststream_nats() -> None:
     with running("faststream_nats.app") as app:

@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "3.0.1"
+version = "3.0.2"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
@@ -112,8 +112,6 @@ dev = [
 ]
 
 [tool.uv]
-# The comparison libraries of benchmarks/compare.py, which mypy checks
-default-groups = ["dev", "compare"]
 # Litestar 2.25 builds its Headers from a list, which multidict 7 rejects (500 on every request that reads them)
 constraint-dependencies = ["multidict<7"]
 
@@ -163,7 +161,8 @@ venv = ".venv"
 
 [tool.pytest.ini_options]
 # The plugin of this package would import nuke_di before coverage starts; tests/test_pytest_plugin.py loads it
-addopts = "-p no:nuke_di"
+addopts = "-p no:nuke_di -m 'not benchmarks'"
+markers = ["benchmarks: benchmark CLI and comparison checks"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]

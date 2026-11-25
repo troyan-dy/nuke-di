@@ -47,17 +47,16 @@ nuke-di 1.13.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 36ddf
 The suite needs only the standard library and `nuke-di`; the `fastapi` scenario needs `fastapi` and
 `httpx` (in the dev dependencies) and is skipped without them. `make bench` runs the suite on the
 project's Python, `make bench-all` on every supported version into `docs/benchmarks/py<version>.json`,
-which is where the baseline below comes from. CI runs `--size 10 --repeat 1` on every pull request as a
-non-blocking smoke test, so the suite keeps working; there is no regression gate, a GitHub runner is too
-noisy for one.
+which is where the baseline below comes from. On every pull request and push to `master`, CI runs both
+suites with `--size 10 --repeat 1` and checks their reports. Run those checks locally with
+`make test-benchmarks`.
 
 `benchmarks/compare.py` takes the same flags, plus `--summary`, and runs `nuke-di` against other libraries, see
-[Comparison with other libraries](#comparison-with-other-libraries); its scenarios are `cold`, `warm`
-and `request`, and the libraries are the `compare` dependency group, which `uv sync` installs with the
-dev dependencies:
+[Comparison with other libraries](#comparison-with-other-libraries). Its scenarios are `cold`, `warm`,
+`request` and `connect`. Add the `compare` dependency group to install the other libraries:
 
 ```console
-$ uv run python benchmarks/compare.py [--size N]... [--repeat K] [--only SCENARIO]... [--json PATH] [--summary]
+$ uv run --group compare python benchmarks/compare.py [--size N]... [--repeat K] [--only SCENARIO]... [--json PATH] [--summary]
 ```
 
 ## What is measured
@@ -270,7 +269,7 @@ the depth.
 The picture is `benchmarks/product_page.py` over the JSON of the run, `docs/benchmarks/connect-py3.11.json`:
 
 ```console
-$ uv run python benchmarks/compare.py --only connect --summary
+$ uv run --group compare python benchmarks/compare.py --only connect --summary
 nuke-di 1.14.3 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 17c8815 · N = 10, 100, 1000 · 20 repeats
 nuke-di 1.14.3 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 

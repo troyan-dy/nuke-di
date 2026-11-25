@@ -131,7 +131,7 @@ dependency-injector starts as fast once every client is a `Resource` written by 
 and `EventsProducer`, which take 300 ms each to stop, are in different layers. injector has no async lifecycle.
 
 ```console
-$ uv run python benchmarks/compare.py --only connect --summary
+$ uv run --group compare python benchmarks/compare.py --only connect --summary
 nuke-di 1.14.3 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 17c8815 · N = 10, 100, 1000 · 20 repeats
 nuke-di 1.14.3 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 
@@ -152,7 +152,7 @@ injector, each registering the same classes its own way: a cold container with t
 classes new to the process, the root again, and one FastAPI request through each library's integration:
 
 ```console
-$ uv run python benchmarks/compare.py --size 100 --summary
+$ uv run --group compare python benchmarks/compare.py --size 100 --summary
 nuke-di 1.11.1 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 6c2ae10 · N = 100 · 20 repeats
 nuke-di 1.11.1 · dishka 1.10.1 · wireup 2.12.1 · dependency-injector 4.49.1 · injector 0.24.0
 

@@ -1,7 +1,7 @@
 """
 The picture of the product page in the README and docs/benchmarks.md, from the JSON of `compare.py --only connect`.
 
-    uv run python benchmarks/product_page.py [JSON] [SVG]
+    uv run --group compare python benchmarks/product_page.py [JSON] [SVG]
 
 The tree of benchmarks/compare_trees.py with the connect() time of every client, and the startup and the shutdown
 of every library on one scale, nuke-di in color and the others in gray. Light and dark, as the other pictures of

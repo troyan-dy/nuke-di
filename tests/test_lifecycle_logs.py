@@ -7,9 +7,6 @@ import pytest
 from nuke_di import Client, ConnectError, ConnectTimeoutError, Dependencies, DependenciesSettings
 from tests.sequences import single
 
-SLOW_CONNECT = 0.05
-SLOW_DISCONNECT = 0.02
-
 
 class Postgres(Client):
     async def connect(self) -> None:
@@ -71,7 +68,7 @@ async def test_zero_timeout_expires_before_the_client_runs(caplog: pytest.LogCap
 
 
 async def test_startup_summary(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.INFO, logger="nuke_di")
+    caplog.set_level(logging.DEBUG, logger="nuke_di")
     dep = Dependencies()
     dep.resolve(Payments)
     dep.resolve(Redis)
@@ -81,9 +78,13 @@ async def test_startup_summary(caplog: pytest.LogCaptureFixture) -> None:
 
     summaries = (record for record in caplog.records if record.getMessage().startswith("Connected 3 clients"))
     summary = single(summaries)
+    postgres = single(
+        record for record in caplog.records if record.getMessage().startswith("Connected client Postgres ")
+    )
+    duration = summary.duration  # type: ignore[attr-defined]
     assert summary.levelno == logging.INFO
-    assert summary.getMessage().startswith("Connected 3 clients in 0.")
-    assert summary.duration >= SLOW_CONNECT  # type: ignore[attr-defined]
+    assert summary.getMessage() == f"Connected 3 clients in {duration:.2f}s"
+    assert 0 < postgres.duration <= duration  # type: ignore[attr-defined]
     assert summary.name == "nuke_di"
 
 

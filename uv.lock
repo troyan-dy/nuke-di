@@ -2341,9 +2341,8 @@ wheels = [
 
 [[package]]
 name = "nuke-di"
-version = "3.0.1"
+version = "3.0.2"
 source = { editable = "." }
-default-groups = ["compare", "dev"]
 
 [package.optional-dependencies]
 aiogram = [
