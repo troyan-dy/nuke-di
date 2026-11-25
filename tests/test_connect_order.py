@@ -6,7 +6,7 @@ from collections.abc import Iterator
 import pytest
 
 from nuke_di import Client, ConnectError, Dependencies, DependenciesSettings
-from tests.sequences import repeated, single
+from tests.sequences import single
 from tests.test_resolve import chain
 
 # The bound on a disconnect() the deadline cuts short: well under the timeouts that would run in turn without it
@@ -170,45 +170,6 @@ async def test_failure_cancels_the_clients_still_connecting() -> None:
     assert not probe.events
 
 
-async def test_concurrency_limit() -> None:
-    dep = Dependencies(settings=DependenciesSettings(connect_concurrency=1))
-    dep.resolve(Postgres)
-    dep.resolve(Redis)
-
-    async with dep:
-        assert probe.peak == 1
-        probe.peak = 0
-
-    assert probe.peak == 1
-
-
-def test_concurrency_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CONNECT_CONCURRENCY", "3")
-
-    assert DependenciesSettings().connect_concurrency == 3
-
-
-def test_concurrency_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("CONNECT_CONCURRENCY", raising=False)
-
-    assert DependenciesSettings().connect_concurrency == 0
-
-
-def test_negative_concurrency() -> None:
-    with pytest.raises(ValueError, match="connect_concurrency"):
-        DependenciesSettings(connect_concurrency=-1)
-
-
-async def test_concurrency_limit_is_not_held_while_waiting_for_dependencies() -> None:
-    # A client waiting for its dependencies with the only slot would never let them connect
-    dep = Dependencies(settings=DependenciesSettings(connect_concurrency=1))
-    dep.resolve(Checkout)
-
-    async with asyncio.timeout(1):
-        async with dep:
-            assert probe.before("connect:Postgres", "connect:Payments")
-
-
 class Signals:
     """
     Couples clients of unrelated branches, so a barrier between them deadlocks instead of passing by luck.
@@ -279,9 +240,14 @@ async def test_client_disconnects_without_waiting_for_an_unrelated_slow_one() ->
 class SlowConsumer(Client):
     def __init__(self, kafka: Kafka) -> None:
         self.kafka = kafka
+        self.cancelled = False
 
     async def connect(self) -> None:
-        await asyncio.sleep(10)
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
 
 
 class FailsLater(Client):
@@ -292,20 +258,17 @@ class FailsLater(Client):
 
 async def test_failure_cancels_a_client_connecting_in_another_branch() -> None:
     dep = Dependencies()
-    dep.resolve(SlowConsumer)
+    consumer = dep.resolve(SlowConsumer)
     dep.resolve(FailsLater)
 
     with pytest.raises(ConnectError, match="FailsLater"):
         await dep.connect()
 
-    timings = {timing.name: timing for timing in dep.timings}
-    assert timings["Kafka"].connect_outcome == "ok"
-    assert timings["Kafka"].disconnect_outcome == "ok"
-    assert timings["SlowConsumer"].connect_outcome == "cancelled"
-    assert timings["SlowConsumer"].disconnect_outcome is None
+    assert consumer.cancelled
+    assert signals.kafka_disconnected.is_set()
 
 
-class Blocked(Client):
+class Blocked(Tracked):
     def __init__(self, broken: Broken) -> None:
         self.broken = broken
 
@@ -317,9 +280,7 @@ async def test_consumer_of_a_failed_client_never_starts() -> None:
     with pytest.raises(ConnectError, match="Broken"):
         await dep.connect()
 
-    timing = single(timing for timing in dep.timings if timing.name == "Blocked")
-    assert timing.connect is None
-    assert timing.connect_outcome is None
+    assert "connect:Blocked:start" not in probe.events
 
 
 class FailsToDisconnect(Tracked):
@@ -341,14 +302,26 @@ async def test_failed_disconnect_still_releases_its_dependencies() -> None:
     assert probe.before("disconnect:FailsToDisconnect", "disconnect:Postgres")
 
 
-async def test_long_chain_connects_and_disconnects() -> None:
+async def test_long_chain_connects_and_disconnects(monkeypatch: pytest.MonkeyPatch) -> None:
+    connected: list[Client] = []
+    disconnected: list[Client] = []
+
+    async def connect(client: Client) -> None:
+        connected.append(client)
+
+    async def disconnect(client: Client) -> None:
+        disconnected.append(client)
+
+    monkeypatch.setattr(Client, "connect", connect)
+    monkeypatch.setattr(Client, "disconnect", disconnect)
+    classes = chain(2000)
     dep = Dependencies()
-    dep.resolve(chain(2000)[-1])
+    dep.resolve(classes[-1])
 
     async with dep:
-        assert [timing.connect_outcome for timing in dep.timings] == repeated(["ok"], 2000)
+        assert [type(client) for client in connected] == classes
 
-    assert [timing.disconnect_outcome for timing in dep.timings] == repeated(["ok"], 2000)
+    assert disconnected == list(reversed(connected))
 
 
 async def test_progress_in_the_client_records(caplog: pytest.LogCaptureFixture) -> None:
@@ -405,9 +378,6 @@ async def test_client_cancelling_its_own_connect_fails_the_connect() -> None:
             await dep.connect()
 
     assert not probe.events
-    timing = single(timing for timing in dep.timings if timing.name == "CancelsItself")
-    # The culprit, told apart from the clients cancelled because of it
-    assert timing.connect_outcome == "failed"
 
 
 class HangsOnDisconnect(Tracked):
@@ -428,8 +398,6 @@ async def test_timed_out_disconnect_still_releases_its_dependencies() -> None:
         await dep.disconnect()
 
     assert probe.before("disconnect:HangsOnDisconnect", "disconnect:Postgres")
-    timing = single(timing for timing in dep.timings if timing.name == "HangsOnDisconnect")
-    assert timing.disconnect_outcome == "timed_out"
 
 
 class HangingBottom(Tracked):
@@ -463,16 +431,11 @@ async def test_deadline_bounds_a_chain_of_hung_disconnects(caplog: pytest.LogCap
 
     loop = asyncio.get_running_loop()
     started = loop.time()
-    with caplog.at_level(logging.ERROR, logger="nuke_di.core"):
+    with caplog.at_level(logging.ERROR, logger="nuke_di"):
         await dep.disconnect()
 
     # Not 0.6: the timeout of each of the three clients in turn
     assert loop.time() - started < WITHIN_DEADLINE
-    assert {timing.name: timing.disconnect_outcome for timing in dep.timings} == {
-        "HangingTop": "timed_out",
-        "HangingMiddle": "timed_out",
-        "HangingBottom": None,
-    }
     assert "disconnect:HangingBottom:start" not in probe.events
     errors = [
         "HangingTop did not disconnect within 0.2s (DISCONNECT_TIMEOUT_SECONDS)",
@@ -488,12 +451,10 @@ async def test_zero_deadline_skips_every_client(caplog: pytest.LogCaptureFixture
     dep.resolve(Checkout)
     await dep.connect()
 
-    with caplog.at_level(logging.ERROR, logger="nuke_di.core"):
+    with caplog.at_level(logging.ERROR, logger="nuke_di"):
         await dep.disconnect()
 
     assert not any(event.startswith("disconnect:") for event in probe.events)
-    assert {timing.disconnect_outcome for timing in dep.timings} == {None}
-    assert {timing.disconnect for timing in dep.timings} == {None}
     record = single(record for record in caplog.records if "Skipped" in record.getMessage())
     assert (record.levelno, record.getMessage()) == (
         logging.ERROR,
@@ -512,31 +473,6 @@ class HangsAlone(Tracked):
         await asyncio.sleep(10)
 
 
-class AlsoHangsAlone(HangsAlone):
-    """A second client that hangs on disconnect, independent of the first."""
-
-
-async def test_client_waiting_for_the_concurrency_slot_at_the_deadline_is_skipped(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    dep = Dependencies(
-        settings=DependenciesSettings(disconnect_timeout=10, disconnect_deadline=0.05, connect_concurrency=1)
-    )
-    dep.resolve(HangsAlone)
-    dep.resolve(AlsoHangsAlone)
-    await dep.connect()
-
-    with caplog.at_level(logging.ERROR, logger="nuke_di.core"):
-        async with asyncio.timeout(1):
-            await dep.disconnect()
-
-    outcomes = sorted(str(timing.disconnect_outcome) for timing in dep.timings)
-    assert outcomes == ["None", "timed_out"]
-    skipped = single(timing.name for timing in dep.timings if timing.disconnect_outcome is None)
-    assert f"Skipped disconnecting 1 client after DISCONNECT_DEADLINE_SECONDS (0.05s): {skipped}" in caplog.text
-    assert f"disconnect:{skipped}:start" not in probe.events
-
-
 async def test_deadline_bounds_the_rollback_of_a_failed_connect() -> None:
     dep = Dependencies(settings=DependenciesSettings(disconnect_timeout=10, disconnect_deadline=0.05))
     dep.resolve(HangsAlone)
@@ -548,8 +484,7 @@ async def test_deadline_bounds_the_rollback_of_a_failed_connect() -> None:
         await dep.connect()
 
     assert loop.time() - started < WITHIN_DEADLINE
-    timings = {timing.name: timing for timing in dep.timings}
-    assert timings["HangsAlone"].disconnect_outcome == "timed_out"
+    assert "disconnect:HangsAlone:start" in probe.events
 
 
 async def test_deadline_shorter_than_the_timeout_names_the_deadline(caplog: pytest.LogCaptureFixture) -> None:
@@ -557,12 +492,10 @@ async def test_deadline_shorter_than_the_timeout_names_the_deadline(caplog: pyte
     dep.resolve(HangsOnDisconnect)
     await dep.connect()
 
-    with caplog.at_level(logging.ERROR, logger="nuke_di.core"):
+    with caplog.at_level(logging.ERROR, logger="nuke_di"):
         async with asyncio.timeout(1):
             await dep.disconnect()
 
-    timing = single(timing for timing in dep.timings if timing.name == "HangsOnDisconnect")
-    assert timing.disconnect_outcome == "timed_out"
     assert "HangsOnDisconnect did not disconnect before DISCONNECT_DEADLINE_SECONDS ran out (0.05s)" in caplog.text
     assert "DISCONNECT_TIMEOUT_SECONDS" not in caplog.text
 
@@ -575,7 +508,6 @@ async def test_deadline_not_reached_changes_nothing(caplog: pytest.LogCaptureFix
     with caplog.at_level(logging.DEBUG, logger="nuke_di"):
         await dep.disconnect()
 
-    assert {timing.disconnect_outcome for timing in dep.timings} == {"ok"}
     assert probe.before("disconnect:Checkout", "disconnect:Payments")
     assert probe.before("disconnect:Payments", "disconnect:Postgres")
     assert "DISCONNECT_DEADLINE_SECONDS" not in caplog.text
@@ -586,11 +518,10 @@ async def test_infinite_deadline_leaves_the_timeout_alone(caplog: pytest.LogCapt
     dep.resolve(HangsOnDisconnect)
     await dep.connect()
 
-    with caplog.at_level(logging.ERROR, logger="nuke_di.core"):
+    with caplog.at_level(logging.ERROR, logger="nuke_di"):
         async with asyncio.timeout(1):
             await dep.disconnect()
 
-    assert {timing.disconnect_outcome for timing in dep.timings} == {"timed_out", "ok"}
     assert "HangsOnDisconnect did not disconnect within 0.05s (DISCONNECT_TIMEOUT_SECONDS)" in caplog.text
     assert "DISCONNECT_DEADLINE_SECONDS" not in caplog.text
 
@@ -600,12 +531,11 @@ async def test_deadline_longer_than_the_chain_of_timeouts_cuts_nothing(caplog: p
     dep.resolve(HangingTop)
     await dep.connect()
 
-    with caplog.at_level(logging.ERROR, logger="nuke_di.core"):
+    with caplog.at_level(logging.ERROR, logger="nuke_di"):
         async with asyncio.timeout(1):
             await dep.disconnect()
 
     # Each client timed out on its own, in turn
-    assert {timing.disconnect_outcome for timing in dep.timings} == {"timed_out"}
     assert probe.before("disconnect:HangingTop", "disconnect:HangingMiddle")
     assert probe.before("disconnect:HangingMiddle", "disconnect:HangingBottom")
     assert "DISCONNECT_DEADLINE_SECONDS" not in caplog.text
@@ -617,17 +547,15 @@ async def test_cancellation_before_the_deadline_still_propagates(caplog: pytest.
     dep.resolve(HangsOnDisconnect)
     await dep.connect()
 
-    with caplog.at_level(logging.ERROR, logger="nuke_di.core"):
+    with caplog.at_level(logging.ERROR, logger="nuke_di"):
         task = asyncio.create_task(dep.disconnect())
         await asyncio.sleep(0.01)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
 
-    timings = {timing.name: timing for timing in dep.timings}
-    assert timings["HangsOnDisconnect"].disconnect_outcome == "cancelled"
-    # Postgres, waiting for its consumer, is neither disconnected nor reported as skipped
-    assert timings["Postgres"].disconnect_outcome is None
+    assert "disconnect:HangsOnDisconnect:start" in probe.events
+    assert "disconnect:Postgres:start" not in probe.events
     assert "DISCONNECT_DEADLINE_SECONDS" not in caplog.text
     assert dep.connected is False
 
@@ -650,17 +578,13 @@ async def test_cancellation_after_the_deadline_still_reports_the_skipped_clients
     dep.resolve(HangingMiddle)
     await dep.connect()
 
-    with caplog.at_level(logging.ERROR, logger="nuke_di.core"):
+    with caplog.at_level(logging.ERROR, logger="nuke_di"):
         task = asyncio.create_task(dep.disconnect())
         await asyncio.sleep(0.2)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
 
-    timings = {timing.name: timing for timing in dep.timings}
-    assert timings["HangingMiddle"].disconnect_outcome == "timed_out"
-    assert timings["HangingBottom"].disconnect_outcome is None
-    assert timings["OutlivesItsTimeout"].disconnect_outcome == "cancelled"
     assert "Skipped disconnecting 1 client after DISCONNECT_DEADLINE_SECONDS (0.05s): HangingBottom" in caplog.text
     assert dep.connected is False
 
@@ -734,9 +658,5 @@ async def test_cancelled_connect_cancels_the_clients_waiting_for_dependencies() 
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    timings = {timing.name: timing for timing in dep.timings}
-    assert timings["Slow"].connect_outcome == "cancelled"
-    assert timings["Waits"].connect_outcome is None
-    assert timings["Postgres"].disconnect_outcome == "ok"
     assert dep.connected is False
     assert "connect:Waits:start" not in probe.events

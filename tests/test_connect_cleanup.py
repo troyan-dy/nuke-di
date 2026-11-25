@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from nuke_di import Client, ConnectError, Dependencies
+from nuke_di import Client, ConnectError, ConnectTimeoutError, Dependencies, InitializeDependencyError
 from nuke_di._container.connect import Connect
 from tests.sequences import single
 
@@ -142,7 +142,9 @@ async def test_failure_resets_container() -> None:
     assert not dep.clients
 
 
-@pytest.mark.parametrize("error_type", [ConnectError, SystemExit, KeyboardInterrupt])
+@pytest.mark.parametrize(
+    "error_type", [ConnectError, ConnectTimeoutError, InitializeDependencyError, SystemExit, KeyboardInterrupt]
+)
 @pytest.mark.parametrize("with_competing_failure", [False, True])
 def test_base_exception_rolls_back_connect(
     error_type: type[BaseException],
@@ -176,11 +178,6 @@ def test_base_exception_rolls_back_connect(
 
     assert recorder.disconnected == ["Postgres"]
     assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
-    outcomes = {timing.name: timing.connect_outcome for timing in dep.timings}
-    expected = {"Postgres": "ok", "Broken": "failed", "Hanging": "cancelled", "Top": None}
-    if with_competing_failure:
-        expected["CompetingFailure"] = "failed"
-    assert outcomes == expected
     assert f"Broken.connect() raised {error_type.__name__}: stopped" in caplog.text
 
 
@@ -199,8 +196,6 @@ async def test_base_exception_group_rolls_back_connect(monkeypatch: pytest.Monke
     assert raised.value.exceptions == (error,)
     assert recorder.disconnected == ["Postgres"]
     assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
-    timing = single(other for other in dep.timings if other.name == "Broken")
-    assert timing.connect_outcome == "failed"
 
 
 async def _check_cancellation(expected: bool) -> None:
@@ -312,7 +307,7 @@ async def test_pending_cancellation_prevents_startup() -> None:
 
     await asyncio.create_task(connect())
 
-    assert all(timing.connect is None for timing in dep.timings)
+    assert recorder.disconnected == []
     assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
 
 
@@ -436,5 +431,3 @@ async def test_client_cancelling_itself_does_not_stop_disconnect() -> None:
     assert dep.connected is False
     assert not dep.connect_clients
     assert not dep.clients
-    timing = single(other for other in dep.timings if other.name == "SelfCancelling")
-    assert timing.disconnect_outcome == "cancelled"

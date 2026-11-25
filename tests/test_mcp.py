@@ -16,9 +16,10 @@ from mcp.types import InputRequiredResult
 from pydantic import BaseModel, ConfigDict
 from pydantic.json_schema import GenerateJsonSchema
 
-from nuke_di import DI, Client, Dependencies
-from nuke_di.integration.testing import Send, check
+from nuke_di import DI, Client, ConnectError, Dependencies
 from nuke_di.mcp import _MCP, setup
+from tests.integration_contract.check import check
+from tests.integration_contract.outcomes import Send
 from tests.sequences import single
 
 events: list[str] = []
@@ -394,7 +395,7 @@ async def test_failed_connect_fails_the_startup() -> None:
     server = make_server(container)
     server.tool()(broken)
 
-    with pytest.raises(RuntimeError, match=r"nuke-di clients failed to start: Broken\.connect\(\) raised OSError"):
+    with pytest.raises(ConnectError, match=r"Broken\.connect\(\) raised OSError"):
         async with MCPClient(server):
             ...
 

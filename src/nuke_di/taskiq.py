@@ -11,9 +11,9 @@ from typing import Annotated, Any, get_args, get_origin, get_type_hints
 
 from taskiq import AsyncBroker, TaskiqDepends, TaskiqEvents, TaskiqState
 
+from nuke_di._integration import Binding, DependsFramework, bind, client_of, running, unique
+from nuke_di._integration.hints import _first_marker, _hint_class
 from nuke_di.core import DI, Dependencies
-from nuke_di.integration import Binding, DependsFramework, bind, client_of, running, unique
-from nuke_di.integration.hints import _first_marker, _hint_class
 
 __all__ = ("setup",)
 

@@ -1,23 +1,17 @@
 """
-How the clients of one connect() or disconnect() take their turns: in dependency order, a few at a time, each step
-bounded by a timeout and measured.
+How the clients of one connect() or disconnect() take their turns: in dependency order, each step bounded by a timeout.
 """
 
 import asyncio
-import contextlib
-import time
-from collections.abc import Callable, Coroutine, Iterator, Mapping
+from collections.abc import Callable, Coroutine, Mapping
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Final, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Final, TypeAlias
 
-from nuke_di.options import DependenciesSettings
-from nuke_di.timings import ClientTiming, Outcome
 from nuke_di.types import Client
 
 if TYPE_CHECKING:
     from nuke_di.core import Dependencies
 
-Limiter: TypeAlias = asyncio.Semaphore | contextlib.nullcontext[None]
 # The step of one client, run once the clients it waits for are done
 _Step: TypeAlias = Callable[[Client], Coroutine[Any, Any, None]]
 # The class asked for and the client passed, for one `__init__` argument of a client
@@ -76,12 +70,6 @@ def dependencies_among(container: "Dependencies", clients: list[Client]) -> dict
     }
 
 
-def make_limiter(settings: DependenciesSettings) -> Limiter:
-    if settings.connect_concurrency == 0:
-        return contextlib.nullcontext()
-    return asyncio.Semaphore(settings.connect_concurrency)
-
-
 async def within(seconds: float, coro: Coroutine[Any, Any, None]) -> None:
     """
     Await a client's coroutine with a timeout, in the task of the caller.
@@ -104,40 +92,3 @@ def cancelled_from_outside() -> bool:
     """
     task = asyncio.current_task()
     return task is None or task.cancelling() > 0
-
-
-@contextlib.contextmanager
-def measure(
-    timing: ClientTiming,
-    phase: Literal["connect", "disconnect"],
-    *,
-    done: list[Any] | None = None,
-    client: object = None,
-) -> Iterator[None]:
-    """
-    Record how long the block took and how it ended as the `phase` of `timing`, then append `client` to `done`.
-    """
-    started = time.perf_counter()
-    outcome: Outcome = "failed"
-    try:
-        yield
-    except TimeoutError:
-        outcome = "timed_out"
-        raise
-    except asyncio.CancelledError:
-        # Another client failed, or the whole connect or disconnect was cancelled
-        outcome = "cancelled"
-        raise
-    else:
-        outcome = "ok"
-    finally:
-        # Both fields in one statement: a third one in this finally would take a helper, a call per client
-        timing.__dict__.update(
-            {
-                phase: time.perf_counter() - started,
-                f"{phase}_outcome": outcome,
-            }
-        )
-        # However the block ended, and once its timing is recorded
-        if done is not None:
-            done.append(client)

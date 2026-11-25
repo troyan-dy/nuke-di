@@ -27,7 +27,9 @@ CLIENTS = """
 from collections.abc import Callable
 from typing import Any, Generic, Literal, Protocol, TypeVar
 
-from nuke_di import Client, client_dataclass
+from dataclasses import dataclass
+
+from nuke_di import Client
 
 T = TypeVar("T")
 
@@ -169,12 +171,12 @@ class Twice(Client):
         self.first, self.second, self.fine = first, second, fine
 
 
-@client_dataclass
-class Plain:
+@dataclass
+class Plain(Client):
     db: Database
 
 
-@client_dataclass(frozen=True)
+@dataclass(frozen=True)
 class Dataclass(Client):
     db: Database
     plain: Plain
@@ -469,11 +471,14 @@ def test_inject_job_and_worker_start_the_path_at_the_function(tmp_path: Path) ->
     write(
         tmp_path,
         app="""
-        from nuke_di import DI, Client, Dependencies, Shutdown, job, worker
+        from nuke_di import DI, Client, Dependencies, entrypoint
 
 
         class Broken(Client):
             def __init__(self, count: int) -> None: ...
+
+
+        class Shutdown(Client): ...
 
 
         class Container(Dependencies):
@@ -496,32 +501,39 @@ def test_inject_job_and_worker_start_the_path_at_the_function(tmp_path: Path) ->
         DI.inject(untyped_broken)
 
 
-        @job
+        @entrypoint
         async def once(broken: Broken) -> None: ...
 
 
-        @worker(hooks=[])
+        @entrypoint
         async def forever(broken: Broken, shutdown: Shutdown) -> None: ...
 
 
-        @job(hooks=[])
+        @entrypoint
         async def fine(shutdown: Shutdown, day: int = 1) -> None: ...
+
+
+        from typing import Any
+
+
+        def dynamic_entrypoint(func: Any) -> None:
+            entrypoint(func)
         """,
     )
 
     path = "(resolving {} -> Broken)"
     message = 'Argument "count" of "Broken.__init__" is int, which is not a client '
     assert mypy(tmp_path, "app.py") == [
-        ("app.py", 21, message + path.format("handler")),
-        ("app.py", 22, message + path.format("handler")),
-        ("app.py", 23, 'Argument "user_id" of "untyped" has no type hint'),
+        ("app.py", 24, message + path.format("handler")),
+        ("app.py", 25, message + path.format("handler")),
+        ("app.py", 26, 'Argument "user_id" of "untyped" has no type hint'),
         # A bound method, as the container names it
-        ("app.py", 24, message + path.format("handle")),
+        ("app.py", 27, message + path.format("handle")),
         # The type hints first, as the container checks them before it resolves a client
-        ("app.py", 25, 'Argument "user_id" of "untyped_broken" has no type hint'),
-        ("app.py", 25, message + path.format("untyped_broken")),
-        ("app.py", 28, message + path.format("once")),
-        ("app.py", 32, message + path.format("forever")),
+        ("app.py", 28, 'Argument "user_id" of "untyped_broken" has no type hint'),
+        ("app.py", 28, message + path.format("untyped_broken")),
+        ("app.py", 31, message + path.format("once")),
+        ("app.py", 35, message + path.format("forever")),
     ]
 
 

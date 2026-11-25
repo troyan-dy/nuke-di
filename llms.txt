@@ -7,14 +7,16 @@ type-hinted `__init__` and async `connect()` / `disconnect()`. The type hint is 
 consumers of a client class in a container share one instance. There are no
 provider or factory functions (ADR-0005), no binding of a Protocol to an implementation, qualifiers or multibinding
 (ADR-0008), no per-request or per-message scopes (ADR-0006) and no retries in `connect()` (ADR-0009): the
-recipes in the guide reach the same results with plain clients, `mock()` and `override()`.
+recipes in the guide reach the same results with plain clients, `mock()` and `override()`. Use `@entrypoint`
+for a module that takes no launch arguments. The application or framework owns process options, signals and
+background tasks.
 
 ## Docs
 
 - [README](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/README.md): the pitch, the Quick start, the principles and two examples
-- [Clients](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/clients.md): `Client`, the lifecycle, dataclass clients, connect order, startup timings, the dependency graph, connect and resolution errors
+- [Clients](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/clients.md): `Client`, the lifecycle, dataclass clients, connect order, connect and resolution errors
 - [The container](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/container.md): `Dependencies` and the global `DI`, `resolve()`, `inject()`, `mock()`, `override()`
-- [Workers and jobs](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/workers-and-jobs.md): `@job` and `@worker`, command-line parameters, `Shutdown`, the grace period, background tasks, exit codes, hooks, Kubernetes
+- [Executable modules](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/workers-and-jobs.md): `@entrypoint`, explicit process control and migration from 2.x
 - [FastAPI](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/fastapi.md)
 - [Litestar](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/litestar.md)
 - [FastStream](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/faststream.md)
@@ -22,12 +24,11 @@ recipes in the guide reach the same results with plain clients, `mock()` and `ov
 - [aiogram](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/aiogram.md)
 - [taskiq](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/taskiq.md)
 - [Starlette, Quart and any ASGI app](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/asgi.md)
-- [Servers inside a worker](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/servers-in-workers.md)
-- [Writing an integration](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/integrations.md)
+- [Servers with an explicit lifespan](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/servers-in-workers.md)
 - [Testing](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/testing.md): `mock()`, `override()`, the pytest fixtures, checking the wiring
-- [Configuration](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/configuration.md): timeouts, concurrency and the grace period
+- [Configuration](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/configuration.md): client timeouts and the disconnect deadline
 - [Errors](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/errors.md): every exception and when it is raised
-- [Coding agents](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/agents.md): the Agent Skill, a block for `AGENTS.md`, `llms.txt`, Context7, the graph as JSON
+- [Coding agents](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/agents.md): the Agent Skill, a block for `AGENTS.md`, `llms.txt`, Context7
 - [Development](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/development.md): the checks, coverage and releases
 
 ## Optional

@@ -7,7 +7,7 @@ from types import NoneType, UnionType
 from typing import Any, Final, Union, get_args, get_origin
 
 from nuke_di._container.messages import state_error
-from nuke_di.errors import ConnectError, InvalidSignatureError
+from nuke_di.errors import InvalidSignatureError
 from nuke_di.naming import qualname
 from nuke_di.types import Client, isclient
 
@@ -55,6 +55,6 @@ def not_a_client(client_class: Any) -> InvalidSignatureError:
     return InvalidSignatureError(f"{type_name(client_class)} is not a client: subclass Client")
 
 
-def resolve_refused(client_class: Any) -> ConnectError:
+def resolve_refused(client_class: Any) -> RuntimeError:
     # `type_name`, not `qualname`: `client_class` may be no class at all
     return state_error(f"resolve({type_name(client_class)})")

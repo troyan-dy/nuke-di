@@ -4,20 +4,18 @@ One disconnect() of a container, or the rollback of a connect() that failed: eve
 
 import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING
 
+from nuke_di._container.messages import names
 from nuke_di._container.order import (
     cancelled_from_outside,
     dependencies_among,
     in_dependency_order,
-    make_limiter,
-    measure,
     within,
 )
-from nuke_di.errors import ConnectError
 from nuke_di.logs import CONTAINER_LOGGER, client_fields, fields
 from nuke_di.naming import count
-from nuke_di.timings import ClientTiming
 from nuke_di.types import Client
 
 if TYPE_CHECKING:
@@ -28,7 +26,7 @@ logger = logging.getLogger(CONTAINER_LOGGER)
 
 async def disconnect_all(container: "Dependencies") -> None:
     if not container.connected:
-        raise ConnectError("disconnect(): already disconnected")
+        raise RuntimeError("disconnect(): already disconnected")
 
     await Disconnect(container, container.connect_clients).run()
 
@@ -42,15 +40,14 @@ class Disconnect:
         self._container = container
         self._to_disconnect = to_disconnect
         settings = container.settings
-        self._limiter = make_limiter(settings)
         self._timeout = settings.disconnect_timeout
         # Clients whose disconnect() ended, for the progress in the records
-        self._disconnected: list[Client] = []
+        self._disconnected = 0
         # Clients whose turn came after the deadline, in disconnect order
-        self._skipped: list[Client] = []
+        self._skipped: list[str] = []
         self._total = 0
         self._deadline: float = 0
-        self._timings: dict[int, ClientTiming] = {}
+        self._names: dict[type, str] = {}
 
     async def run(self) -> None:
         container = self._container
@@ -59,8 +56,8 @@ class Disconnect:
             clients = list(self._to_disconnect)
             # Read with the flag: once it is down, another thread may flush() the dependencies away
             dependencies = dependencies_among(container, clients)
+            self._names = names(container)
         self._total = len(clients)
-        self._timings = container._timings
         # One budget for the whole disconnect, whatever the depth of the tree
         self._deadline = asyncio.get_running_loop().time() + container.settings.disconnect_deadline
 
@@ -74,86 +71,81 @@ class Disconnect:
         self._end()
 
     async def client(self, client: Client) -> None:
-        timing = self._timings[id(client)]
+        name = self._names[type(client)]
+        remaining = self._deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            self._skipped.append(name)
+            return
+
         debug = logger.isEnabledFor(logging.DEBUG)
-        timeout = self._timeout
-        # Whether the deadline of the whole disconnect, not the client's own timeout, is the bound that expires
-        cut_off = False
+        if debug:
+            logger.debug(
+                "Disconnecting client %s (%d/%d disconnected)",
+                name,
+                self._disconnected,
+                self._total,
+                extra=client_fields(name),
+            )
+        started = time.perf_counter()
         try:
-            async with self._limiter:
-                remaining = self._deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    # Never started: its timing keeps None, and returning releases its dependencies to be skipped too
-                    self._skipped.append(client)
-                    return
-                cut_off = remaining < timeout
-                if debug:
-                    logger.debug(
-                        "Disconnecting client %s (%d/%d disconnected)",
-                        timing.name,
-                        len(self._disconnected),
-                        self._total,
-                        extra=client_fields(timing),
-                    )
-                with measure(timing, "disconnect", done=self._disconnected, client=client):
-                    # The bound that expires first: the deadline when `cut_off`
-                    await within(min(remaining, timeout), client.disconnect())
+            await within(min(remaining, self._timeout), client.disconnect())
         except asyncio.CancelledError:
-            # A CancelledError of the client's own, re-raised from a task it awaited, ends its disconnect() alone: its
-            # dependencies still have to be stopped. A cancellation of disconnect() itself goes on.
+            # A client may raise its own CancelledError. The clients it uses still need to disconnect.
             if cancelled_from_outside():
                 raise
-            self._log_failure(timing, "%s.disconnect() raised CancelledError")
+            logger.exception("%s.disconnect() raised CancelledError", name, extra=client_fields(name))
         except TimeoutError:
-            self._log_timeout(timing, cut_off=cut_off)
+            duration = time.perf_counter() - started
+            self._log_timeout(name, duration, cut_off=remaining < self._timeout)
         except Exception as exc:
-            # The client failed, but the rest still have to be stopped
-            self._log_failure(timing, "%s.disconnect() raised %s: %s", type(exc).__name__, exc)
+            logger.exception(
+                "%s.disconnect() raised %s: %s",
+                name,
+                type(exc).__name__,
+                exc,
+                extra=client_fields(name, time.perf_counter() - started),
+            )
         else:
-            if debug:
-                logger.debug(
-                    "Disconnected client %s in %.3fs (%d/%d disconnected)",
-                    timing.name,
-                    timing.disconnect,
-                    len(self._disconnected),
-                    self._total,
-                    extra=client_fields(timing, timing.disconnect),
-                )
+            self._log_success(name, started)
+        finally:
+            self._disconnected += 1
 
-    def _log_timeout(self, timing: ClientTiming, *, cut_off: bool) -> None:
+    def _log_success(self, name: str, started: float) -> None:
+        if logger.isEnabledFor(logging.DEBUG):
+            duration = time.perf_counter() - started
+            logger.debug(
+                "Disconnected client %s in %.3fs (%d/%d disconnected)",
+                name,
+                duration,
+                self._disconnected + 1,
+                self._total,
+                extra=client_fields(name, duration),
+            )
+
+    def _log_timeout(self, name: str, duration: float, *, cut_off: bool) -> None:
         if cut_off:
-            self._log_failure(
-                timing,
+            logger.exception(
                 "%s did not disconnect before DISCONNECT_DEADLINE_SECONDS ran out (%gs)",
+                name,
                 self._container.settings.disconnect_deadline,
+                extra=client_fields(name, duration),
             )
         else:
-            self._log_failure(
-                timing,
+            logger.exception(
                 "%s did not disconnect within %gs (DISCONNECT_TIMEOUT_SECONDS)",
+                name,
                 self._timeout,
+                extra=client_fields(name, duration),
             )
-
-    def _log_failure(self, timing: ClientTiming, message: str, *args: object) -> None:
-        """
-        Log the exception being handled, with the traceback, as the failure of `timing`'s client to disconnect.
-        """
-        logger.exception(
-            message,
-            timing.name,
-            *args,
-            extra=client_fields(timing, timing.disconnect),
-        )
 
     def _end(self) -> None:
         # A cancellation after the deadline still reports the clients it skipped
         if self._skipped:
-            skipped = [self._timings[id(client)].name for client in self._skipped]
             logger.error(
                 "Skipped disconnecting %s after DISCONNECT_DEADLINE_SECONDS (%gs): %s",
-                count(len(skipped), "client"),
+                count(len(self._skipped), "client"),
                 self._container.settings.disconnect_deadline,
-                ", ".join(skipped),
+                ", ".join(self._skipped),
                 extra=fields(),
             )
         # Cancelled or not, the container keeps no half-disconnected client for the next connect() to reuse

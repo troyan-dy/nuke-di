@@ -20,24 +20,12 @@ _Avoid_: Instantiation, wiring
 A client connects as soon as its own dependencies have and disconnects as soon as its consumers have; only dependencies declared in `__init__` order clients, and every client that is ready connects concurrently with the others.
 _Avoid_: Layer, level, DAG schedule
 
-**Connect concurrency**:
-The most `connect()` or `disconnect()` calls of one container running at once; unlimited by default. A client waiting for its own dependencies does not count against it.
-_Avoid_: Parallelism, workers
-
 **Disconnect deadline**:
 One budget for a container's whole disconnect, and for the rollback of a failed connect, whatever the depth of the tree; each client's `disconnect()` is still bounded by its own timeout. A client still disconnecting when it runs out is timed out, and the clients not started by then are skipped (ADR-0012).
 _Avoid_: Shutdown timeout, shutdown deadline
 
-**Graph**:
-Every client the container has resolved so far, with who depends on whom. A snapshot: a flush empties it, apart from the Replacements of open Override blocks. Resolution of one root builds that root's tree; the container holds the graph, because singletons are shared between trees.
-_Avoid_: Tree (for the whole container), DAG, node, edge
-
-**Client timing**:
-How long one client's `connect()` and `disconnect()` took in the last connect of its container, and how each ended: ok, failed, timed out or cancelled. A phase that never started, such as a disconnect skipped after the disconnect deadline, has no outcome. The container only measures; exporting timings is left to hooks.
-_Avoid_: Stat, span (a metric or a span is what a hook exports from timings)
-
 **Integration**:
-The glue between nuke-di and a framework: the framework's handlers take clients by type hint through its own dependency injection, and the container connects when the app starts and disconnects when it stops. Built on the public `nuke_di.integration` kit, and checked with `nuke_di.integration.testing.check()`.
+The glue between nuke-di and a framework: the framework's handlers take clients by type hint through its own dependency injection, and the container connects when the app starts and disconnects when it stops. The framework owns application startup, shutdown and task supervision.
 _Avoid_: Plugin, adapter, extension (except where a framework names its own hook so, like Litestar's `ClientPlugin`)
 
 **Replacement**:
@@ -48,32 +36,7 @@ _Avoid_: Fake, stub, double (for the concept; `mock()` is only the method name)
 A `with` block of `override()` that registers a Replacement for its duration and leaves the container flushed.
 _Avoid_: Patch
 
-### Running
+### Executable modules
 
 **Entrypoint**:
-An async function that a process runs as its main program, declared as a Job or a Worker.
-_Avoid_: Command, main, executable
-
-**Job**:
-An entrypoint that runs once: it finishes when its function returns. How often it runs is decided by an external scheduler.
-_Avoid_: Cron, task, script
-
-**Parameter**:
-A command-line option of an entrypoint, declared as an annotated argument of its function that is not a client.
-_Avoid_: Argument, CLI arg
-
-**Worker**:
-An entrypoint that runs until the process is asked to stop.
-_Avoid_: Daemon, consumer
-
-**Run**:
-One execution of an entrypoint in a process, from resolving its clients to the exit code.
-_Avoid_: Execution, launch, invocation
-
-**Shutdown**:
-The request for a Run to stop, raised by a termination signal. An entrypoint gets a grace period to finish on its own before it is cancelled.
-_Avoid_: Stop token, termination, kill
-
-**Background task**:
-A coroutine started through the container-owned task supervisor rather than awaited by its caller. It is cancelled and awaited before the clients it uses disconnect.
-_Avoid_: Fire-and-forget, job
+An async function marked with `@entrypoint`. Executing its module runs the function with connected clients. Importing the module leaves the original function available to callers.

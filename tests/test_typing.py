@@ -3,7 +3,6 @@ The public API under `mypy --strict`, as a user's test file sees it: the example
 page have to pass without a `type: ignore`, so they are checked straight from docs/guide/testing.md.
 """
 
-import re
 import subprocess
 import sys
 import textwrap
@@ -16,37 +15,22 @@ from tests.test_docs import document, split
 
 pytest.importorskip("mypy")
 
-# The blocks that the "Testing" blocks build on, by content, at the file each one names in its first line:
-# the Quick start of README.md, which has no name, and the modules of the "Workers and jobs" page
+# The modules used by the Testing guide, from the Quick start and Entrypoints pages.
 QUICK_START = "quick_start.py"
-MODULES: Final = (
-    "class UserService(Client):",  # Quick start: Database, UserService, handler
-    "class Warehouse(Client):",  # app/clients.py: Postgres, Warehouse, Queue
-    "Option(help=",  # app/jobs/sync.py with its Parameters: sync(pg, warehouse, day=..., tables=...)
-    "async def consumer(queue: Queue, shutdown: Shutdown)",  # app/workers/consumer.py
-)
-# Every "Testing" block says in prose what it takes from the Quick start or the jobs; a fragment imports nothing
+MODULES: Final = ("class UserService(Client):", "class Reports(Client):", "from nuke_di import entrypoint")
 QUICK_START_HEADER = """
 from nuke_di import DI, Dependencies
 from quick_start import Database, UserService, handler
-"""
-JOBS_HEADER = """
-import datetime
-from unittest.mock import AsyncMock, call
-
-from nuke_di import Dependencies, Shutdown
-from app.clients import Postgres, Warehouse
-from app.jobs.sync import sync
-from app.workers.consumer import consumer
 """
 
 # What a test touches: the mock API of an autospec Replacement, the type of a Replacement of your own,
 # of a resolved dataclass client and of an injected function
 SNIPPET = """
 from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from typing import Any, assert_type
 
-from nuke_di import Client, Dependencies, client_dataclass
+from nuke_di import Client, Dependencies
 
 
 class Database(Client):
@@ -59,7 +43,7 @@ class FakeDatabase(Database):
         return "alice"
 
 
-@client_dataclass(frozen=True)
+@dataclass(frozen=True)
 class UserService(Client):
     db: Database
 
@@ -153,8 +137,6 @@ def header(block: str) -> str:
         return ""  # a whole test module, with its own imports from the app laid out above
     if "Database" in block:
         return QUICK_START_HEADER
-    if re.search(r"\b(sync|consumer)\b", block):
-        return JOBS_HEADER
     return ""
 
 

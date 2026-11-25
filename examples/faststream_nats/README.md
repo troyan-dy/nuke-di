@@ -2,14 +2,14 @@
 
 A FastStream worker on NATS: `setup(app)` connects the clients before the broker starts, the subscriber
 takes a client next to a pydantic message and a dependency that takes another client, and its return
-value is published to a second subject. A `@job` sends the test orders.
+value is published to a second subject. A separate script sends the test orders.
 
 | File          | What it holds                                                                          |
 |---------------|----------------------------------------------------------------------------------------|
 | `clients.py`  | `Database` of customers and `Ledger` of totals                                         |
 | `messages.py` | The pydantic messages `Order` and `Receipt`                                            |
 | `app.py`      | The broker, the app, `handle_order` (orders in, receipts out) and `print_receipt`      |
-| `publish.py`  | A `@job` that sends `--count` orders through a `NatsBroker` wrapped as a client        |
+| `publish.py`  | A script that sends `--count` orders through a `NatsBroker` wrapped as a client        |
 | `test_app.py` | `TestNatsBroker` + `TestApp` with `Database` replaced, and the job with a mocked `Nats` |
 
 ## Run
@@ -78,17 +78,6 @@ $ uv run python -m faststream_nats.publish --count 1 --customer-id 9
 nats: connected
 published order 1
 nats: disconnected
-$ uv run python -m faststream_nats.publish --help
-usage: python -m faststream_nats.publish [-h] [--count COUNT]
-                                         [--customer-id CUSTOMER_ID]
-
-Send test orders to the faststream_nats.orders subject.
-
-options:
-  -h, --help            show this help message and exit
-  --count COUNT         How many orders to send (default: 3)
-  --customer-id CUSTOMER_ID
-                        The customer-id header (default: 1)
 ```
 
 ## Test
@@ -114,10 +103,10 @@ $ uv run pytest -q faststream_nats
 - The test starts the app with `TestApp` inside `TestNatsBroker`: the test broker alone runs no app
   hooks, so the clients would not connect. The app module holds one broker for every test, so the tests
   that start it run one after another, never two at once.
-- `publish.py` is a `@job` with a NATS connection wrapped as a `Client`: the address is read in `__init__`,
+- `publish.py` wraps a NATS connection as a `Client`: the address is read in `__init__`,
   the broker is made in `connect()`. With `max_reconnect_attempts=1` a NATS that is down fails the job in a
   couple of seconds instead of nats-py retrying until `CONNECT_TIMEOUT_SECONDS`. `--count` and
-  `--customer-id` come from its signature.
+  `--customer-id` are parsed by the script with `argparse`.
 - Nothing here is specific to NATS but the broker class: with `KafkaBroker`, `RabbitBroker` or `RedisBroker`
   of FastStream the subscribers and `setup(app)` stay the same, and the tests swap `TestNatsBroker` for the
   test broker of that class.

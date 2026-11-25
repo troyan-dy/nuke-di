@@ -19,10 +19,10 @@ from aiogram.handlers import MessageHandler
 from aiogram.methods import GetMe, GetUpdates, SendMessage, TelegramMethod
 from aiogram.types import ErrorEvent, Message, Update, User
 
-from nuke_di import DI, BackgroundTasks, Client, Dependencies, Shutdown
+from nuke_di import DI, Client, ConnectError, Dependencies
 from nuke_di.aiogram import setup
 from nuke_di.aiogram.framework import _AIOGRAM
-from nuke_di.integration.testing import check
+from tests.integration_contract.check import check
 from tests.sequences import repeated
 
 if TYPE_CHECKING:
@@ -475,24 +475,6 @@ async def test_failed_shutdown_handler_still_disconnects() -> None:
     assert events == ["database: connected", "database: disconnected"]
 
 
-async def loop(message: Message, shutdown: Shutdown, tasks: BackgroundTasks) -> bool:
-    return shutdown.is_set()
-
-
-async def test_shutdown_is_set_and_dispatcher_restarts() -> None:
-    deps = Dependencies()
-    dp = make_dispatcher(deps)
-    dp.message.register(loop)
-
-    for _ in range(2):
-        async with started(dp):
-            assert await dp.feed_update(BOT, update()) is False
-            shutdown = deps.clients[Shutdown]
-        assert isinstance(shutdown, Shutdown)
-        assert shutdown.is_set()
-        assert not deps.connected
-
-
 async def test_failed_connect_fails_startup_and_forgets_clients() -> None:
     deps = Dependencies()
     dp = make_dispatcher(deps)
@@ -500,7 +482,7 @@ async def test_failed_connect_fails_startup_and_forgets_clients() -> None:
     @dp.message()
     async def broken(message: Message, kafka: Broken) -> None: ...
 
-    with pytest.raises(RuntimeError, match=r"nuke-di clients failed to start: Broken.connect\(\) raised OSError"):
+    with pytest.raises(ConnectError, match=r"Broken.connect\(\) raised OSError"):
         await dp.emit_startup(bot=BOT)
 
     assert not deps.connected

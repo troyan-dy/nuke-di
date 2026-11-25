@@ -20,7 +20,7 @@ Without a token, against the fake Telegram:
 $ cd examples
 $ uv run python -m aiogram_bot.demo
 database: connected
-INFO nuke_di.core: Connected 2 clients in 0.00s (slowest: Database 0.00s, UserService 0.00s)
+INFO nuke_di: Connected 2 clients in 0.00s
 startup: bot 42, 0 users so far
 INFO aiogram.dispatcher: Start polling
 INFO aiogram.dispatcher: Run polling for bot @demo_bot id=42 - 'Demo'

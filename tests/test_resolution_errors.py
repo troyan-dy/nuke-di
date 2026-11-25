@@ -1,10 +1,11 @@
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from typing import Any, Literal, Protocol, cast
 
 import pytest
 
-from nuke_di import CircularDependencyError, Client, Dependencies, InvalidSignatureError, client_dataclass
+from nuke_di import CircularDependencyError, Client, Dependencies, InvalidSignatureError
 
 
 class Chicken(Client):
@@ -119,7 +120,7 @@ class Variadic(Client):
         self.db = db
 
 
-@client_dataclass
+@dataclass
 class DataclassClient(Client):
     db: Database
     retries: int = 3

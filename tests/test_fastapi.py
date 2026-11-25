@@ -1,7 +1,6 @@
 # String annotations on purpose: every endpoint below goes through evaluating them
 from __future__ import annotations
 
-import asyncio
 import copy
 import gc
 import inspect
@@ -9,7 +8,6 @@ import sys
 import weakref
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
-from operator import attrgetter
 from typing import TYPE_CHECKING, Annotated, Any
 
 import pytest
@@ -19,13 +17,13 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
-from nuke_di import DI, BackgroundTasks, Client, ConnectError, Dependencies, Shutdown
+from nuke_di import DI, Client, ConnectError, Dependencies
 from nuke_di.fastapi import ClientRoute, ClientRouter, setup
 from nuke_di.fastapi.bindings import _FASTAPI
-from nuke_di.integration.testing import check
+from tests.integration_contract.check import check
+from tests.sequences import repeated
 
 # How a client connected and disconnected: (name, connect outcome, disconnect outcome)
-_OUTCOMES = attrgetter("name", "connect_outcome", "disconnect_outcome")
 
 if TYPE_CHECKING:
     from decimal import Decimal
@@ -373,49 +371,19 @@ def test_app_lifespan_runs_inside_connected_clients() -> None:
     assert events == ["database: connected", "app: startup", "app: shutdown", "database: disconnected"]
 
 
-def test_app_lifespan_sees_connect_timings() -> None:
-    deps = Dependencies()
-    seen: list[tuple[str, str | None, str | None]] = []
-
-    @asynccontextmanager
-    async def timed(app: FastAPI) -> AsyncIterator[None]:
-        seen.extend(map(_OUTCOMES, deps.timings))
-        yield
-
-    app = make_app(deps, lifespan=timed)
-    app.get("/users/{user_id}")(greet)
-
-    with TestClient(app):
-        ...
-
-    assert ("Database", "ok", None) in seen
-    # The container disconnects after the app's lifespan, the timings stay on it
-    assert {timing.name: timing.disconnect_outcome for timing in deps.timings}["Database"] == "ok"
+async def broken(broken: Broken) -> None: ...
 
 
-async def watch(shutdown: Shutdown, tasks: BackgroundTasks) -> None:
-    async def loop() -> None:
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            events.append(f"loop: cancelled, shutdown set: {shutdown.is_set()}")
-            raise
-
-    tasks.spawn(loop())
-
-
-def test_shutdown_is_set_and_tasks_stop_before_disconnect() -> None:
+def test_app_restarts_with_fresh_clients() -> None:
     app = make_app(Dependencies())
     app.get("/users/{user_id}")(greet)
-    app.post("/watch")(watch)
 
     with TestClient(app) as client:
-        client.post("/watch")
+        assert client.get("/users/1").json() == "Hello, user-1!"
+    with TestClient(app) as client:
+        assert client.get("/users/2").json() == "Hello, user-2!"
 
-    assert events[-2:] == ["loop: cancelled, shutdown set: True", "database: disconnected"]
-
-
-async def broken(broken: Broken) -> None: ...
+    assert events == repeated(["database: connected", "database: disconnected"], 2)
 
 
 def test_failed_connect_fails_startup_and_forgets_clients() -> None:
@@ -423,11 +391,10 @@ def test_failed_connect_fails_startup_and_forgets_clients() -> None:
     app = make_app(deps)
     app.get("/")(broken)
 
-    # A SystemExit would escape the event loop of the server, so the lifespan raises a plain error
-    with pytest.raises(RuntimeError, match="nuke-di clients failed to start") as excinfo, TestClient(app):
+    with pytest.raises(ConnectError, match=r"Broken.connect\(\) raised OSError") as excinfo, TestClient(app):
         ...
 
-    assert isinstance(excinfo.value.__cause__, ConnectError)
+    assert isinstance(excinfo.value.__cause__, OSError)
     assert not deps.connected
     assert deps.clients == {}
 
@@ -445,21 +412,6 @@ def test_failed_resolution_fails_startup_and_flushes() -> None:
         ...
 
     assert deps.clients == {}
-
-
-def test_failed_resolution_leaves_no_timings_of_an_earlier_run() -> None:
-    deps = Dependencies()
-    app = make_app(deps)
-    app.get("/users/{user_id}")(greet)
-    with TestClient(app):
-        ...
-    assert deps.timings != []
-
-    app.get("/")(unbuildable)
-    with pytest.raises(TypeError), TestClient(app):
-        ...
-
-    assert deps.timings == []
 
 
 async def test_container_connected_before_startup_is_left_alone() -> None:

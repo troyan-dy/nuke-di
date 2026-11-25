@@ -15,10 +15,10 @@ from litestar.response.base import ASGIResponse
 from litestar.testing import TestClient
 from litestar.types import Receive, Scope, Send
 
-from nuke_di import DI, BackgroundTasks, Client, Dependencies, Shutdown
-from nuke_di.integration.testing import check
+from nuke_di import DI, Client, ConnectError, Dependencies
 from nuke_di.litestar import ClientPlugin
 from nuke_di.litestar.plugin import _LITESTAR
+from tests.integration_contract.check import check
 
 if TYPE_CHECKING:
     from decimal import Decimal
@@ -315,24 +315,6 @@ def test_app_lifespan_and_hooks_run_inside_connected_clients() -> None:
     ]
 
 
-@get("/loop")
-async def loop(shutdown: Shutdown, tasks: BackgroundTasks) -> bool:
-    return shutdown.is_set()
-
-
-def test_shutdown_is_set_and_app_restarts() -> None:
-    deps = Dependencies()
-    app = make_app(deps, [loop])
-
-    for _ in range(2):
-        with TestClient(app) as client:
-            assert client.get("/loop").json() is False
-            shutdown = deps.clients[Shutdown]
-        assert isinstance(shutdown, Shutdown)
-        assert shutdown.is_set()
-        assert not deps.connected
-
-
 @get("/broken")
 async def broken(kafka: Broken) -> None: ...
 
@@ -346,7 +328,7 @@ def test_failed_connect_fails_startup_and_forgets_clients() -> None:
         with TestClient(app):
             ...
 
-    assert excinfo.group_contains(RuntimeError, match=r"nuke-di clients failed to start: Broken.connect\(\) raised")
+    assert excinfo.group_contains(ConnectError, match=r"Broken.connect\(\) raised")
 
     assert not deps.connected
     assert deps.connect_clients == []

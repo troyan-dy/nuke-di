@@ -128,9 +128,8 @@ The rules:
   gets the clients that app started.
 - **Instances.** As with `inject()`, arguments of the same client class share the container's instance.
 - **Lifespan.** The app's own `lifespan=` runs inside: its startup code sees connected clients, and
-  its shutdown code runs before they disconnect. On shutdown `Shutdown` is set and
-  `BackgroundTasks` are stopped, if the app uses them, before the clients disconnect, as in a
-  worker. FastAPI's own `BackgroundTasks` is a different class and is not a client.
+  its shutdown code runs before they disconnect. If the application starts tasks that use clients,
+  finish or cancel and await those tasks in its lifespan before returning.
 - **The function stays a function.** Its signature now shows `Annotated[UserService, Depends(...)]`
   to FastAPI, but calling it directly with a client, e.g. in a unit test, works as before.
 
@@ -204,9 +203,8 @@ $ pytest -q tests/test_chat.py
 1 passed in 0.16s
 ```
 
-**A client that fails to connect** fails the startup. The lifespan raises a plain `RuntimeError`
-from the `ConnectError`, since a `SystemExit` would escape the server's event loop, and the server
-reports it and exits:
+**A client that fails to connect** fails the startup. The lifespan raises `ConnectError`.
+The server reports the startup failure:
 
 ```python
 # app/broken.py
@@ -240,12 +238,6 @@ OSError: broker kafka-1:9092 is unreachable
 ERROR:    Traceback (most recent call last):
   ...
 nuke_di.errors.ConnectError: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  ...
-RuntimeError: nuke-di clients failed to start: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 
 ERROR:    Application startup failed. Exiting.
 $ echo $?
@@ -378,7 +370,7 @@ The rules:
   dataclass works the same way, its fields being the arguments.
 - **A view that needs nothing from the request is a client.** `class Account(Client)` taken as
   `account: Account` is built once per container and connects with the others. A client class written
-  as `Annotated[Account, Depends()]`, e.g. one decorated with `@client_dataclass`, is built by FastAPI
+  as `Annotated[Account, Depends()]` is built by FastAPI
   for every request instead, and its `connect()` never runs: leave the `Depends()` out.
 - **`@cbv` of fastapi-utils is not needed.** It declares the routes again on a plain `APIRouter` of its
   own, so a class attribute typed as a client fails at `include_router()` with

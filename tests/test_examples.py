@@ -36,11 +36,9 @@ CONFIGURATION = frozenset(
         "QUEUE_DB",
         "SERVICE_DB",
         "SQLITE_PATH",
-        "CONNECT_CONCURRENCY",
         "CONNECT_TIMEOUT_SECONDS",
         "DISCONNECT_DEADLINE_SECONDS",
         "DISCONNECT_TIMEOUT_SECONDS",
-        "SHUTDOWN_GRACE_SECONDS",
     )
 )
 
@@ -125,19 +123,10 @@ def run(
 PROGRAMS = (
     Program("hello.main", output=("database: connected", "Hello, user-42!", "database: disconnected")),
     Program("plain_script.seed", env={"SQLITE_PATH": "{tmp}/seed.sqlite3"}, output=("seed: 5 customers in ",)),
-    Program(
-        "cli_job.export",
-        ("--since", "2026-10-01"),
-        env={"SQLITE_PATH": "{tmp}/orders.sqlite3"},
-        output=("id,customer,amount,created", "4,ada,42.0,2026-10-01", "export: wrote 5 orders to stdout"),
-    ),
-    Program("cli_job.export", ("--since", "yesterday"), exit_code=2, output=("invalid date value: 'yesterday'",)),
     Program("http_job.versions", exit_code=2, output=("the following arguments are required: -p/--package",)),
     Program("settings.show", output=("show: one Settings for everyone: True",)),
     Program("settings.show", env={"POOL_SIZE": "0"}, exit_code=1, output=("POOL_SIZE must be at least 1, got 0",)),
     Program("dataclass_clients.main", output=("placed order 1",)),
-    Program("graph.show", output=("  Notifications --> Checkout",)),
-    Program("graph.start", output=("Connecting client Checkout (7/8 connected)", "placed order 1")),
     Program("startup_failures.connect_error", output=("connected: False",)),
     Program(
         "startup_failures.connect_timeout",
@@ -162,17 +151,6 @@ PROGRAMS = (
         output=('"url" of "Cache.__init__" is str, which is not a client (resolving checkout -> Checkout -> Cache)',),
     ),
     Program(
-        "hooks_metrics.export",
-        env={"CONNECT_TIMEOUT_SECONDS": "1"},
-        output=('job_exit_code{job="hooks_metrics.export.export"} 0', "more than half of CONNECT_TIMEOUT_SECONDS (1s)"),
-    ),
-    Program(
-        "hooks_metrics.export",
-        ("--limit", "three"),
-        exit_code=2,
-        output=('job_exit_code{job="hooks_metrics.export.export"} 2', "invalid int value: 'three'"),
-    ),
-    Program(
         "mcp_server.ask",
         output=(
             "tool count_books(genre): How many books of a genre the shop has.",
@@ -194,20 +172,11 @@ PROGRAMS = (
         "taskiq_app.main",
         output=("send_report(1): sent to alice", "mail to admin: taskiq_app.tasks:send_reports finished"),
     ),
-    Program(
-        "testing.jobs.reminders", ("--limit", "1", "--dry-run"), output=("reminders: would remind bob@example.com",)
-    ),
+    Program("testing.jobs.reminders", output=("reminders: 2 users",)),
     Program(
         "service_layout.jobs.cleanup",
-        ("--older-than-days", "0"),
         env={"SERVICE_DB": "{tmp}/service.db"},
-        output=("cleanup: deleted 0 sent outbox rows older than 0 days",),
-    ),
-    Program(
-        "background_tasks.worker",
-        ("--fail-after", "2"),
-        exit_code=1,
-        output=("Background task refresh-cache failed", "ConnectionError: the settings service is unreachable"),
+        output=("cleanup: deleted 0 sent outbox rows older than 7 days",),
     ),
 )
 
@@ -301,64 +270,41 @@ def running(
 
 def test_sqlite_queue(tmp_path: Path) -> None:
     env = {"QUEUE_DB": str(tmp_path / "queue.db")}
-    enqueued = run("sqlite_queue.enqueue", "--count", "3", env=env)
+    enqueued = run("sqlite_queue.enqueue", env=env)
     assert enqueued.returncode == 0, enqueued.stdout
     assert "enqueue: 3 tasks pending" in enqueued.stdout
 
-    with running("sqlite_queue.consumer", env=env) as consumer:
-        consumer.wait_for("consumer: done task 3")
-        assert consumer.stop() == 128 + signal.SIGINT
-
-    assert "consumer: stopped" in consumer.output
-
-
-def test_periodic_worker() -> None:
-    with running("periodic_worker.cleanup", "--interval", "0.5") as cleanup:
-        cleanup.wait_for("cleanup: deleted ['session-1'], 4 left")
-        assert cleanup.stop(signal.SIGTERM) == 128 + signal.SIGTERM
-
-    assert "cleanup: stopped" in cleanup.output
+    consumed = run("sqlite_queue.consumer", env=env)
+    assert consumed.returncode == 0, consumed.stdout
+    assert "consumer: done task 3" in consumed.stdout
+    assert "consumer: queue is empty" in consumed.stdout
 
 
-def test_background_tasks_worker() -> None:
-    with running("background_tasks.worker") as worker:
-        worker.wait_for("refresh: cache v2")
-        assert worker.stop() == 128 + signal.SIGINT
-
-    assert "worker: stopped" in worker.output
-    assert "inbox: disconnected" in worker.output
-
-
-def test_testing_worker() -> None:
-    with running("testing.workers.signups") as signups:
-        signups.wait_for("signups: registered user1@example.com as user 4")
-        assert signups.stop() == 128 + signal.SIGINT
-
-    assert "signups: stopped" in signups.output
-
-
+@pytest.mark.skipif(sys.platform == "win32", reason="the example handles SIGTERM on POSIX")
 def test_service_layout_worker(tmp_path: Path) -> None:
     with running("service_layout.workers.outbox", env={"SERVICE_DB": str(tmp_path / "service.db")}) as relay:
         relay.wait_for("outbox: relaying")
-        assert relay.stop() == 128 + signal.SIGINT
+        assert relay.stop(signal.SIGTERM) == 0
 
     assert "outbox: stopped" in relay.output
 
 
 @needs_nats
+@pytest.mark.skipif(sys.platform == "win32", reason="the subprocess uses POSIX signal delivery")
 def test_nats_worker() -> None:
     with running("nats_worker.worker") as worker:
         worker.wait_for("worker: listening on nats_worker.orders")
-        published = run("nats_worker.publish", "--count", "3")
+        published = run("nats_worker.publish")
         assert published.returncode == 0, published.stdout
         worker.wait_for("worker: order 3 saved")
-        assert worker.stop() == 128 + signal.SIGINT
+        assert worker.stop() in {128 + signal.SIGINT, -signal.SIGINT}
 
     assert "worker: order 1: 1 x book" in worker.output
     assert "worker: stopped" in worker.output
 
 
 @needs_nats
+@pytest.mark.skipif(sys.platform == "win32", reason="the subprocess uses POSIX signal delivery")
 def test_faststream_nats() -> None:
     with running("faststream_nats.app") as app:
         app.wait_for("FastStream app started successfully")

@@ -13,13 +13,11 @@ from nuke_di._container.order import (
     cancelled_from_outside,
     dependencies_among,
     in_dependency_order,
-    make_limiter,
-    measure,
     within,
 )
-from nuke_di.errors import ConnectError, ConnectTimeoutError
+from nuke_di.errors import ConnectError, ConnectTimeoutError, InitializeDependencyError
 from nuke_di.logs import CONTAINER_LOGGER, client_fields, fields
-from nuke_di.timings import ClientTiming
+from nuke_di.naming import count
 from nuke_di.types import Client
 
 if TYPE_CHECKING:
@@ -28,22 +26,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(CONTAINER_LOGGER)
 
 
-class ClientConnectError(Exception):
-    """
-    Carries an error out of a connect task.
-
-    `ConnectError` is a `SystemExit`, and a `SystemExit` raised inside a task escapes the event loop.
-    """
+class _ClientStartupError(Exception):
+    """Carry a client's existing startup error through TaskGroup so rollback can finish first."""
 
     def __init__(self, error: BaseException) -> None:
         super().__init__(str(error))
         self.error = error
-
-
-class ClientInterruptError(ClientConnectError):
-    """
-    Carries a client's exit or interrupt without letting it escape the event loop from a child task.
-    """
 
 
 class Connect:
@@ -55,76 +43,75 @@ class Connect:
     def __init__(self, container: "Dependencies") -> None:
         self._container = container
         settings = container.settings
-        self._limiter = make_limiter(settings)
         self._timeout = settings.connect_timeout
         # Clients whose connect() finished, so a failure knows what to roll back
         self._connected: list[Client] = []
         self._total = 0
-        self._timings: dict[int, ClientTiming] = {}
+        self._names: dict[type, str] = {}
 
-    async def run(self) -> float:
-        """
-        Connect the clients of the container; how long it took.
-        """
-        container = self._container
-        with container._lock:
-            if container.connected:
-                raise already_connected("connect()")
-
-            # Flipped and snapshotted together: a thread inside resolve() finishes before or fails after, never
-            # leaves a client that this connect() does not see
-            container.connected = True
-            clients = list(container.connect_clients)
-        self._timings = _start_timings(container, clients)
+    async def run(self) -> None:
+        clients = self._snapshot()
         self._total = len(clients)
         task = asyncio.current_task()
         prior_cancels = 0 if task is None else task.cancelling()
 
         try:
-            return await self._connect(clients, prior_cancels)
+            duration = await self._connect(clients, prior_cancels)
         except BaseException as exc:
             await self._rollback(exc, task, prior_cancels)
-            error = _reported_error(exc)
+            error = _startup_error(exc)
             if error is None:
                 raise
+        else:
+            if clients:
+                _log_summary(self._total, duration)
+            return
 
-        # Keep the client's exception chain without the task group's wrapper.
+        # Preserve the client's own exception context after leaving TaskGroup's exception handler.
         raise error
 
     async def client(self, client: Client) -> None:
-        timing = self._timings[id(client)]
-        # The record's fields are built per client: skipped when nobody listens
+        name = self._names[type(client)]
         debug = logger.isEnabledFor(logging.DEBUG)
+        if debug:
+            logger.debug(
+                "Connecting client %s (%d/%d connected)",
+                name,
+                len(self._connected),
+                self._total,
+                extra=client_fields(name),
+            )
+
+        started = time.perf_counter()
         try:
-            async with self._limiter:
-                if debug:
-                    logger.debug(
-                        "Connecting client %s (%d/%d connected)",
-                        timing.name,
-                        len(self._connected),
-                        self._total,
-                        extra=client_fields(timing),
-                    )
-                with measure(timing, "connect"):
-                    await within(self._timeout, client.connect())
+            await within(self._timeout, client.connect())
         except TimeoutError as exc:
-            raise self._timeout_failure(timing, exc) from exc
+            duration = time.perf_counter() - started
+            raise _timeout_failure(name, duration, self._timeout) from exc
         except BaseException as exc:
-            failure = self._failure(timing, exc)
+            failure = self._failure(name, time.perf_counter() - started, exc)
             if failure is None:
                 raise
             raise failure from exc
 
-        # Past the try, which every failure leaves by raising
         self._connected.append(client)
+        duration = time.perf_counter() - started
         if debug:
             logger.debug(
                 "Connected client %s in %.3fs (%d/%d connected)",
-                timing.name,
-                timing.connect,
+                name,
+                duration,
                 len(self._connected),
                 self._total,
-                extra=client_fields(timing, timing.connect),
+                extra=client_fields(name, duration),
+            )
+        if duration > self._timeout / 2:
+            logger.warning(
+                "Client %s took %.2fs to connect, more than half of CONNECT_TIMEOUT_SECONDS (%gs)",
+                name,
+                duration,
+                self._timeout,
+                extra=client_fields(name, duration),
             )
 
     async def _connect(self, clients: list[Client], prior_cancels: int) -> float:
@@ -163,68 +150,58 @@ class Connect:
             task.uncancel()
             task.cancel(*cancellation.args)
 
-    def _timeout_failure(self, timing: ClientTiming, exc: TimeoutError) -> ClientConnectError:
-        """
-        Log the timeout being handled, with the traceback, and carry its ConnectTimeoutError out of the task.
-        """
-        logger.exception(
-            "%s did not connect within %gs (CONNECT_TIMEOUT_SECONDS)",
-            timing.name,
-            self._timeout,
-            extra=client_fields(timing, timing.connect),
-        )
-        seconds = format(self._timeout, "g")
-        error = ConnectTimeoutError(f"{timing.name} did not connect within {seconds}s (CONNECT_TIMEOUT_SECONDS)")
-        error.__cause__ = exc
-        return ClientConnectError(error)
+    def _snapshot(self) -> list[Client]:
+        container = self._container
+        with container._lock:
+            if container.connected:
+                raise already_connected("connect()")
 
-    def _failure(self, timing: ClientTiming, exc: BaseException) -> ClientConnectError | None:
-        """
-        Log the failed connect with its traceback and prepare the error to report after rollback.
-        """
-        if isinstance(exc, asyncio.CancelledError):
-            # Only a client's own cancellation fails the connect. Its consumers would otherwise wait forever.
-            if cancelled_from_outside():
-                return None
-            timing.connect_outcome = "failed"
-        raised = f"{timing.name}.connect() raised {described(exc)}"
-        logger.exception("%s", raised, extra=client_fields(timing, timing.connect))
-        if isinstance(exc, (SystemExit, KeyboardInterrupt)):
-            return ClientInterruptError(exc)
-        if not isinstance(exc, (Exception, asyncio.CancelledError)):
+            # Resolve either finishes before the snapshot or fails once the container is connected.
+            container.connected = True
+            self._names = names(container)
+            return list(container.connect_clients)
+
+    def _failure(self, name: str, duration: float, exc: BaseException) -> Exception | None:
+        # A self-cancelled client must fail the group, or its consumers wait forever.
+        if isinstance(exc, asyncio.CancelledError) and cancelled_from_outside():
             return None
-        error = ConnectError(raised)
-        error.__cause__ = exc
-        return ClientConnectError(error)
+        raised = f"{name}.connect() raised {described(exc)}"
+        logger.exception("%s", raised, extra=client_fields(name, duration))
+        if isinstance(exc, (SystemExit, KeyboardInterrupt, ConnectError, InitializeDependencyError)):
+            return _ClientStartupError(exc)
+        if isinstance(exc, (Exception, asyncio.CancelledError)):
+            return ConnectError(raised)
+        return None
 
 
-def _start_timings(container: "Dependencies", clients: list[Client]) -> dict[int, ClientTiming]:
-    # Computed once: the timings, the logs and the errors of this connect() all name a client the same way
-    named = names(container)
-    timings = {}
-    for client in clients:
-        timings[id(client)] = ClientTiming(named[type(client)])
-    container._timings = timings
-    container.timings = list(timings.values())
-    return timings
+def _log_summary(total: int, duration: float) -> None:
+    quantity = count(total, "client")
+    logger.info("Connected %s in %.2fs", quantity, duration, extra=fields(duration=duration))
 
 
-def _reported_error(exc: BaseException) -> BaseException | None:
+def _timeout_failure(name: str, duration: float, timeout: float) -> ConnectTimeoutError:
+    seconds = format(timeout, "g")
+    message = f"{name} did not connect within {seconds}s (CONNECT_TIMEOUT_SECONDS)"
+    logger.exception("%s", message, extra=client_fields(name, duration))
+    return ConnectTimeoutError(message)
+
+
+def _startup_error(exc: BaseException) -> BaseException | None:
     if not isinstance(exc, BaseExceptionGroup):
         return None
-    # TaskGroup gives exits and interrupts priority over ordinary failures.
+    # Preserve an existing startup error or interrupt ahead of a newly wrapped client failure.
     for failure in exc.exceptions:
-        if isinstance(failure, ClientInterruptError):
+        if isinstance(failure, _ClientStartupError):
             return failure.error
     first = exc.exceptions[0]
-    if isinstance(exc, ExceptionGroup) and isinstance(first, ClientConnectError):
+    if isinstance(exc, ExceptionGroup) and isinstance(first, ConnectError):
         # Every failure is logged already, the first one stops the application
-        return first.error
+        return first
     return None
 
 
-def already_connected(call: str) -> ConnectError:
-    return ConnectError(f"{call}: already connected, call disconnect() first")
+def already_connected(call: str) -> RuntimeError:
+    return RuntimeError(f"{call}: already connected, call disconnect() first")
 
 
 def described(exc: BaseException) -> str:

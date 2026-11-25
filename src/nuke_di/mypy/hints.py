@@ -5,7 +5,7 @@ What a type hint is to the container: a client it fills, an optional client it r
 from mypy.nodes import TypeInfo
 from mypy.types import AnyType, Instance, NoneType, Type, TypeOfAny, UnboundType, UnionType, get_proper_type
 
-from nuke_di.mypy.names import CLIENT, METADATA, type_statement
+from nuke_di.mypy.names import CLIENT, type_statement
 
 
 def client(hint: Type) -> TypeInfo | None:
@@ -27,10 +27,7 @@ def client(hint: Type) -> TypeInfo | None:
 
 
 def is_client(type_info: TypeInfo) -> bool:
-    if type_info.has_base(CLIENT):
-        return True
-    marks = (base.metadata.get(METADATA, {}) for base in type_info.mro)
-    return any(mark.get("client") for mark in marks)
+    return type_info.has_base(CLIENT)
 
 
 def optional_client(hint: Type) -> TypeInfo | None:

@@ -1,6 +1,4 @@
-import asyncio
-
-from nuke_di import BackgroundTasks, Client
+from nuke_di import Client
 
 
 class Database(Client):
@@ -24,34 +22,20 @@ class Database(Client):
 
 class UserCache(Client):
     """
-    Every user in memory: loaded on connect, then refreshed in the background.
+    Every user in memory, loaded on connect.
     """
 
-    refresh_seconds = 5.0
-
-    def __init__(self, db: Database, tasks: BackgroundTasks) -> None:
+    def __init__(self, db: Database) -> None:
         self._db = db
-        self._tasks = tasks
         self._users: dict[int, str] = {}
 
     async def connect(self) -> None:
         # Database is a dependency, so it is connected by now
-        await self.refresh()
+        self._users = await self._db.fetch_users()
         print(f"cache: warmed with {len(self._users)} users")
-        self._tasks.spawn(self._refresh_forever(), name="cache-refresh")
 
     async def disconnect(self) -> None:
         print("cache: disconnected")
 
-    async def refresh(self) -> None:
-        self._users = await self._db.fetch_users()
-
     def get(self, user_id: int) -> str | None:
         return self._users.get(user_id)
-
-    async def _refresh_forever(self) -> None:
-        # Cancelled on shutdown before any client disconnects
-        while True:
-            await asyncio.sleep(self.refresh_seconds)
-            await self.refresh()
-            print(f"cache: refreshed, {len(self._users)} users")

@@ -1,9 +1,10 @@
+import argparse
+import asyncio
 import os
 from decimal import Decimal
-from typing import Annotated
 
 from faststream.nats import NatsBroker
-from nuke_di import Client, Option, job
+from nuke_di import Client, Dependencies
 
 from faststream_nats.messages import Order
 
@@ -38,13 +39,23 @@ class Nats(Client):
         await self._broker.publish(order, "faststream_nats.orders", headers={"customer-id": str(customer_id)})
 
 
-@job
-async def publish(
-    nats: Nats,
-    count: Annotated[int, Option(help="How many orders to send")] = 3,
-    customer_id: Annotated[int, Option(help="The customer-id header")] = 1,
-) -> None:
+async def publish(nats: Nats, count: int, customer_id: int) -> None:
     """Send test orders to the faststream_nats.orders subject."""
     for order_id in range(1, count + 1):
         await nats.send_order(Order(order_id=order_id, amount=Decimal("9.99")), customer_id)
         print(f"published order {order_id}")
+
+
+async def main(count: int, customer_id: int) -> None:
+    deps = Dependencies()
+    send = deps.inject(publish)
+    async with deps:
+        await send(count=count, customer_id=customer_id)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Publish test orders to FastStream.")
+    parser.add_argument("--count", type=int, default=3)
+    parser.add_argument("--customer-id", type=int, default=1)
+    args = parser.parse_args()
+    asyncio.run(main(args.count, args.customer_id))

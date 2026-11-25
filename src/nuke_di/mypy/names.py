@@ -14,10 +14,7 @@ from mypy.types import Instance, Type, TypeAliasType, get_proper_type
 
 CLIENT = "nuke_di.types.Client"
 CONTAINER = "nuke_di.core.Dependencies"
-ENTRYPOINTS = frozenset(("nuke_di.entrypoint.job", "nuke_di.entrypoint.worker"))
-# What `job(hooks=...)` and `worker(hooks=...)` return: the decorator call is a call of its `__call__`
-DECORATOR = "nuke_di.entrypoint.EntrypointDecorator.__call__"
-DATACLASS = "nuke_di.dataclass.client_dataclass"
+ENTRYPOINT = "nuke_di._entrypoint.entrypoint"
 # The key of a client's `TypeInfo.metadata`, which the cache keeps
 METADATA = "nuke_di"
 

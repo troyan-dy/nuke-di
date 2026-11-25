@@ -5,7 +5,7 @@ How the container's errors and records name the clients, and the path that led t
 import logging
 from typing import TYPE_CHECKING
 
-from nuke_di.errors import ConnectError, InitializeDependencyError, InvalidSignatureError
+from nuke_di.errors import InitializeDependencyError, InvalidSignatureError
 from nuke_di.logs import CONTAINER_LOGGER, fields
 from nuke_di.naming import display_names, sname
 from nuke_di.types import Client
@@ -61,11 +61,11 @@ def signature_error(
     return InvalidSignatureError(f'Argument "{name}" of "{owner}.__init__" {reason}{suffix}')
 
 
-def state_error(call: str) -> ConnectError:
+def state_error(call: str) -> RuntimeError:
     """
     `call` builds the tree, and the container is connected: the message names the call, the state and the way out.
     """
-    return ConnectError(
+    return RuntimeError(
         f"{call}: the container is already connected; resolve, inject, mock and override only work before "
         f"connect(), flush() after disconnect()"
     )

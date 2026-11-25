@@ -1,209 +1,117 @@
+import runpy
+import subprocess
 import sys
-import types
-from collections.abc import Callable, Iterator
-from typing import Any
+from pathlib import Path
 
 import pytest
 
-from nuke_di import DI, Client, InvalidSignatureError, Run, UsageError, job, worker
-from nuke_di._program import entrypoint_name, entrypoint_prog
-
-DECORATORS = (job, worker)
+from nuke_di import Client, entrypoint
 
 
-class Db(Client):
-    used = False
+def test_import_preserves_function_and_does_not_resolve_clients() -> None:
+    class Database(Client):
+        def __init__(self) -> None:
+            pytest.fail("import must not resolve clients")
+
+    async def main(db: Database) -> None: ...
+
+    assert entrypoint(main) is main
 
 
-class Hook:
-    def __init__(self) -> None:
-        self.runs: list[Run] = []
-
-    async def on_start(self, run: Run) -> None: ...
-
-    async def on_finish(self, run: Run) -> None:
-        self.runs.append(run)
-
-
-@pytest.fixture(autouse=True)
-def clean_di() -> Iterator[None]:
-    yield
-    DI.flush()
-
-
-@pytest.fixture(autouse=True)
-def argv(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    # The Run parses the command line, and pytest's own arguments are not Parameters
-    argv = ["sync.py"]
-    monkeypatch.setattr(sys, "argv", argv)
-    return argv
-
-
-@pytest.mark.parametrize("decorator", DECORATORS)
-def test_returns_function_unchanged_on_import(decorator: Any) -> None:
-    async def entry(db: Db) -> None: ...
-
-    assert decorator(entry) is entry
-    assert decorator(hooks=[Hook()])(entry) is entry
-    assert DI.connect_clients == []
-
-
-@pytest.mark.parametrize("decorator", DECORATORS)
-def test_rejects_sync_function(decorator: Any) -> None:
-    def entry() -> None: ...
+def test_requires_an_async_function() -> None:
+    def main() -> None: ...
 
     with pytest.raises(TypeError, match="async def"):
-        decorator(entry)
-    with pytest.raises(TypeError, match="async def"):
-        decorator(hooks=[])(entry)
-
-
-def as_main(func: Callable[..., Any]) -> Callable[..., Any]:
-    func.__module__ = "__main__"
-    return func
-
-
-@pytest.mark.parametrize(("decorator", "kind"), [(job, "job"), (worker, "worker")])
-def test_runs_and_exits_under_main(decorator: Any, kind: str) -> None:
-    async def entry(db: Db) -> None:
-        Db.used = True
-
-    hook = Hook()
-    with pytest.raises(SystemExit) as exc_info:
-        decorator(hooks=[hook])(as_main(entry))
-
-    assert exc_info.value.code == 0
-    assert Db.used
-    assert [run.kind for run in hook.runs] == [kind]
-    assert DI.connected is False
-
-
-def test_exit_code_of_failed_run() -> None:
-    async def entry() -> None:
-        raise RuntimeError("boom")
-
-    with pytest.raises(SystemExit) as exc_info:
-        job(as_main(entry))
-
-    assert exc_info.value.code == 1
-
-
-def test_grace_is_read_when_run_starts(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SHUTDOWN_GRACE_SECONDS", "-1")
-
-    async def entry() -> None: ...
-
-    with pytest.raises(ValueError, match="shutdown_grace"):
-        job(as_main(entry))
-
-
-def fake_main(monkeypatch: pytest.MonkeyPatch, spec_name: str | None, filename: str) -> None:
-    main = types.ModuleType("__main__")
-    main.__spec__ = types.SimpleNamespace(name=spec_name) if spec_name else None  # type: ignore[assignment]
-    main.__file__ = filename
-    monkeypatch.setitem(sys.modules, "__main__", main)
-
-
-def test_name_of_module_run_with_dash_m(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_main(monkeypatch, "app.jobs.sync", "/srv/app/jobs/sync.py")
-
-    async def sync() -> None: ...
-
-    assert entrypoint_name(as_main(sync)) == f"app.jobs.sync.{sync.__qualname__}"
-
-
-def test_name_of_file_run_by_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_main(monkeypatch, None, "/srv/app/jobs/sync.py")
-
-    async def sync() -> None: ...
-
-    assert entrypoint_name(as_main(sync)) == f"sync.{sync.__qualname__}"
-
-
-def test_name_of_imported_function() -> None:
-    async def sync() -> None: ...
-
-    assert entrypoint_name(sync) == "tests.test_entrypoint.test_name_of_imported_function.<locals>.sync"
-
-
-def test_parameters_from_command_line(argv: list[str]) -> None:
-    argv += ["--day", "5"]
-    days: list[int] = []
-
-    async def entry(db: Db, day: int) -> None:
-        days.append(day)
-
-    with pytest.raises(SystemExit) as exc_info:
-        job(as_main(entry))
-
-    assert exc_info.value.code == 0
-    assert days == [5]
-
-
-def test_help_exits_without_run(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
-    argv.append("--help")
-
-    async def entry(day: int) -> None:
-        """Sync one day."""
-
-    hook = Hook()
-    with pytest.raises(SystemExit) as exc_info:
-        job(hooks=[hook])(as_main(entry))
-
-    assert exc_info.value.code == 0
-    assert hook.runs == []
-    assert "Sync one day." in capsys.readouterr().out
-
-
-def test_usage_error_exits_with_code_two(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
-    argv.append("--bogus")
-
-    async def entry(db: Db) -> None:
-        Db.used = True
-
-    Db.used = False
-    hook = Hook()
-    with pytest.raises(SystemExit) as exc_info:
-        job(hooks=[hook])(as_main(entry))
-
-    assert exc_info.value.code == 2
-    assert not Db.used
-    assert isinstance(hook.runs[0].error, UsageError)
-    stderr = capsys.readouterr().err
-    assert stderr.startswith("usage: ")
-    assert ": error: unrecognized arguments: --bogus\n" in stderr
-
-
-def test_signature_error_is_seen_by_hooks(argv: list[str]) -> None:
-    argv.append("--help")
-
-    async def entry(day: dict[str, int]) -> None: ...
-
-    hook = Hook()
-    with pytest.raises(SystemExit) as exc_info:
-        job(hooks=[hook])(as_main(entry))
-
-    assert exc_info.value.code == 1
-    assert isinstance(hook.runs[0].error, InvalidSignatureError)
-
-
-def test_unresolvable_annotation_is_seen_by_hooks() -> None:
-    async def entry(db: "Missing") -> None:  # type: ignore[name-defined]  # noqa: F821
-        ...
-
-    hook = Hook()
-    with pytest.raises(SystemExit) as exc_info:
-        job(hooks=[hook])(as_main(entry))
-
-    assert exc_info.value.code == 1
-    assert isinstance(hook.runs[0].error, NameError)
+        entrypoint(main)  # type: ignore[type-var]  # pyright: ignore[reportArgumentType]
 
 
 @pytest.mark.parametrize(
-    ("spec_name", "prog"),
-    [("app.jobs.sync", "python -m app.jobs.sync"), ("app.__main__", "python -m app"), (None, None)],
+    ("body", "arguments", "code", "events", "diagnostic"),
+    [
+        ("    print(db.item, label)", [], 0, ["connect", "data default", "disconnect"], ""),
+        ("    raise RuntimeError('boom')", [], 1, ["connect", "disconnect"], "RuntimeError: boom"),
+        ("    raise SystemExit(7)", [], 7, ["connect", "disconnect"], ""),
+        ("    print(db.item, label)", ["--dry-run"], 1, [], "does not accept command-line arguments"),
+    ],
 )
-def test_prog(monkeypatch: pytest.MonkeyPatch, spec_name: str | None, prog: str | None) -> None:
-    fake_main(monkeypatch, spec_name, "/srv/app/jobs/sync.py")
+def test_runs_as_a_module(
+    tmp_path: Path,
+    body: str,
+    arguments: list[str],
+    code: int,
+    events: list[str],
+    diagnostic: str,
+) -> None:
+    _write_module(tmp_path, "label: str = 'default'", body)
 
-    assert entrypoint_prog() == prog
+    completed = _run_module(tmp_path, arguments)
+
+    assert completed.returncode == code
+    assert completed.stdout.splitlines() == events
+    assert diagnostic in completed.stderr
+
+
+def test_missing_non_client_argument_is_rejected_before_connect(tmp_path: Path) -> None:
+    _write_module(tmp_path, "label: str", "    print(db.item, label)")
+
+    completed = _run_module(tmp_path, [])
+
+    assert completed.returncode == 1
+    assert completed.stdout == ""
+    assert "missing a required argument: 'label'" in completed.stderr
+
+
+@pytest.mark.parametrize("arguments", [[], ["--dry-run"]])
+def test_runs_a_standalone_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    arguments: list[str],
+) -> None:
+    _write_module(tmp_path, "label: str = 'default'", "    print(db.item, label)")
+    script = str(tmp_path / "sample_entrypoint.py")
+    monkeypatch.setattr(sys, "argv", [script, *arguments])
+
+    with pytest.raises(SystemExit) as stopped:
+        runpy.run_path(script, run_name="__main__")
+
+    output = capsys.readouterr().out.splitlines()
+    if arguments:
+        assert stopped.value.code == "This entrypoint does not accept command-line arguments"
+        assert output == []
+    else:
+        assert stopped.value.code is None
+        assert output == ["connect", "data default", "disconnect"]
+
+
+def _write_module(path: Path, parameter: str, body: str) -> None:
+    source = f"""
+from nuke_di import Client, entrypoint
+
+class Database(Client):
+    item = 'data'
+
+    async def connect(self) -> None:
+        print('connect')
+
+    async def disconnect(self) -> None:
+        print('disconnect')
+
+@entrypoint
+async def main(db: Database, {parameter}) -> None:
+{body}
+
+print('after the entrypoint')
+"""
+    (path / "sample_entrypoint.py").write_text(source, encoding="utf-8")
+
+
+def _run_module(path: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603
+        [sys.executable, "-m", "sample_entrypoint", *arguments],
+        cwd=path,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )

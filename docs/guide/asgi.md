@@ -90,8 +90,8 @@ The rules:
   any other.
 - **Resolved on startup.** Creating `clients` resolves nothing; every startup resolves the listed clients
   again, so `override()` before the app starts replaces one, and a second start gets fresh clients.
-- **Shutdown.** On shutdown `Shutdown` is set, the `BackgroundTasks` are stopped and then the clients
-  disconnect, the same order as in a [worker](workers-and-jobs.md).
+- **Shutdown.** The application finishes any tasks that use clients before leaving its lifespan.
+  nuke-di then disconnects the clients.
 - **One app at a time.** A container connects once: a second app started on the same container while
   the first runs fails its startup.
 - **FastAPI too.** A FastAPI app that keeps the signatures of its routes as written passes
@@ -428,7 +428,7 @@ INFO:     Finished server process [48646]
 |---|---|
 | A handler runs without the app's lifespan, or after it stopped | ``RuntimeError: UserService is not connected: start the app with its lifespan, e.g. `with TestClient(app)` in Starlette or `async with app.test_app()` in Quart `` |
 | `get()` of a client the list lacks | ``RuntimeError: Database is not a client of this lifespan: list it in `lifespan(container, ...)` `` |
-| A client's `connect()` fails | `RuntimeError: nuke-di clients failed to start: Database.connect() raised OSError: connection refused`; the server reports a failed startup and exits, and the container is left flushed |
+| A client's `connect()` fails | `ConnectError: Database.connect() raised OSError: connection refused`; the server reports a failed startup and exits, and the container is left flushed |
 | The container is connected already, e.g. by another app | `RuntimeError: nuke-di clients failed to start: the container is already connected` |
 | `lifespan(Database)`, the container left out | `TypeError: lifespan() takes the container first, then the clients, e.g. lifespan(DI, Database); got <class 'app.clients.Database'>` |
 | `lifespan(DI, "Database")`, not a client class | `TypeError: 'Database' is not a client: subclass Client` |
@@ -441,7 +441,7 @@ INFO:     Started server process [44319]
 INFO:     Waiting for application startup.
 Database.connect() raised OSError: connection refused
 ...
-RuntimeError: nuke-di clients failed to start: Database.connect() raised OSError: connection refused
+nuke_di.errors.ConnectError: Database.connect() raised OSError: connection refused
 
 ERROR:    Application startup failed. Exiting.
 ```

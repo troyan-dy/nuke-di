@@ -140,7 +140,6 @@ def test_chain_deeper_than_the_recursion_limit() -> None:
         built.append(built[-1].below)
     assert [type(client) for client in reversed(built)] == links
     assert dep.connect_clients == list(reversed(built))
-    assert [node.client_class for node in dep.graph().nodes] == links
 
 
 ResolvePath: TypeAlias = list[type[Client]]

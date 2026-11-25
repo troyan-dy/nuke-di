@@ -10,7 +10,7 @@ from litestar.constants import RESERVED_KWARGS
 from litestar.handlers import BaseRouteHandler, HTTPRouteHandler, WebsocketRouteHandler
 from litestar.handlers.websocket_handlers import WebsocketListenerRouteHandler
 
-from nuke_di.integration import client_of
+from nuke_di._integration import client_of
 from nuke_di.naming import sname
 from nuke_di.types import Client
 

@@ -34,3 +34,9 @@ Now a function is bound once (`per_container=False`), so every read of its signa
 - **`per_container=False` alone**: fixes the mix-up, but two apps sharing a handler could no longer run at once.
 
 The getter costs no more than before: one request with one client measured 105 µs median against 107 µs on 1.18.1, and 105 µs for a plain FastAPI `Depends()` (`benchmarks/run.py --only fastapi --repeat 30`, CPython 3.14, FastAPI 0.142.4).
+
+## Revisited in 3.0
+
+The signature rewrite and framework-specific entry points stay. The integration kit is now
+private. The framework owns its lifespan, including application tasks, and receives container
+startup errors directly.

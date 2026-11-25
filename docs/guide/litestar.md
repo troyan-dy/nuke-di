@@ -78,8 +78,7 @@ The rules:
   the client.
 - **Instances.** Arguments of the same client class share the container's instance.
 - **Lifespan.** The clients connect before the app's own `lifespan=` and `on_startup=` run, and
-  disconnect after its `on_shutdown=` hooks, which Litestar calls last. `Shutdown` and
-  `BackgroundTasks` behave as in [FastAPI](fastapi.md).
+  disconnect after its `on_shutdown=` hooks, which Litestar calls last.
 - **The function stays a function.** Its client arguments are now annotated as explicit Litestar
   dependencies whose value is not validated, `Annotated[UserService, Dependency(), SkipValidationMarker()]`,
   which is what Litestar 2.23 asks for instead of a dependency matched by name only. Calling the function
@@ -203,7 +202,7 @@ $ uvicorn app.litestar_graphql:app
 INFO:     Started server process [56803]
 INFO:     Waiting for application startup.
 database: connected
-INFO - 2026-10-10 18:40:33,849 - nuke_di.core - core - Connected 2 clients in 0.00s (slowest: Database 0.00s, UserService 0.00s)
+INFO - 2026-10-10 18:40:33,849 - nuke_di - connect - Connected 2 clients in 0.00s
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 INFO:     127.0.0.1:53760 - "POST /graphql HTTP/1.1" 200 OK

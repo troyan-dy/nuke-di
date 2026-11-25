@@ -1,14 +1,14 @@
 import os
-from dataclasses import field
+from dataclasses import dataclass, field
 
-from nuke_di import Client, client_dataclass
+from nuke_di import Client
 
 
 def _debug() -> bool:
     return os.environ.get("DEBUG", "").lower() in {"1", "true", "yes"}
 
 
-@client_dataclass(frozen=True)
+@dataclass(frozen=True)
 class Settings(Client):
     """
     The configuration of the process, read from the environment once, when the container builds it.

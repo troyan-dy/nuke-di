@@ -1,8 +1,9 @@
+import asyncio
 import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, call
 
-from nuke_di import Dependencies, Shutdown
+from nuke_di import Dependencies
 
 from service_layout.clients import Broker, Orders, Outbox, Settings
 from service_layout.jobs.cleanup import cleanup
@@ -10,21 +11,21 @@ from service_layout.workers.outbox import relay
 
 
 async def test_relay_publishes_and_marks_sent(di: Dependencies, tmp_path: Path) -> None:
-    """The worker publishes every pending row, finishes its batch after Shutdown, and marks the rows sent."""
+    """The worker finishes its batch and marks the rows sent after the application requests a stop."""
     di.mock(
         Settings,
         Settings(db_path=str(tmp_path / "orders.db"), poll_seconds=0.01),
     )
     broker = di.mock(Broker)
-    shutdown = di.resolve(Shutdown)
-    broker.publish.side_effect = lambda topic, payload: shutdown.set()  # what SIGTERM would do
+    stop = asyncio.Event()
+    broker.publish.side_effect = lambda topic, payload: stop.set()  # what SIGTERM would do
     orders, outbox = di.resolve(Orders), di.resolve(Outbox)
     injected = di.inject(relay)
 
     async with di:
         await orders.create("book", 2)
         await orders.create("pen", 10)
-        await injected()
+        await injected(stop=stop)
         assert not await outbox.pending(limit=10)
 
     assert broker.publish.await_args_list == [

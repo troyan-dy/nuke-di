@@ -15,8 +15,6 @@ when you need isolation, e.g. in tests.
 | `mock(client_class, new=None)`| Register a Replacement for `client_class` (an autospec mock by default) until the next `flush()`. Must come before `client_class` is resolved. |
 | `override(client_class, new=None)` | A Replacement for the duration of a `with` block, then `flush()`; see [Testing](testing.md). |
 | `flush()`            | Forget every resolved client.                                           |
-| `timings`            | One `ClientTiming` per client of the last `connect()`; see [Startup timings](clients.md#startup-timings). |
-| `graph()`            | A `Graph` of the resolved clients with their dependencies, `to_mermaid()` included; see [The graph](clients.md#the-graph). |
 
 The result of `inject()` keeps the return type of the function, while its remaining arguments are
 untyped: a type checker cannot subtract the client arguments from a signature.
@@ -30,7 +28,7 @@ async def main() -> None:
     injected = deps.inject(handler)  # build the tree
     async with deps:  # connect
         await injected(42)
-        deps.resolve(Cache)  # ConnectError: resolve(Cache): the container is already connected; ...
+        deps.resolve(Cache)  # RuntimeError: resolve(Cache): the container is already connected; ...
 ```
 
 The container is safe to resolve from several threads: one lock per container serializes `resolve`,

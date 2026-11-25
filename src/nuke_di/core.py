@@ -10,7 +10,6 @@ from nuke_di._container import (
     already_connected,
     disconnect_all,
     inject_function,
-    log_startup,
     not_a_client,
     resolve_locked,
     resolve_refused,
@@ -23,9 +22,7 @@ from nuke_di._container.replacements import (
     exit_override,
     register_replacement,
 )
-from nuke_di.graph import Graph, snapshot
 from nuke_di.options import DependenciesSettings
-from nuke_di.timings import ClientTiming
 from nuke_di.types import Client, ClientT, isclient
 
 ReturnT = TypeVar("ReturnT")
@@ -55,13 +52,8 @@ class Dependencies:  # noqa: WPS214
     connect_clients: list[Client] = field(default_factory=list)
     settings: DependenciesSettings = field(default_factory=DependenciesSettings)
     connected: bool = field(default=False, init=False)
-    # One entry per client of the last connect(), in resolution order: a client after its dependencies; kept after
-    # disconnect()
-    timings: list[ClientTiming] = field(default_factory=list, init=False)
-    # The entries of `timings` by `id()` of their client, until the container is flushed
-    _timings: dict[int, ClientTiming] = field(default_factory=dict, init=False)
     # The class asked for and the client passed, per `__init__` argument of every client in `connect_clients`, keyed
-    # by `id()`: dataclass clients may be unhashable. Orders connect() and disconnect(), and makes `graph()`; the
+    # by `id()`: dataclass clients may be unhashable. Orders connect() and disconnect(); the
     # class tells a Replacement apart from the clients it stands in for.
     _dependencies: dict[int, dict[str, _Dependency]] = field(default_factory=dict, init=False)
     # Replacements registered by `mock()` and `override()`, a subset of `clients`
@@ -100,15 +92,12 @@ class Dependencies:  # noqa: WPS214
             self.clients = OrderedDict()
             self.connect_clients = []
             self._dependencies = {}
-            self._timings = {}
             self._replacements = {}
             for client_class, replacement in self._overrides:
                 register_replacement(self, client_class, replacement)
 
     async def connect(self) -> None:
-        duration = await Connect(self).run()
-        # Logged from here: the records name this module, `core`
-        log_startup(self.timings, self.settings.connect_timeout, duration)
+        await Connect(self).run()
 
     async def disconnect(self) -> None:
         await disconnect_all(self)
@@ -144,14 +133,6 @@ class Dependencies:  # noqa: WPS214
             if self.connected:
                 raise resolve_refused(client_class)
             return resolve_locked(self, client_class)
-
-    def graph(self) -> Graph:
-        """
-        A snapshot of the resolved clients with their dependencies.
-
-        `flush()` empties it, apart from the Replacements of the open `override()` blocks, which it keeps.
-        """
-        return snapshot(self._replacements, self.connect_clients, self._dependencies)
 
     def inject(self, func: Callable[..., ReturnT]) -> Callable[..., ReturnT]:
         """

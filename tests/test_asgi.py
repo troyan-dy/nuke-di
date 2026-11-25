@@ -12,9 +12,10 @@ from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from nuke_di import Client, Dependencies, Shutdown
+from nuke_di import Client, ConnectError, Dependencies
 from nuke_di.asgi import _ASGI, Lifespan, lifespan
-from nuke_di.integration.testing import Send, check
+from tests.integration_contract.check import check
+from tests.integration_contract.outcomes import Send
 from tests.sequences import repeated
 
 events: list[str] = []
@@ -156,16 +157,10 @@ def test_the_apps_own_lifespan_runs_inside_and_keeps_its_state() -> None:
 
 
 async def test_runs_without_a_framework() -> None:
-    clients = lifespan(Dependencies(), UserService, Shutdown)
+    clients = lifespan(Dependencies(), UserService)
 
     async with clients():
         assert clients.get(UserService).greet() == "Hello, alice!"
-        shutdown = clients.get(Shutdown)
-        assert not shutdown.is_set()
-
-    # As a Run does: the loops are asked to stop before the clients disconnect
-    assert shutdown.is_set()
-    assert events == ["database: connected", "database: disconnected"]
 
 
 async def test_one_lifespan_runs_one_app_at_a_time() -> None:
@@ -197,14 +192,30 @@ def test_a_failed_connect_fails_the_startup_and_flushes_the_container() -> None:
     container = Dependencies()
     clients = lifespan(container, UserService, Broken)
 
-    with pytest.raises(RuntimeError) as exc, TestClient(make_app(clients)):
+    with pytest.raises(ConnectError) as exc, TestClient(make_app(clients)):
         ...
 
-    assert str(exc.value) == "nuke-di clients failed to start: Broken.connect() raised OSError: connection refused"
+    assert str(exc.value) == "Broken.connect() raised OSError: connection refused"
     assert not container.connected
     assert not container.clients
     with pytest.raises(RuntimeError, match="Broken is not connected"):
         clients.get(Broken)
+
+
+def test_client_system_exit_is_reported_as_startup_failure() -> None:
+    class Exiting(Client):
+        async def connect(self) -> None:
+            sys.exit(73)
+
+    container = Dependencies()
+    clients = lifespan(container, UserService, Exiting)
+    with pytest.raises(RuntimeError, match="failed to start") as raised, TestClient(make_app(clients)):
+        pytest.fail("the app must not start")
+
+    assert isinstance(raised.value.__cause__, SystemExit)
+    assert raised.value.__cause__.code == 73
+    assert not container.connected
+    assert not container.clients
 
 
 @pytest.mark.parametrize("make", [lifespan, Lifespan])

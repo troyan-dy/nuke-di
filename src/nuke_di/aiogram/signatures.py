@@ -7,8 +7,8 @@ import inspect
 from collections.abc import Mapping
 from typing import Any, ForwardRef, TypeAlias, get_type_hints
 
+from nuke_di._integration import client_of
 from nuke_di.aiogram.framework import _SIGNATURE
-from nuke_di.integration import client_of
 from nuke_di.types import Client
 
 # A client argument: its name and its client

@@ -88,8 +88,7 @@ asyncio.run(main())
 ```console
 $ python ask.py bookshop.server
 database: connected
-[10/10/26 18:46:46] INFO     Connected 2 clients in 0.00s (slowest:  core.py:111
-                             Database 0.00s, Catalog 0.00s)
+[10/10/26 18:46:46] INFO     Connected 2 clients in 0.00s
 count_books {'genre': {'title': 'Genre', 'type': 'string'}}
 {'result': 2}
 database: disconnected
@@ -292,10 +291,9 @@ connected, which is why `FakeDatabase` has its books from `__init__`.
 
 - **A tool added after the server started** raises `RuntimeError: Catalog was not started with the server:
   add its tool before the server starts` (FastMCP: "its tool, resource or prompt").
-- **A failed `connect()`** fails the startup: `async with Client(server)` raises `RuntimeError: nuke-di
-  clients failed to start: Database.connect() raised OSError: db.local:5432 is unreachable` (FastMCP's client
-  prefixes it with `Client failed to connect: `), and a server on stdio exits with code 1 and that error in
-  its traceback, which the host reports as a server that failed to start.
+- **A failed `connect()`** fails the startup: `async with Client(server)` raises
+  `ConnectError: Database.connect() raised OSError: db.local:5432 is unreachable`. A server on stdio
+  exits with the error in its traceback, which the host reports as a failed server startup.
 - **`setup()` twice** for one server: `TypeError: setup() was already called for this app`.
 - **Two FastMCP servers that share a function, at once:** the second fails to start with `RuntimeError:
   nuke-di clients failed to start: Catalog is filled for another app that is running; apps that share a

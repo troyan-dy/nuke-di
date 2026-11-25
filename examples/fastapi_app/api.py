@@ -3,7 +3,6 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, status
-from nuke_di import DI
 from nuke_di.fastapi import ClientRouter, setup
 
 from fastapi_app.clients import UserCache
@@ -12,10 +11,11 @@ from fastapi_app.clients import UserCache
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Runs inside the connected container: its startup code sees every client connected
-    started = ", ".join(timing.name for timing in DI.timings)
-    print(f"app: started with {started}")
-    yield
-    print("app: stopping")  # the clients are still connected here
+    print("app: started")
+    try:
+        yield
+    finally:
+        print("app: stopping")  # the clients are still connected here
 
 
 app = FastAPI(lifespan=lifespan)

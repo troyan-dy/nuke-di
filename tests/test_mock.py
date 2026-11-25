@@ -4,7 +4,7 @@ from unittest.mock import NonCallableMock, call
 
 import pytest
 
-from nuke_di import DI, Client, ConnectError, Dependencies
+from nuke_di import DI, Client, Dependencies
 
 
 class InnerDeps(Client):
@@ -83,14 +83,14 @@ def test_mock_after_resolve_raises() -> None:
     dep = Dependencies()
     dep.resolve(PublicClient)
 
-    with pytest.raises(ConnectError, match=r"InnerDeps is already resolved, call mock\(\) before resolve\(\)"):
+    with pytest.raises(RuntimeError, match=r"InnerDeps is already resolved, call mock\(\) before resolve\(\)"):
         dep.mock(InnerDeps)
 
 
 def test_mock_refuses_a_client_already_registered_for_connection() -> None:
     dep = Dependencies(connect_clients=[InnerDeps()])
 
-    with pytest.raises(ConnectError, match="InnerDeps is already resolved"):
+    with pytest.raises(RuntimeError, match="InnerDeps is already resolved"):
         dep.mock(InnerDeps)
 
 
@@ -128,7 +128,7 @@ def test_mock_with_another_replacement_raises() -> None:
     dep = Dependencies()
     dep.mock(InnerDeps)
 
-    with pytest.raises(ConnectError, match="InnerDeps already has a replacement"):
+    with pytest.raises(RuntimeError, match="InnerDeps already has a replacement"):
         dep.mock(InnerDeps, InnerDeps())
 
 

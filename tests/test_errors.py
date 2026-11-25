@@ -86,17 +86,17 @@ async def test_disconnect_continues_after_failure() -> None:
 async def test_connected_state_guards() -> None:
     dep = Dependencies()
 
-    with pytest.raises(ConnectError):
+    with pytest.raises(RuntimeError):
         await dep.disconnect()
 
     async with dep:
-        with pytest.raises(ConnectError):
+        with pytest.raises(RuntimeError):
             await dep.connect()
-        with pytest.raises(ConnectError):
+        with pytest.raises(RuntimeError):
             dep.resolve(TrackedClient)
-        with pytest.raises(ConnectError):
+        with pytest.raises(RuntimeError):
             dep.inject(test_initialize_error)
-        with pytest.raises(ConnectError):
+        with pytest.raises(RuntimeError):
             dep.mock(TrackedClient)
 
 

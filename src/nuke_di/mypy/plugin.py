@@ -11,7 +11,7 @@ from mypy.plugin import ClassDefContext, FunctionContext, MethodContext, Plugin
 from mypy.types import Type
 
 from nuke_di.mypy.calls import _Calls
-from nuke_di.mypy.names import CLIENT, CONTAINER, DATACLASS, DECORATOR, ENTRYPOINTS, METADATA
+from nuke_di.mypy.names import CLIENT, CONTAINER, ENTRYPOINT, METADATA
 
 
 class NukeDIPlugin(Plugin):
@@ -22,8 +22,6 @@ class NukeDIPlugin(Plugin):
         self._calls = _Calls(self._walked)
 
     def get_method_hook(self, fullname: str) -> Callable[[MethodContext], Type] | None:
-        if fullname == DECORATOR:
-            return self._calls.check_entrypoint
         # `owner` names the class of the object, a subclass of `Dependencies` included
         owner, _, method = fullname.rpartition(".")
         if method not in {"resolve", "inject"} or not self._subclasses(owner, CONTAINER):
@@ -31,13 +29,10 @@ class NukeDIPlugin(Plugin):
         return self._calls.check_resolve if method == "resolve" else self._calls.check_inject
 
     def get_function_hook(self, fullname: str) -> Callable[[FunctionContext], Type] | None:
-        return self._calls.check_entrypoint if fullname in ENTRYPOINTS else None
+        return self._calls.check_entrypoint if fullname == ENTRYPOINT else None
 
     def get_base_class_hook(self, fullname: str) -> Callable[[ClassDefContext], None] | None:
         return _record_arguments if self._subclasses(fullname, CLIENT) else None
-
-    def get_class_decorator_hook(self, fullname: str) -> Callable[[ClassDefContext], None] | None:
-        return _record_dataclass if fullname == DATACLASS else None
 
     def get_additional_indirect_deps(self, file: MypyFile) -> set[str]:  # noqa: WPS110
         """
@@ -73,10 +68,3 @@ def _record_arguments(ctx: ClassDefContext) -> None:
     if init is not None and isinstance(init.node, FuncDef):
         names = [argument.variable.name for argument in init.node.arguments]
         ctx.cls.info.metadata.setdefault(METADATA, {})["arguments"] = names
-
-
-def _record_dataclass(ctx: ClassDefContext) -> None:
-    """
-    Mark a class of `client_dataclass`: a client at runtime even when it does not subclass `Client`.
-    """
-    ctx.cls.info.metadata.setdefault(METADATA, {})["client"] = True

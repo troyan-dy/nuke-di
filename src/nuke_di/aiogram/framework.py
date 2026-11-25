@@ -8,7 +8,7 @@ from importlib.util import find_spec
 from types import MappingProxyType
 from typing import Final, TypeAlias
 
-from nuke_di.integration import Binding, Framework
+from nuke_di._integration import Binding, Framework
 
 # aiogram has no `Depends`: it passes a handler the items of its middleware data by name, see `_Clients`
 _AIOGRAM = Framework(

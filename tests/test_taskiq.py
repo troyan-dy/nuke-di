@@ -23,10 +23,10 @@ from taskiq import (
 from taskiq.brokers.inmemory_broker import InmemoryResultBackend
 from taskiq.receiver import Receiver
 
-from nuke_di import DI, BackgroundTasks, Client, Dependencies, Shutdown
+from nuke_di import DI, Client, ConnectError, Dependencies
 from nuke_di.fastapi import setup as fastapi_setup
-from nuke_di.integration.testing import check
 from nuke_di.taskiq import _TASKIQ, setup
+from tests.integration_contract.check import check
 
 events: list[str] = []
 
@@ -436,7 +436,7 @@ async def test_failed_connect_fails_the_startup() -> None:
     async def task(broken: Broken) -> None: ...
 
     broker.task(task)
-    with pytest.raises(RuntimeError, match=r"nuke-di clients failed to start: .*Broken.*unreachable"):
+    with pytest.raises(ConnectError, match=r"Broken.*unreachable"):
         await broker.startup()
 
     assert not deps.connected
@@ -512,34 +512,6 @@ async def test_disconnect_after_middlewares_and_result_backend() -> None:
         "result backend: shut down",
         "database: disconnected",
     ]
-
-
-seen: list[Shutdown] = []
-
-
-async def watch(shutdown: Shutdown, tasks: BackgroundTasks) -> None:
-    async def forever() -> None:
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            events.append("background: cancelled")
-            raise
-
-    tasks.spawn(forever())
-    seen.append(shutdown)
-    events.append(f"shutdown set: {shutdown.is_set()}")
-
-
-async def test_shutdown_is_set_and_background_tasks_stop() -> None:
-    seen.clear()
-    broker = make_broker(Dependencies())
-    task = broker.task(watch)
-
-    async with started(broker):
-        await task_result(task)
-
-    assert events == ["shutdown set: False", "background: cancelled"]
-    assert seen[0].is_set()
 
 
 class Slow(Client):

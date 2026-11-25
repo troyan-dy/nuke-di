@@ -10,10 +10,10 @@ from aiogram import Dispatcher
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.types import TelegramObject
 
+from nuke_di._integration import Binding
 from nuke_di.aiogram.framework import _AIOGRAM, _RESERVED, Arguments
 from nuke_di.aiogram.signatures import _client_arguments
 from nuke_di.core import Dependencies
-from nuke_di.integration import Binding
 from nuke_di.naming import sname
 from nuke_di.types import Client
 

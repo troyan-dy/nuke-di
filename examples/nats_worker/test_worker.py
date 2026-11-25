@@ -1,15 +1,15 @@
+import asyncio
 from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 from nats.aio.msg import Msg
-from nuke_di import ConnectError, Dependencies, Shutdown
+from nuke_di import ConnectError, Dependencies
 
 from nats_worker.clients import SUBJECT, Nats, Order, Orders
 from nats_worker.worker import QUEUE_GROUP, consume, process_order
 
 
 def message(payload: bytes) -> Msg:
-    # A delivered message without a server: process_order() reads only its data
     return Msg(_client=MagicMock(), subject=SUBJECT, data=payload)
 
 
@@ -29,24 +29,34 @@ async def test_process_order_skips_an_invalid_message() -> None:
     assert not orders.saved
 
 
-async def test_consume_drains_the_subscription_on_shutdown() -> None:
+async def test_consume_drains_the_subscription_on_cancellation() -> None:
+    started = asyncio.Event()
     subscription = AsyncMock()
-    nats = MagicMock()
-    nats.connection.subscribe = AsyncMock(return_value=subscription)
-    shutdown = Shutdown()
-    shutdown.set()  # SIGTERM arrived: consume() returns right after draining
 
-    await consume(nats, Orders(), shutdown)
+    def subscribe(*args: object, **kwargs: object) -> AsyncMock:
+        started.set()
+        return subscription
+
+    nats = MagicMock()
+    nats.connection.subscribe = AsyncMock(side_effect=subscribe)
+    task = asyncio.create_task(consume(nats, Orders()))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
     nats.connection.subscribe.assert_awaited_once_with(SUBJECT, queue=QUEUE_GROUP, cb=ANY)
     subscription.drain.assert_awaited_once()
 
 
 async def test_nats_down_fails_the_startup_at_once(di: Dependencies, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NATS_URL", "nats://localhost:1")  # nothing listens there
+    refused = AsyncMock(side_effect=ConnectionRefusedError("broker unavailable"))
+    monkeypatch.setattr(asyncio, "open_connection", refused)
+    monkeypatch.setenv("NATS_URL", "nats://broker.test:4222")
     di.resolve(Nats)
 
-    # No retries: the first refused connection is the error, well before CONNECT_TIMEOUT_SECONDS
     with pytest.raises(ConnectError, match=r"Nats.connect\(\) raised"):
         async with di:
             ...
+
+    refused.assert_awaited_once()

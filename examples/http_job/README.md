@@ -1,13 +1,13 @@
 # HTTP job
 
-A `@job` that asks the PyPI JSON API for the latest version of several packages at once, through an
+A script that asks the PyPI JSON API for the latest version of several packages at once, through an
 `httpx.AsyncClient` wrapped in a client. Use this shape for any job that talks to an HTTP API: the
 HTTP client is created once with its base URL and timeout, shared by every request, and closed on exit.
 
 | File               | What it holds                                                                |
 |--------------------|------------------------------------------------------------------------------|
 | `clients.py`       | `Settings`, which reads `PYPI_URL` and `HTTP_TIMEOUT_SECONDS`, and `PyPI`, which creates the `httpx.AsyncClient` in `connect()` and closes it in `disconnect()` |
-| `versions.py`      | The `versions` job: `--package` repeated, the requests run in an `asyncio.TaskGroup` |
+| `versions.py`      | The `versions` job: Repeated `--package` flags from `argparse`, and concurrent requests |
 | `test_versions.py` | The job with `PyPI` mocked, and `PyPI` itself over an `httpx.MockTransport`; no network |
 
 | Variable               | Default            |
@@ -38,11 +38,9 @@ pypi: connected to https://pypi.org
 pypi: disconnected
 $ echo $?
 1
-$ uv run python -m http_job.versions -p fastapi -p no-such-package-nuke-di 2>&1 >/dev/null | grep -E "failed|httpx\."
-Run http_job.versions.versions failed
+$ uv run python -m http_job.versions -p fastapi -p no-such-package-nuke-di 2>&1 >/dev/null | grep -E "httpx\."
     | httpx.HTTPStatusError: Client error '404 Not Found' for url 'https://pypi.org/pypi/no-such-package-nuke-di/json'
-$ HTTP_TIMEOUT_SECONDS=0.001 uv run python -m http_job.versions -p fastapi 2>&1 >/dev/null | grep -E "failed|httpx\."
-Run http_job.versions.versions failed
+$ HTTP_TIMEOUT_SECONDS=0.001 uv run python -m http_job.versions -p fastapi 2>&1 >/dev/null | grep -E "httpx\."
     | httpx.ConnectTimeout
 ```
 
@@ -56,6 +54,8 @@ $ uv run pytest -q http_job
 
 ## What to look at
 
+- The script parses its own arguments with `argparse`. Its `main()` passes the package names to the
+  injected function and runs it inside an explicit container context.
 - `PyPI.__init__` only stores `Settings`; the `httpx.AsyncClient` is created in `connect()` with an
   explicit `httpx.Timeout`, so no request can hang the job, and `aclose()` runs in `disconnect()`.
 - `Settings` is a client too: the environment is read once, when the tree is built, and every client

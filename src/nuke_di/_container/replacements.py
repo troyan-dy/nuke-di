@@ -6,7 +6,6 @@ block.
 from typing import TYPE_CHECKING, Any, TypeAlias
 
 from nuke_di._container.messages import names, state_error
-from nuke_di.errors import ConnectError
 from nuke_di.types import Client
 
 if TYPE_CHECKING:
@@ -31,11 +30,11 @@ def check_mockable(
     current = container._replacements.get(client_class)
     if current is not None:
         if new is not None and new is not current:
-            raise ConnectError(f"{name} already has a replacement")
+            raise RuntimeError(f"{name} already has a replacement")
         return current
     # Consumers resolved before would keep the real client while the caller holds the Replacement
     if is_resolved(container, client_class):
-        raise ConnectError(f"{name} is already resolved, call mock() before resolve() or inject()")
+        raise RuntimeError(f"{name} is already resolved, call mock() before resolve() or inject()")
     return None
 
 
@@ -52,9 +51,9 @@ def check_overridable(container: "Dependencies", client_class: type[Client]) -> 
         named = names(container)
         resolved = sorted(named[type(client)] for client in container.connect_clients)
         listed = ", ".join(resolved)
-        raise ConnectError(f"override({name}) needs a container without resolved clients, found: {listed}")
+        raise RuntimeError(f"override({name}) needs a container without resolved clients, found: {listed}")
     if client_class in container._replacements:
-        raise ConnectError(f"{name} already has a replacement")
+        raise RuntimeError(f"{name} already has a replacement")
     return name
 
 
@@ -73,7 +72,7 @@ def exit_override(container: "Dependencies", entry: _Replacement, name: str) -> 
     """
     close_override(container, entry)
     if container.connected:
-        raise ConnectError(f"override({name}) exited while the container is connected")
+        raise RuntimeError(f"override({name}) exited while the container is connected")
 
 
 def register_replacement(

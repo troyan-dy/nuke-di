@@ -2,7 +2,7 @@
 A mypy plugin that checks the client trees of a program while mypy checks its types.
 
 Enable it in the mypy configuration, `plugins = ["nuke_di.mypy"]` under `[tool.mypy]` of `pyproject.toml`. At every
-`resolve()`, `inject()`, `@job` and `@worker` it walks the `__init__` of every client the call would build and reports
+`resolve()`, `inject()`, `@entrypoint` it walks the `__init__` of every client the call would build and reports
 what the container would raise, with the same message, so a broken tree fails `mypy` instead of the process.
 
 Only what mypy keeps in its cache is read: a module checked from the cache has its classes and their types, not their

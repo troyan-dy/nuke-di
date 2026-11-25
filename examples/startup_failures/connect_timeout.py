@@ -13,8 +13,6 @@ async def main() -> None:
     except ConnectTimeoutError as exc:  # a ConnectError too
         print(f"{type(exc).__name__}: {exc}")
         print(f"__cause__: {exc.__cause__!r}")
-    for timing in deps.timings:
-        print(f"{timing.name:<8} connect {timing.connect_outcome}  disconnect {timing.disconnect_outcome}")
 
 
 if __name__ == "__main__":

@@ -118,7 +118,7 @@ the layer barriers for `Kafka` while `Postgres` was long connected.
   ([#35](https://github.com/troyan-dy/nuke-di/issues/35)). `benchmarks/compare.py` still raises it, for the
   libraries that recurse.
 - The `connect()` figures include the logging calls of the container (the `nuke_di` logger with no
-  handler) and a `ClientTiming` per client, which is what a real startup pays too.
+  handler). Baselines before 3.0 also include the cost of retaining a timing record for each client.
 - The application figures are wall time, and `asyncio.sleep()` overshoots by up to a millisecond per
   sleep in a chain, which the container and the critical path both pay: compare the two with each other,
   not either with the nominal 84 ms.

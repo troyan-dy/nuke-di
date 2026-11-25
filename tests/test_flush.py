@@ -1,7 +1,6 @@
 import pytest
 
 from nuke_di import Client, Dependencies
-from nuke_di.errors import ConnectError
 
 
 class InnerDeps(Client):
@@ -53,5 +52,5 @@ async def test_flush_on_connected() -> None:
     dep.resolve(PublicClient)
 
     async with dep:
-        with pytest.raises(ConnectError):
+        with pytest.raises(RuntimeError):
             dep.flush()

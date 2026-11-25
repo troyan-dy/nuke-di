@@ -8,7 +8,24 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [3.0.0] - 2026-11-25
 
+### Changed
+
+- Use `@entrypoint` for a module executable. It injects clients and runs one async function
+  inside the container lifecycle. Modules that take launch arguments or need process supervision
+  use an explicit `main()`. See [migration from 2.x](docs/guide/workers-and-jobs.md#migrating-from-2x).
+- Raise ordinary exceptions for dependency initialization and connection failures. Container
+  state errors use `RuntimeError`. Framework lifespans report DI errors directly and wrap an
+  explicit client `SystemExit` as a startup failure.
+
 ### Removed
+
+- Remove the `@job` and `@worker` runtime, including launch parameters, hooks, grace periods,
+  exit-code policies, `Shutdown` and `BackgroundTasks`.
+- Remove public graph and timing objects. Dependency paths and lifecycle logs remain available
+  for diagnosis.
+- Remove `client_dataclass` and `CONNECT_CONCURRENCY`. Use `dataclasses.dataclass` on a `Client`
+  subclass. Clients start concurrently as their dependencies become ready.
+- Make shared integration helpers private. Continue using the framework-specific adapters.
 
 - Remove `NotSingletonClient`. A container shares one instance of each `Client` class across all consumers.
   Use a method on a client to create fresh state for an operation.
@@ -184,7 +201,7 @@ the mypy and pytest plugins behave as in 1.19.0; the names below changed to sati
 
 ### Documentation
 
-- [Writing an integration](docs/guide/integrations.md#per-container) says which frameworks `per_container=True`
+- The 1.x integration guide says which frameworks `per_container=True`
   fits, now that no shipped integration uses it, and documents the `Binding(cls, container, framework)`
   constructor and its `cls` and `instance`; the [FastAPI](docs/guide/fastapi.md) rules say which container's
   clients an app gets, mounted apps included; in every language. ADR-0003 has a dated revisit with the

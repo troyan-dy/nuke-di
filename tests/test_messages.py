@@ -81,23 +81,23 @@ async def test_resolve_inject_mock_override_name_the_call_and_the_state() -> Non
         "the container is already connected; resolve, inject, mock and override only work before connect(), "
         "flush() after disconnect()"
     )
-    with pytest.raises(ConnectError, match=rf"^resolve\(Database\): {expected}$"):
+    with pytest.raises(RuntimeError, match=rf"^resolve\(Database\): {expected}$"):
         deps.resolve(Database)
-    with pytest.raises(ConnectError, match=rf"^inject\(handler\): {expected}$"):
+    with pytest.raises(RuntimeError, match=rf"^inject\(handler\): {expected}$"):
         deps.inject(handler)
-    with pytest.raises(ConnectError, match=rf"^mock\(Database\): {expected}$"):
+    with pytest.raises(RuntimeError, match=rf"^mock\(Database\): {expected}$"):
         deps.mock(Database)
-    with pytest.raises(ConnectError, match=rf"^override\(Database\): {expected}$"), deps.override(Database):
+    with pytest.raises(RuntimeError, match=rf"^override\(Database\): {expected}$"), deps.override(Database):
         ...
-    with pytest.raises(ConnectError, match=r"^flush\(\): already connected, call disconnect\(\) first$"):
+    with pytest.raises(RuntimeError, match=r"^flush\(\): already connected, call disconnect\(\) first$"):
         deps.flush()
-    with pytest.raises(ConnectError, match=r"^connect\(\): already connected, call disconnect\(\) first$"):
+    with pytest.raises(RuntimeError, match=r"^connect\(\): already connected, call disconnect\(\) first$"):
         await deps.connect()
     await deps.disconnect()
 
 
 async def test_disconnect_names_the_state() -> None:
-    with pytest.raises(ConnectError, match=r"^disconnect\(\): already disconnected$"):
+    with pytest.raises(RuntimeError, match=r"^disconnect\(\): already disconnected$"):
         await Dependencies().disconnect()
 
 
@@ -109,7 +109,7 @@ async def test_timeout_names_the_limit(caplog: pytest.LogCaptureFixture) -> None
     deps = Dependencies(settings=DependenciesSettings(connect_timeout=2.5))
     deps.resolve(Hanging)
 
-    with caplog.at_level(logging.ERROR, logger="nuke_di.core"), pytest.raises(ConnectTimeoutError) as excinfo:
+    with caplog.at_level(logging.ERROR, logger="nuke_di"), pytest.raises(ConnectTimeoutError) as excinfo:
         await deps.connect()
 
     assert str(excinfo.value) == "Hanging did not connect within 2.5s (CONNECT_TIMEOUT_SECONDS)"
@@ -124,7 +124,7 @@ async def test_failed_connect_names_the_exception(caplog: pytest.LogCaptureFixtu
     deps = Dependencies()
     deps.resolve(Broken)
 
-    with caplog.at_level(logging.ERROR, logger="nuke_di.core"), pytest.raises(ConnectError) as excinfo:
+    with caplog.at_level(logging.ERROR, logger="nuke_di"), pytest.raises(ConnectError) as excinfo:
         await deps.connect()
 
     assert str(excinfo.value) == "Broken.connect() raised OSError: broker unreachable"
@@ -140,7 +140,7 @@ async def test_failed_disconnect_is_logged_with_the_exception(caplog: pytest.Log
     deps = Dependencies()
     deps.resolve(Broken)
     await deps.connect()
-    with caplog.at_level(logging.ERROR, logger="nuke_di.core"):
+    with caplog.at_level(logging.ERROR, logger="nuke_di"):
         await deps.disconnect()
 
     assert "Broken.disconnect() raised OSError: socket closed" in caplog.text
@@ -204,9 +204,9 @@ async def test_a_non_client_on_a_connected_container_gets_the_state_error() -> N
     deps.resolve(Database)
     await deps.connect()
 
-    with pytest.raises(ConnectError, match=r"^resolve\(\{\}\): the container is already connected"):
+    with pytest.raises(RuntimeError, match=r"^resolve\(\{\}\): the container is already connected"):
         deps.resolve({})  # type: ignore[arg-type]
-    with pytest.raises(ConnectError, match=r"^resolve\(int\): the container is already connected"):
+    with pytest.raises(RuntimeError, match=r"^resolve\(int\): the container is already connected"):
         deps.resolve(int)  # type: ignore[type-var]
     await deps.disconnect()
 
@@ -241,13 +241,12 @@ async def test_two_clients_with_one_name_are_told_apart_by_module(caplog: pytest
 
     deps = Dependencies()
     deps.resolve(Root)
-    with caplog.at_level(logging.INFO, logger="nuke_di.core"):
-        await deps.connect()
+    caplog.set_level(logging.DEBUG, logger="nuke_di")
+    await deps.connect()
     await deps.disconnect()
 
-    names = [timing.name for timing in deps.timings]
+    names = _connected_names(caplog)
     assert names == [f"{__name__}.Database", "app.billing.Database", "Root"]
-    assert f"{__name__}.Database 0.00s" in caplog.text and "app.billing.Database 0.00s" in caplog.text
 
 
 def test_two_clients_with_one_name_are_told_apart_in_the_path() -> None:
@@ -269,35 +268,37 @@ def test_two_clients_with_one_name_are_told_apart_in_the_path() -> None:
     deps = Dependencies()
     deps.resolve(Database)
     deps.mock(billing)
-    with pytest.raises(ConnectError) as error, deps.override(billing):
+    with pytest.raises(RuntimeError) as error, deps.override(billing):
         ...
     assert str(error.value) == (
         f"override(app.billing.Database) needs a container without resolved clients, found: {__name__}.Database"
     )
 
 
-async def test_a_nested_class_keeps_its_outer_class() -> None:
+async def test_a_nested_class_keeps_its_outer_class(caplog: pytest.LogCaptureFixture) -> None:
     deps = Dependencies()
     deps.resolve(Outer.Inner)
+    caplog.set_level(logging.DEBUG, logger="nuke_di")
     await deps.connect()
     await deps.disconnect()
 
-    assert deps.timings[0].name == "Outer.Inner"
+    assert _connected_names(caplog)[0] == "Outer.Inner"
 
 
-async def test_a_class_local_to_a_function_drops_the_function() -> None:
+async def test_a_class_local_to_a_function_drops_the_function(caplog: pytest.LogCaptureFixture) -> None:
     class Local(Client):
         """A client local to the test function."""
 
     deps = Dependencies()
     deps.resolve(Local)
+    caplog.set_level(logging.DEBUG, logger="nuke_di")
     await deps.connect()
     await deps.disconnect()
 
-    assert deps.timings[0].name == "Local"
+    assert _connected_names(caplog)[0] == "Local"
 
 
-async def test_two_local_classes_with_one_name_are_told_apart_in_full() -> None:
+async def test_two_local_classes_with_one_name_are_told_apart_in_full(caplog: pytest.LogCaptureFixture) -> None:
     def first() -> type[Client]:
         class Local(Client):
             """A client local to a function, with the name of the other one."""
@@ -313,10 +314,11 @@ async def test_two_local_classes_with_one_name_are_told_apart_in_full() -> None:
     deps = Dependencies()
     deps.resolve(first())
     deps.resolve(second())
+    caplog.set_level(logging.DEBUG, logger="nuke_di")
     await deps.connect()
     await deps.disconnect()
 
-    assert [timing.name for timing in deps.timings] == [
+    assert _connected_names(caplog) == [
         f"{__name__}.test_two_local_classes_with_one_name_are_told_apart_in_full.<locals>.first.<locals>.Local",
         f"{__name__}.test_two_local_classes_with_one_name_are_told_apart_in_full.<locals>.second.<locals>.Local",
     ]
@@ -332,10 +334,19 @@ def test_a_nested_class_is_named_in_full_in_an_argument_error() -> None:
         Dependencies().resolve(Outer)  # type: ignore[type-var]
 
 
-async def test_a_unique_name_stays_short() -> None:
+async def test_a_unique_name_stays_short(caplog: pytest.LogCaptureFixture) -> None:
     deps = Dependencies()
     deps.resolve(Users)
+    caplog.set_level(logging.DEBUG, logger="nuke_di")
     await deps.connect()
     await deps.disconnect()
 
-    assert [timing.name for timing in deps.timings] == ["Database", "Users"]
+    assert _connected_names(caplog) == ["Database", "Users"]
+
+
+def _connected_names(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        str(record.client)  # type: ignore[attr-defined]
+        for record in caplog.records
+        if record.getMessage().startswith("Connected client ")
+    ]

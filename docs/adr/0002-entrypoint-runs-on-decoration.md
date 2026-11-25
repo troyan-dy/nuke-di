@@ -9,3 +9,11 @@ The cost is that the module stops executing at the decorator: code below the ent
 - **An explicit tail** (`if __name__ == "__main__": sync.run()`): no surprise, but every entrypoint file carries the same boilerplate line and forgetting it gives a module that silently does nothing.
 - **A generic CLI** (`nuke-di run app.jobs.sync:sync`): no boilerplate either, but a second way to start the same thing and a command-line surface to maintain.
 - **Deferring the Run to `atexit`**, so the whole module executes first: exit codes would have to go through `os._exit()`, which skips other exit handlers and buffer flushing, and threads are already shut down by then. That trades one visible rule for several hidden ones.
+
+## Revisited in 3.0
+
+One `@entrypoint` decorator serves executable modules. It injects clients, runs the
+function inside the container context, and leaves failures and exit to ordinary Python.
+An import still returns the original function. Declare the entrypoint last.
+Applications that accept command-line arguments or supervise tasks use an explicit
+`main()` or a framework's entrypoint.

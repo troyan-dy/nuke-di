@@ -4,12 +4,13 @@ How the container reads `__init__`: once per class, from the code object where i
 
 import inspect
 import logging
+from dataclasses import dataclass
 from functools import wraps
 from typing import Any
 
 import pytest
 
-from nuke_di import Client, Dependencies, InvalidSignatureError, client_dataclass
+from nuke_di import Client, Dependencies, InvalidSignatureError
 
 ENTRY = "__nuke_di_arguments__"
 
@@ -93,8 +94,8 @@ class ClassSignature(Client):
         self.db = db
 
 
-@client_dataclass(kw_only=True)
-class DataclassClient:
+@dataclass(kw_only=True)
+class DataclassClient(Client):
     db: Database
     retries: int = 3
 
@@ -223,7 +224,7 @@ def test_signature_of_the_class_is_ignored() -> None:
 
 
 def test_keyword_only_dataclass() -> None:
-    client = Dependencies().resolve(DataclassClient)  # type: ignore[type-var]
+    client = Dependencies().resolve(DataclassClient)
 
     assert (type(client.db), client.retries) == (Database, 3)
 
@@ -246,11 +247,11 @@ def test_future_annotations() -> None:
 
 
 def test_resolve_logs_only_when_debug_is_enabled(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.INFO, logger="nuke_di.core"):
+    with caplog.at_level(logging.INFO, logger="nuke_di"):
         Dependencies().resolve(Repository)
     assert caplog.records == []
 
-    with caplog.at_level(logging.DEBUG, logger="nuke_di.core"):
+    with caplog.at_level(logging.DEBUG, logger="nuke_di"):
         Dependencies().resolve(Repository)
     assert [record.getMessage() for record in caplog.records] == [
         'Resolving dependency "Repository"',

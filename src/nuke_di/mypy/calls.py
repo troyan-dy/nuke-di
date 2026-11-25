@@ -1,5 +1,5 @@
 """
-The checks of the calls that build clients, `resolve()`, `inject()`, `@job` and `@worker`, and the type
+The checks of the calls that build clients, `resolve()`, `inject()`, `@entrypoint`, and the type
 `inject()` returns.
 """
 
@@ -45,8 +45,8 @@ class _Calls:
         narrowed = None if clients is None else without_clients(func, clients)
         return ctx.default_return_type if narrowed is None else narrowed
 
-    def check_entrypoint(self, ctx: MethodContext | FunctionContext) -> Type:
-        # `job(hooks=...)` has no function yet: its decorator is checked when it is applied
+    def check_entrypoint(self, ctx: FunctionContext) -> Type:
+        # A dynamically typed function is validated by the runtime.
         func = first_argument(ctx)
         if isinstance(func, CallableType) and not func.is_type_obj():
             self._check_function(ctx, func)

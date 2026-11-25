@@ -28,26 +28,3 @@ def test_wiring_catches_a_broken_init() -> None:
     """The same inject() fails on a broken __init__ with the error a real run would print."""
     with pytest.raises(InvalidSignatureError, match=r'Argument "table" of "Audit.__init__" is str'):
         Dependencies().inject(audited)  # type: ignore[nuke-di]
-
-
-def test_graph() -> None:
-    """deps.graph(): assert on which clients an entrypoint pulls in and what each one needs."""
-    deps = Dependencies()
-    deps.inject(signups)
-    nodes = {node.name: node for node in deps.graph().nodes}
-
-    assert list(nodes["Signups"].dependencies) == ["db", "mailer"]
-    leaves = {name for name, node in nodes.items() if not node.dependencies}
-    assert leaves == {"Queue", "Database", "Mailer", "Shutdown"}
-    assert "Database --> Signups" in deps.graph().to_mermaid()
-
-
-def test_graph_shows_replacements() -> None:
-    """A mocked client shows up in the graph with `replacement` set: it is never connected."""
-    deps = Dependencies()
-    db = deps.mock(Database)
-    deps.inject(reminders)
-    nodes = {node.name: node for node in deps.graph().nodes}
-
-    assert nodes["Database"].replacement is db
-    assert nodes["Mailer"].replacement is None
