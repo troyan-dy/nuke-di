@@ -1,6 +1,6 @@
 # nuke-di
 
-[![PyPI](https://img.shields.io/pypi/v/nuke-di)](https://pypi.org/project/nuke-di/)
+[![Release](https://img.shields.io/github/v/release/troyan-dy/nuke-di)](https://github.com/troyan-dy/nuke-di/releases/latest)
 [![Python](https://img.shields.io/pypi/pyversions/nuke-di)](https://pypi.org/project/nuke-di/)
 [![CI](https://github.com/troyan-dy/nuke-di/actions/workflows/ci.yml/badge.svg)](https://github.com/troyan-dy/nuke-di/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/development.md)
