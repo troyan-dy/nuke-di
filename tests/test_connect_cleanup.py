@@ -76,6 +76,31 @@ class SelfCancelling(Recorded):
         raise asyncio.CancelledError
 
 
+async def _cancel_current_task() -> None:
+    task = asyncio.current_task()
+    assert task is not None
+    task.cancel()
+    await asyncio.sleep(0)
+
+
+class CancelsOwnConnect(Sibling):
+    async def connect(self) -> None:
+        await _cancel_current_task()
+
+
+class DependsOnCancellingClient(Recorded):
+    def __init__(self, dependency: CancelsOwnConnect) -> None:
+        self.dependency = dependency
+
+    async def connect(self) -> None:
+        pytest.fail("a dependent ran after its dependency cancelled startup")
+
+
+class CancelsOwnDisconnect(Sibling):
+    async def disconnect(self) -> None:
+        await _cancel_current_task()
+
+
 class Interrupted(Recorded):
     """
     Records that its disconnect() saw the cancellation and got to finish it.
@@ -119,15 +144,51 @@ async def test_failure_disconnects_connected_siblings() -> None:
     assert recorder.disconnected == ["Sibling", "Postgres"]
 
 
-async def test_failure_skips_cancelled_siblings() -> None:
+async def test_failure_skips_cancelled_siblings(caplog: pytest.LogCaptureFixture) -> None:
     dep = Dependencies()
     dep.resolve(Hanging)
     dep.resolve(Broken)
 
-    with pytest.raises(ConnectError):
+    with pytest.raises(ConnectError, match="Broken"):
         await dep.connect()
 
     assert recorder.disconnected == ["Postgres"]
+    assert "Hanging.connect() raised CancelledError" not in caplog.text
+
+
+@pytest.mark.parametrize("previously_cancelled", [False, True])
+async def test_self_cancelled_connect_rolls_back(previously_cancelled: bool) -> None:
+    dep = Dependencies()
+    dep.resolve(DependsOnCancellingClient)
+
+    async def connect() -> None:
+        if previously_cancelled:
+            with pytest.raises(asyncio.CancelledError):
+                await _cancel_current_task()
+
+        async with asyncio.timeout(0.5):
+            with pytest.raises(ConnectError, match="CancelsOwnConnect") as raised:
+                await dep.connect()
+        assert isinstance(raised.value.__cause__, asyncio.CancelledError)
+
+    await asyncio.create_task(connect())
+
+    assert recorder.disconnected == ["Postgres"]
+    assert not dep.connected
+    assert not dep.clients
+
+
+async def test_self_cancelled_disconnect_releases_dependencies() -> None:
+    dep = Dependencies()
+    dep.resolve(CancelsOwnDisconnect)
+    await dep.connect()
+
+    async with asyncio.timeout(0.5):
+        await dep.disconnect()
+
+    assert recorder.disconnected == ["Postgres"]
+    assert not dep.connected
+    assert not dep.clients
 
 
 async def test_failure_resets_container() -> None:

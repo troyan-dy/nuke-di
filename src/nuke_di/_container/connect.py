@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from nuke_di._container.disconnect import Disconnect
 from nuke_di._container.messages import names
 from nuke_di._container.order import (
-    cancelled_from_outside,
+    LifecycleCancellation,
     dependencies_among,
     in_dependency_order,
     within,
@@ -42,6 +42,7 @@ class Connect:
 
     def __init__(self, container: "Dependencies") -> None:
         self._container = container
+        self._cancellation = LifecycleCancellation()
         settings = container.settings
         self._timeout = settings.connect_timeout
         # Clients whose connect() finished, so a failure knows what to roll back
@@ -52,13 +53,12 @@ class Connect:
     async def run(self) -> None:
         clients = self._snapshot()
         self._total = len(clients)
-        task = asyncio.current_task()
-        prior_cancels = 0 if task is None else task.cancelling()
+        prior_cancels = self._cancellation.prior_requests
 
         try:
             duration = await self._connect(clients, prior_cancels)
         except BaseException as exc:
-            await self._rollback(exc, task, prior_cancels)
+            await self._rollback(exc, self._cancellation.task, prior_cancels)
             error = _startup_error(exc)
             if error is None:
                 raise
@@ -115,12 +115,10 @@ class Connect:
             )
 
     async def _connect(self, clients: list[Client], prior_cancels: int) -> float:
-        # Deliver a pending cancellation before starting clients. An already handled request only leaves a count.
-        if prior_cancels:
-            await asyncio.sleep(0)
         started = time.perf_counter()
         # A client connects once its dependencies have. The first failure cancels clients still connecting or waiting.
-        await in_dependency_order(clients, dependencies_among(self._container, clients), self.client)
+        dependencies = dependencies_among(self._container, clients)
+        await in_dependency_order(clients, dependencies, self.client, prior_cancels)
         return time.perf_counter() - started
 
     async def _rollback(
@@ -163,7 +161,7 @@ class Connect:
 
     def _failure(self, name: str, duration: float, exc: BaseException) -> Exception | None:
         # A self-cancelled client must fail the group, or its consumers wait forever.
-        if isinstance(exc, asyncio.CancelledError) and cancelled_from_outside():
+        if isinstance(exc, asyncio.CancelledError) and self._cancellation.group_is_cancelling():
             return None
         raised = f"{name}.connect() raised {described(exc)}"
         logger.exception("%s", raised, extra=client_fields(name, duration))

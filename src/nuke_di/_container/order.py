@@ -20,10 +20,23 @@ _Dependency: TypeAlias = tuple[type[Client], Client]
 _NO_ARGUMENTS: Final[Mapping[str, _Dependency]] = MappingProxyType({})
 
 
+class LifecycleCancellation:
+    """Distinguish a client's cancellation from cancellation of the lifecycle task group."""
+
+    def __init__(self) -> None:
+        self.task = asyncio.current_task()
+        self.prior_requests = 0 if self.task is None else self.task.cancelling()
+
+    def group_is_cancelling(self) -> bool:
+        # TaskGroup cancels the owner on a sibling failure too. Requests already handled by the owner do not count.
+        return self.task is None or self.task.cancelling() > self.prior_requests
+
+
 async def in_dependency_order(
     clients: list[Client],
     waits_for: dict[int, list[int]],
     step: _Step,
+    prior_cancels: int,
 ) -> None:
     """
     Run `step` for every client of `clients` concurrently, each once `step` has returned for the clients it
@@ -32,6 +45,9 @@ async def in_dependency_order(
     A client that `step` raised for releases no one: in a connect, the consumers of a failed client must not start
     before the group cancels them. The first exception cancels every step still running or waiting.
     """
+    # Deliver a pending cancellation before starting clients. An already handled request only leaves a count.
+    if prior_cancels:
+        await asyncio.sleep(0)
     done = {id(client): asyncio.Event() for client in clients}
 
     async with asyncio.TaskGroup() as group:
@@ -83,12 +99,3 @@ async def within(seconds: float, coro: Coroutine[Any, Any, None]) -> None:
         raise TimeoutError
     async with asyncio.timeout(seconds):
         await coro
-
-
-def cancelled_from_outside() -> bool:
-    """
-    Whether the task is being cancelled, as opposed to a client raising a CancelledError of its own, e.g. re-raised
-    from a task it awaited.
-    """
-    task = asyncio.current_task()
-    return task is None or task.cancelling() > 0

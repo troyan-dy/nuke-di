@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from nuke_di._container.messages import names
 from nuke_di._container.order import (
-    cancelled_from_outside,
+    LifecycleCancellation,
     dependencies_among,
     in_dependency_order,
     within,
@@ -38,6 +38,7 @@ class Disconnect:
 
     def __init__(self, container: "Dependencies", to_disconnect: list[Client]) -> None:
         self._container = container
+        self._cancellation = LifecycleCancellation()
         self._to_disconnect = to_disconnect
         settings = container.settings
         self._timeout = settings.disconnect_timeout
@@ -60,11 +61,12 @@ class Disconnect:
         self._total = len(clients)
         # One budget for the whole disconnect, whatever the depth of the tree
         self._deadline = asyncio.get_running_loop().time() + container.settings.disconnect_deadline
+        consumers = consumers_of(clients, dependencies)
 
         # A client disconnects once its consumers have, however their disconnect() ended. Only a cancellation of
         # disconnect() itself ends it early: `client()` logs and swallows what a client raises
         try:
-            await in_dependency_order(clients, consumers_of(clients, dependencies), self.client)
+            await in_dependency_order(clients, consumers, self.client, self._cancellation.prior_requests)
         except BaseException:
             self._end()
             raise
@@ -91,7 +93,7 @@ class Disconnect:
             await within(min(remaining, self._timeout), client.disconnect())
         except asyncio.CancelledError:
             # A client may raise its own CancelledError. The clients it uses still need to disconnect.
-            if cancelled_from_outside():
+            if self._cancellation.group_is_cancelling():
                 raise
             logger.exception("%s.disconnect() raised CancelledError", name, extra=client_fields(name))
         except TimeoutError:
