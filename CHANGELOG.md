@@ -6,6 +6,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-11-25
+
+### Fixed
+
+- Roll back a failed `connect()` when a client raises a `BaseException`. The container disconnects clients that
+  already connected and clears its state before reporting the failure.
+- Keep startup cancellation from interrupting the rollback of a failed `connect()`. A new cancellation during
+  rollback can still interrupt it.
+
 ## [2.0.2] - 2026-11-25
 
 ### Added
@@ -947,7 +956,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v2.0.2...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v2.0.3...HEAD
+[2.0.3]: https://github.com/troyan-dy/nuke-di/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/troyan-dy/nuke-di/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/troyan-dy/nuke-di/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/troyan-dy/nuke-di/compare/v1.19.0...v2.0.0

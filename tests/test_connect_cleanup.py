@@ -1,8 +1,10 @@
 import asyncio
+import sys
 
 import pytest
 
-from nuke_di import Client, ConnectError, Dependencies
+from nuke_di import Client, ConnectError, Dependencies, NotSingletonClient
+from nuke_di._container.connect import Connect
 from tests.sequences import single
 
 
@@ -38,6 +40,10 @@ class Broken(Recorded):
 
     async def connect(self) -> None:
         raise RuntimeError("boom")
+
+
+class CompetingFailure(Broken):
+    """An independent failure that can reach the task group before Broken."""
 
 
 class Sibling(Recorded):
@@ -77,8 +83,10 @@ class Interrupted(Recorded):
 
     def __init__(self, pg: Postgres) -> None:
         self.pg = pg
+        self.disconnect_started = asyncio.Event()
 
     async def disconnect(self) -> None:
+        self.disconnect_started.set()
         try:
             await asyncio.sleep(10)
         except asyncio.CancelledError:
@@ -134,6 +142,218 @@ async def test_failure_resets_container() -> None:
     assert not dep.clients
 
 
+@pytest.mark.parametrize("error_type", [ConnectError, SystemExit, KeyboardInterrupt])
+@pytest.mark.parametrize("with_competing_failure", [False, True])
+def test_base_exception_rolls_back_connect(
+    error_type: type[BaseException],
+    with_competing_failure: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    dep = Dependencies()
+    dep.resolve(Hanging)
+    if with_competing_failure:
+        dep.resolve(CompetingFailure)
+    error = error_type("stopped")
+
+    async def fail() -> None:
+        try:
+            int("invalid configuration")
+        except ValueError as cause:
+            raise error from cause
+
+    async def connect() -> None:
+        with pytest.raises(error_type) as raised:
+            await dep.connect()
+        cause = error.__cause__
+        assert raised.value is error and isinstance(cause, ValueError) and error.__context__ is cause
+
+    monkeypatch.setattr(dep.resolve(Top).broken, "connect", fail)
+    try:
+        asyncio.run(connect())
+    except (SystemExit, KeyboardInterrupt) as escaped:
+        raise AssertionError("A client's exception escaped the calling coroutine") from escaped
+
+    assert recorder.disconnected == ["Postgres"]
+    assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
+    outcomes = {timing.name: timing.connect_outcome for timing in dep.timings}
+    expected = {"Postgres": "ok", "Broken": "failed", "Hanging": "cancelled", "Top": None}
+    if with_competing_failure:
+        expected["CompetingFailure"] = "failed"
+    assert outcomes == expected
+    assert f"Broken.connect() raised {error_type.__name__}: stopped" in caplog.text
+
+
+async def test_base_exception_group_rolls_back_connect(monkeypatch: pytest.MonkeyPatch) -> None:
+    dep = Dependencies()
+    broken = dep.resolve(Broken)
+    error = BaseException("stopped")
+
+    async def fail() -> None:
+        raise error
+
+    monkeypatch.setattr(broken, "connect", fail)
+    with pytest.raises(BaseExceptionGroup) as raised:
+        await dep.connect()
+
+    assert raised.value.exceptions == (error,)
+    assert recorder.disconnected == ["Postgres"]
+    assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
+    timing = single(other for other in dep.timings if other.name == "Broken")
+    assert timing.connect_outcome == "failed"
+
+
+async def _check_cancellation(expected: bool) -> None:
+    if expected:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.sleep(0)
+        return
+    await asyncio.sleep(0)
+
+
+async def _check_startup_failure(dep: Dependencies, error: BaseException) -> None:
+    reported_type = ConnectError if isinstance(error, OSError) else type(error)
+    with pytest.raises(reported_type) as raised:
+        await dep.connect()
+    assert raised.value is error or raised.value.__cause__ is error
+    assert recorder.disconnected == ["Postgres"]
+
+
+@pytest.fixture
+def suspending_disconnect(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def disconnect(client: Postgres) -> None:
+        # A real suspension before releasing the resource, e.g. closing a pool.
+        await asyncio.sleep(0)
+        await Recorded.disconnect(client)
+
+    monkeypatch.setattr(Postgres, "disconnect", disconnect)
+
+
+@pytest.fixture
+def reissuing_task_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    if sys.version_info >= (3, 13):
+        return
+    connect = Connect._connect
+
+    async def connect_with_reissue(controller: Connect, clients: list[NotSingletonClient], prior_cancels: int) -> float:
+        # Exercise the 3.13+ TaskGroup contract under the per-version coverage gate too.
+        try:
+            return await connect(controller, clients, prior_cancels)
+        except BaseExceptionGroup:
+            task = asyncio.current_task()
+            assert task is not None and task.cancelling()
+            task.uncancel()
+            task.cancel()
+            raise
+
+    monkeypatch.setattr(Connect, "_connect", connect_with_reissue)
+
+
+@pytest.mark.usefixtures("suspending_disconnect")
+@pytest.mark.parametrize("error_type", [OSError, SystemExit])
+@pytest.mark.parametrize("cancel_before_start", [False, True], ids=["concurrent", "previous"])
+async def test_startup_cancellation_does_not_interrupt_rollback(
+    error_type: type[BaseException],
+    cancel_before_start: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dep = Dependencies()
+    broken = dep.resolve(Broken)
+    error = error_type("boom")
+
+    async def fail() -> None:
+        if not cancel_before_start:
+            task.cancel("stop startup")
+        raise error
+
+    async def connect() -> None:
+        if cancel_before_start:
+            task.cancel()
+            await _check_cancellation(expected=True)
+
+        await _check_startup_failure(dep, error)
+        await _check_cancellation(expected=not cancel_before_start and sys.version_info >= (3, 13))
+
+    monkeypatch.setattr(broken, "connect", fail)
+    task = asyncio.create_task(connect())
+    await task
+    assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
+
+
+@pytest.mark.usefixtures("reissuing_task_group", "suspending_disconnect")
+async def test_startup_failure_preserves_reissued_cancellation(monkeypatch: pytest.MonkeyPatch) -> None:
+    dep = Dependencies()
+    broken = dep.resolve(Broken)
+    error = OSError("boom")
+
+    async def fail() -> None:
+        task.cancel()
+        raise error
+
+    async def connect() -> None:
+        await _check_startup_failure(dep, error)
+        await _check_cancellation(expected=True)
+
+    monkeypatch.setattr(broken, "connect", fail)
+    task = asyncio.create_task(connect())
+    await task
+
+
+async def test_pending_cancellation_prevents_startup() -> None:
+    dep = Dependencies()
+    dep.resolve(Broken)
+
+    async def connect() -> None:
+        parent = asyncio.current_task()
+        assert parent is not None
+        parent.cancel("pending")
+        with pytest.raises(asyncio.CancelledError, match="pending"):
+            await dep.connect()
+
+    await asyncio.create_task(connect())
+
+    assert all(timing.connect is None for timing in dep.timings)
+    assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
+
+
+@pytest.mark.usefixtures("suspending_disconnect")
+async def test_new_cancellation_at_rollback_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    dep = Dependencies()
+    dep.resolve(Broken)
+    rollback = Connect._rollback
+    cancels_before_checkpoint: list[int] = []
+
+    async def connect() -> BaseException | None:
+        task.cancel()
+        await _check_cancellation(expected=True)
+        try:
+            await dep.connect()
+        except asyncio.CancelledError as cancelled:
+            return cancelled
+        except ConnectError as error:
+            await _check_cancellation(expected=True)
+            return error
+        return None
+
+    async def cancel_at_checkpoint(
+        controller: Connect,
+        error: BaseException,
+        parent: asyncio.Task[object] | None,
+        prior_cancels: int,
+    ) -> None:
+        cancels_before_checkpoint.append(task.cancelling())
+        asyncio.get_running_loop().call_soon(task.cancel, "stop rollback")
+        await rollback(controller, error, parent, prior_cancels)
+
+    monkeypatch.setattr(Connect, "_rollback", cancel_at_checkpoint)
+    task = asyncio.create_task(connect())
+    outcome = await task
+    assert isinstance(outcome, asyncio.CancelledError) and outcome.args == ("stop rollback",)
+    assert task.cancelling() == single(cancels_before_checkpoint) + 1
+    assert not recorder.disconnected
+    assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
+
+
 async def test_cancellation_disconnects_connected_clients() -> None:
     dep = Dependencies()
     dep.resolve(Hanging)
@@ -177,14 +397,21 @@ async def test_cancelled_disconnect_waits_for_the_clients_disconnecting_and_flus
     assert recorder.disconnected == ["Sibling", "Interrupted: cancelled", "Redis"]
 
 
-async def test_cancelled_rollback_flushes() -> None:
+@pytest.mark.parametrize("cancel_during_startup", [False, True])
+async def test_cancelled_rollback_flushes(cancel_during_startup: bool, monkeypatch: pytest.MonkeyPatch) -> None:
     dep = Dependencies()
     # Interrupted connects before Broken fails, so the rollback disconnects it and hangs there
-    dep.resolve(Interrupted)
-    dep.resolve(Broken)
+    interrupted = dep.resolve(Interrupted)
+    broken = dep.resolve(Broken)
 
+    async def fail() -> None:
+        task.cancel()
+        raise RuntimeError("boom")
+
+    if cancel_during_startup:
+        monkeypatch.setattr(broken, "connect", fail)
     task = asyncio.create_task(dep.connect())
-    await asyncio.sleep(0.01)
+    await asyncio.wait_for(interrupted.disconnect_started.wait(), timeout=2)
     task.cancel()
 
     with pytest.raises(asyncio.CancelledError):
