@@ -4,6 +4,7 @@ import sys
 import pytest
 
 from nuke_di import Client, ConnectError, Dependencies
+from nuke_di._container.connect import Connect
 from tests.sequences import single
 
 
@@ -273,6 +274,44 @@ async def test_pending_cancellation_prevents_startup() -> None:
     await asyncio.create_task(connect())
 
     assert all(timing.connect is None for timing in dep.timings)
+    assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
+
+
+@pytest.mark.usefixtures("suspending_disconnect")
+async def test_new_cancellation_at_rollback_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    dep = Dependencies()
+    dep.resolve(Broken)
+    rollback = Connect._rollback
+    cancels_before_checkpoint: list[int] = []
+
+    async def connect() -> BaseException | None:
+        task.cancel()
+        await _check_cancellation(expected=True)
+        try:
+            await dep.connect()
+        except asyncio.CancelledError as cancelled:
+            return cancelled
+        except ConnectError as error:
+            await _check_cancellation(expected=True)
+            return error
+        return None
+
+    async def cancel_at_checkpoint(
+        controller: Connect,
+        error: BaseException,
+        parent: asyncio.Task[object] | None,
+        prior_cancels: int,
+    ) -> None:
+        cancels_before_checkpoint.append(task.cancelling())
+        asyncio.get_running_loop().call_soon(task.cancel, "stop rollback")
+        await rollback(controller, error, parent, prior_cancels)
+
+    monkeypatch.setattr(Connect, "_rollback", cancel_at_checkpoint)
+    task = asyncio.create_task(connect())
+    outcome = await task
+    assert isinstance(outcome, asyncio.CancelledError) and outcome.args == ("stop rollback",)
+    assert task.cancelling() == single(cancels_before_checkpoint) + 1
+    assert not recorder.disconnected
     assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
 
 

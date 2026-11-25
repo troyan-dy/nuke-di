@@ -143,13 +143,19 @@ class Connect:
         prior_cancels: int,
     ) -> None:
         cancellation = None
-        if isinstance(error, BaseExceptionGroup) and task is not None and task.cancelling():
+        cancels = 0 if task is None else task.cancelling()
+        if isinstance(error, BaseExceptionGroup) and task is not None and cancels:
             # TaskGroup can reissue cancellation when it raises a group. Take it before disconnecting so a
             # request from startup cannot stop the rollback at its first await.
             try:
                 await asyncio.sleep(0)
             except asyncio.CancelledError as exc:
-                cancellation = exc
+                if task.cancelling() > cancels:
+                    # A new request arrived during the checkpoint. Let it cancel the rollback itself.
+                    task.uncancel()
+                    task.cancel(*exc.args)
+                else:
+                    cancellation = exc
         logger.debug("Connect failed, disconnecting %d connected clients", len(self._connected), extra=fields())
         await Disconnect(self._container, self._connected).run()
         if cancellation is not None and task is not None and task.cancelling() > prior_cancels:
