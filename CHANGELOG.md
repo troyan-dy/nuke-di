@@ -6,13 +6,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [3.0.0] - 2026-11-25
+## [3.0.0] - 2026-11-26
 
 ### Changed
 
 - Use `@entrypoint` for a module executable. It injects clients and runs one async function
   inside the container lifecycle. Modules that take launch arguments or need process supervision
-  use an explicit `main()`. See [migration from 2.x](docs/guide/workers-and-jobs.md#migrating-from-2x).
+  use an explicit `main()`. See [migration from 2.x](https://github.com/troyan-dy/nuke-di/blob/v3.0.0/docs/guide/workers-and-jobs.md#migrating-from-2x).
 - Raise ordinary exceptions for dependency initialization and connection failures. Container
   state errors use `RuntimeError`. Framework lifespans report DI errors directly and wrap an
   explicit client `SystemExit` as a startup failure.
@@ -31,7 +31,6 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ### Removed
 
 - Remove `connect_clients` and constructor arguments for pre-populating client instances.
-
 - Remove the `@job` and `@worker` runtime, including launch parameters, hooks, grace periods,
   exit-code policies, `Shutdown` and `BackgroundTasks`.
 - Remove public graph and timing objects. Dependency paths and lifecycle logs remain available
@@ -39,7 +38,6 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - Remove `client_dataclass` and `CONNECT_CONCURRENCY`. Use `dataclasses.dataclass` on a `Client`
   subclass. Clients start concurrently as their dependencies become ready.
 - Make shared integration helpers private. Continue using the framework-specific adapters.
-
 - Remove `NotSingletonClient`. A container shares one instance of each `Client` class across all consumers.
   Use a method on a client to create fresh state for an operation.
 
