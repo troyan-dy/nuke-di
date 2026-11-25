@@ -19,6 +19,7 @@ from llms_pages import BLOB_URL, RAW_URL, README, ROOT, documentation, full_page
 GUIDE: Final = (
     "clients",
     "container",
+    "lifecycle",
     "workers-and-jobs",
     "fastapi",
     "litestar",
@@ -41,7 +42,9 @@ type-hinted `__init__` and async `connect()` / `disconnect()`. The type hint is 
 consumers of a client class in a container share one instance. There are no
 provider or factory functions (ADR-0005), no binding of a Protocol to an implementation, qualifiers or multibinding
 (ADR-0008), no per-request or per-message scopes (ADR-0006) and no retries in `connect()` (ADR-0009): the
-recipes in the guide reach the same results with plain clients, `mock()` and `override()`. Use `@entrypoint`
+recipes in the guide reach the same results with plain clients, `mock()` and `override()`.
+Build new clients before startup. A connected container can look up existing clients with `resolve()`. Bind
+functions again after a flush or disconnect. Use `@entrypoint`
 for a module that takes no launch arguments. The application or framework owns process options, signals and
 background tasks."""
 

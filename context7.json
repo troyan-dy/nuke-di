@@ -18,6 +18,7 @@
     "Wrap a third-party object (an httpx client, a database pool) in a Client that creates it in connect(); there are no provider or factory functions.",
     "Depend on concrete client classes: there is no bind(Protocol, Impl), no qualifiers and no multibinding; tests swap a client with DI.mock() or DI.override().",
     "A client lives as long as its container: there are no request or message scopes; open per-request state through a method of a client.",
+    "Build new clients and bind functions before connecting. A connected container can look up an existing client with resolve(). Bind functions again after a flush or disconnect.",
     "Never retry or wait in connect(): it fails fast and the orchestrator restarts the process.",
     "Use @entrypoint for an executable module with injected clients or let an application or framework own launch arguments, signals and task supervision. Built-in integrations connect clients for the framework lifespan. For another server, resolve the clients before startup and use async with container to own their lifecycle.",
     "Register mock() or override() before anything is resolved; check the wiring with mypy and plugins = [\"nuke_di.mypy\"]."

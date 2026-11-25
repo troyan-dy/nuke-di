@@ -3,7 +3,6 @@ The container resolves from several threads at once: one instance per singleton,
 """
 
 import asyncio
-import copy
 import sys
 import sysconfig
 import threading
@@ -87,9 +86,9 @@ def test_threads_resolving_one_singleton_share_the_instance() -> None:
 
     assert all(outcome is outcomes[0] for outcome in outcomes)
     assert Slow.instances == 1
-    assert deps.connect_clients.count(outcomes[0].shared.slow) == 1
-    assert deps.connect_clients.count(outcomes[0]) == 1
-    assert len(deps.connect_clients) == 3
+    assert deps.clients[Slow] is outcomes[0].shared.slow
+    assert deps.clients[ConsumerA] is outcomes[0]
+    assert len(deps.clients) == 3
 
 
 def test_threads_resolving_different_trees_see_no_false_cycle() -> None:
@@ -193,7 +192,7 @@ def test_override_blocks_on_different_containers_are_independent() -> None:
 
     assert not any(isinstance(outcome, Exception) for outcome in outcomes), outcomes
     # No instance was made and neither container registered a client
-    assert (Slow.instances, first.connect_clients, second.connect_clients) == (0, [], [])
+    assert (Slow.instances, first.clients, second.clients) == (0, {}, {})
 
 
 def test_mock_from_threads_registers_one_replacement() -> None:
@@ -218,34 +217,11 @@ def test_flush_from_a_thread_is_serialized_with_resolve() -> None:
 
     assert not any(isinstance(outcome, Exception) for outcome in outcomes), outcomes
     # Whatever the order, every registered client is a complete tree
-    for client in deps.connect_clients:
+    clients = deps.clients
+    for client in clients.values():
         if isinstance(client, ConsumerA | ConsumerB):
-            assert client.shared in deps.connect_clients
-            assert client.shared.slow in deps.connect_clients
-
-
-def test_copy_of_a_container_has_a_lock_of_its_own() -> None:
-    deps = Dependencies()
-    deps.resolve(ConsumerA)
-
-    copied = copy.deepcopy(deps)
-
-    assert copied._lock is not deps._lock
-    # The lock stays out of the comparison: two locks are never equal, two empty containers are
-    assert copy.deepcopy(Dependencies()) == Dependencies()
-    outcomes = run_threads(repeated([lambda: copied.resolve(ConsumerB)], THREADS))
-    assert all(outcome is outcomes[0] for outcome in outcomes)
-    assert copied.resolve(ConsumerA) is not deps.resolve(ConsumerA)
-
-
-def test_connected_container_rejects_resolve_from_a_thread() -> None:
-    deps = Dependencies()
-    deps.resolve(ConsumerA)
-    deps.connected = True
-
-    outcomes = run_threads([lambda: deps.resolve(ConsumerB)])
-
-    assert isinstance(outcomes[0], RuntimeError)
+            assert client.shared is clients[Shared]
+            assert client.shared.slow is clients[Slow]
 
 
 async def test_connect_waits_for_a_resolve_in_flight() -> None:
@@ -268,7 +244,7 @@ async def test_connect_waits_for_a_resolve_in_flight() -> None:
     await deps.connect()
     thread.join()
 
-    assert [type(client) for client in deps.connect_clients] == [Slow, Waits]
+    assert list(deps.clients) == [Slow, Waits]
     await deps.disconnect()
 
 
@@ -283,7 +259,7 @@ def test_resolve_refused_when_connect_flips_the_flag_while_it_waits(monkeypatch:
     class FlipsOnAcquire:
         def __enter__(self) -> None:
             lock.__enter__()
-            deps.connected = True
+            deps._state = "connecting"
 
         def __exit__(self, *args: Any) -> None:
             lock.__exit__(*args)
@@ -292,7 +268,7 @@ def test_resolve_refused_when_connect_flips_the_flag_while_it_waits(monkeypatch:
 
     with pytest.raises(RuntimeError, match="already connected"):
         deps.resolve(ConsumerA)
-    assert not deps.connect_clients
+    assert not deps._clients
 
 
 async def test_resolve_after_a_concurrent_connect_is_refused() -> None:

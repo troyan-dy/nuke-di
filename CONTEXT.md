@@ -9,7 +9,10 @@ A dependency with an async connect / disconnect lifecycle; a singleton within it
 _Avoid_: Service, component, provider, scoped client
 
 **Container**:
-The `Dependencies` object that resolves clients and owns their lifecycle.
+The `Dependencies` object that resolves clients and owns their lifecycle. A single registry
+uses the declared client class as the key for the instance and its lifecycle dependencies.
+Disconnect and flush discard the resolved clients and invalidate callable bindings that
+capture them. An active Override can register its Replacement again.
 _Avoid_: Registry, injector
 
 **Resolution**:

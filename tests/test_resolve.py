@@ -139,7 +139,7 @@ def test_chain_deeper_than_the_recursion_limit() -> None:
     while hasattr(built[-1], "below"):
         built.append(built[-1].below)
     assert [type(client) for client in reversed(built)] == links
-    assert dep.connect_clients == list(reversed(built))
+    assert list(dep.clients.values()) == list(reversed(built))
 
 
 ResolvePath: TypeAlias = list[type[Client]]
@@ -197,7 +197,7 @@ def test_failure_deep_in_a_chain_closes_every_frame(
     assert str(excinfo.value) == message.format(path)
     # Nothing of the chain was built, and no frame of it is left on the path
     assert (
-        dep.connect_clients,
+        list(dep.clients.values()),
         dep.clients,
         dep._resolving,
         dep._resolving_set,
@@ -206,7 +206,7 @@ def test_failure_deep_in_a_chain_closes_every_frame(
     # The next tree resolves from scratch: no stale cycle, and an error names its own path
     healthy = chain(1500, name="Healthy")
     assert isinstance(dep.resolve(healthy[-1]), healthy[-1])
-    assert (len(dep.connect_clients), dep._resolving) == (1500, [])
+    assert (len(dep.clients), dep._resolving) == (1500, [])
     with pytest.raises(CircularDependencyError, match=r"^Circular dependency: Loop -> LoopLink -> Loop$"):
         dep.resolve(Loop)  # type: ignore[nuke-di]
 
@@ -246,7 +246,7 @@ def test_failed_resolve_inside_an_init_closes_only_its_own_frames() -> None:
     # The `__init__` runs with its consumer on the path, and each failure left it there
     assert top.swallower.paths == [[Top], [Top]]
     assert (dep._resolving, dep._resolving_set) == ([], set())
-    assert [type(client) for client in dep.connect_clients] == [Leaf, Swallower, Top]
+    assert list(dep.clients) == [Leaf, Swallower, Top]
     assert dep.clients[Top] is top
 
     with pytest.raises(CircularDependencyError, match=r"^Circular dependency: Loop -> LoopLink -> Loop$"):

@@ -265,7 +265,7 @@ async def test_failed_connect_fails_startup_and_forgets_clients() -> None:
             ...
 
     assert not deps.connected
-    assert deps.connect_clients == []
+    assert not deps.clients
 
 
 async def test_container_connected_before_startup_is_left_alone() -> None:

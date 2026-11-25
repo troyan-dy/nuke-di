@@ -48,10 +48,11 @@ class _Clients(BaseMiddleware):
         """
         The client of a handler the startup did not see: connected if another client depends on it.
         """
-        if self.started:
-            instance = self.container.clients.get(binding.client_class)
-            if instance is not None:
-                return instance
+        if self.started and self.container.connected:
+            try:
+                return self.container.resolve(binding.client_class)
+            except RuntimeError:
+                return binding.require()
         return binding.require()
 
     def shutdown_arguments(self, kwargs: dict[str, Any]) -> dict[str, Any]:

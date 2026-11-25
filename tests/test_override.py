@@ -168,9 +168,9 @@ async def test_override_keeps_exception_while_connected() -> None:
     assert dep.clients == {}
 
 
-def test_override_when_connected_raises() -> None:
+async def test_override_when_connected_raises() -> None:
     dep = Dependencies()
-    dep.connected = True
 
-    with pytest.raises(RuntimeError, match="already connected"), dep.override(Database):
-        ...
+    async with dep:
+        with pytest.raises(RuntimeError, match="already connected"), dep.override(Database):
+            ...

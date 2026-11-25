@@ -70,7 +70,8 @@ Each `connect()` is bounded by `CONNECT_TIMEOUT_SECONDS` (default `30`) and each
 `disconnect()` is logged, and the other clients still shut down. The whole disconnect, whatever
 the depth of the tree, is bounded by `DISCONNECT_DEADLINE_SECONDS` (default `20`): a client
 still disconnecting when it runs out is cut off, and the clients that have not started
-disconnecting by then are skipped, with one log record that names them.
+disconnecting by then are skipped, with one log record that names them. See
+[Lifecycle guarantees](lifecycle.md) for rollback, cancellation and integration behavior.
 
 ## Dataclass clients
 
@@ -321,15 +322,18 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 InvalidSignatureError: UserRepository is not a client: subclass Client
 ```
 
-An argument of `__init__` is filled with a client when its type hint is a client. Any other
-argument needs a default, which is left alone. These fail with `InvalidSignatureError`:
+An argument of `__init__` is filled with a client when its type hint is a client. Ordinary
+constructor arguments need a default, which the container leaves alone. For a function passed
+to `inject()`, the caller supplies ordinary arguments. Both signatures require client arguments
+to use a concrete client type and accept keywords. An optional client is rejected even if it
+has a default of `None`.
 
-| `__init__` argument without a default | Message                                           |
-|---------------------------------------|---------------------------------------------------|
-| no type hint                          | `has no type hint`                                |
-| a type that is not a client           | `is UserRepository, which is not a client`        |
-| `Client \| None`                      | `is Postgres \| None, a client cannot be optional` |
-| a client, positional-only (`/`)       | `is positional-only, a client is passed by keyword` |
+| Invalid argument | `InvalidSignatureError` message |
+|---|---|
+| Missing type hint | `has no type hint` |
+| Required constructor argument with a non-client type | `is UserRepository, which is not a client` |
+| `Client \| None` | `is Postgres \| None, a client cannot be optional` |
+| Positional-only client (`/`) | `is positional-only, a client is passed by keyword` |
 
 A class that is not a client at all, asked for with `resolve()`, fails with `UserRepository is not a client: subclass Client` before anything is built.
 

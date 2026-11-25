@@ -16,8 +16,21 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - Raise ordinary exceptions for dependency initialization and connection failures. Container
   state errors use `RuntimeError`. Framework lifespans report DI errors directly and wrap an
   explicit client `SystemExit` as a startup failure.
+- Construct containers with `Dependencies(settings=None)`. Client instances are stored once per
+  class, `clients` is a read-only snapshot, and containers compare by identity. `resolve()`
+  returns already resolved clients and Replacements during startup and while connected.
+- Reject optional and positional-only client arguments in both constructors and `inject()`.
+  Call `inject()` again before reusing a callable that captured clients after a flush or disconnect.
+- Read default container settings at the first `connect()`. Reject negative or NaN connect timeouts.
+
+### Fixed
+
+- Roll back startup if a client cancels its own `connect()` task. During shutdown, a
+  self-cancelled client releases its dependencies so their cleanup can continue.
 
 ### Removed
+
+- Remove `connect_clients` and constructor arguments for pre-populating client instances.
 
 - Remove the `@job` and `@worker` runtime, including launch parameters, hooks, grace periods,
   exit-code policies, `Shutdown` and `BackgroundTasks`.

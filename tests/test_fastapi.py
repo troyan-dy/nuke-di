@@ -1,7 +1,6 @@
 # String annotations on purpose: every endpoint below goes through evaluating them
 from __future__ import annotations
 
-import copy
 import gc
 import inspect
 import sys
@@ -943,14 +942,14 @@ def test_route_the_app_does_not_know_explains() -> None:
             client.get("/users/1")
 
 
-def test_copy_of_a_container_has_its_own_route_class() -> None:
+def test_distinct_containers_have_distinct_route_classes() -> None:
     deps = Dependencies()
     original = ClientRouter(container=deps).route_class
 
-    copied = ClientRouter(container=copy.deepcopy(deps)).route_class
+    other = ClientRouter(container=Dependencies()).route_class
 
-    assert copied is not original
-    assert original.__name__ == copied.__name__ == "ContainerRoute"
+    assert other is not original
+    assert original.__name__ == other.__name__ == "ContainerRoute"
 
 
 def test_class_dependency_signature_has_no_return_annotation() -> None:

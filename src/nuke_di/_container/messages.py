@@ -23,8 +23,7 @@ def names(container: "Dependencies", *more: type) -> dict[type, str]:
     Built on demand, for an error or a Replacement: the clients are scanned once per call, which a resolve()
     of every client cannot afford.
     """
-    resolved = map(type, container.connect_clients)
-    return display_names({*container.clients, *resolved, *container._resolving, *more})
+    return display_names({*container._clients, *container._resolving, *more})
 
 
 def path(container: "Dependencies", *more: type[Client]) -> str:
@@ -66,7 +65,9 @@ def state_error(call: str) -> RuntimeError:
     `call` builds the tree, and the container is connected: the message names the call, the state and the way out.
     """
     return RuntimeError(
-        f"{call}: the container is already connected; resolve, inject, mock and override only work before "
+        f"{call}: the container is already connected; new clients, inject, mock and override require an idle "
+        "container; "
+        "use them before "
         f"connect(), flush() after disconnect()"
     )
 

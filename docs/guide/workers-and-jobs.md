@@ -83,3 +83,10 @@ processes, use the framework's own command and lifespan. See
 | `CONNECT_CONCURRENCY` | Clients start as their dependencies become ready |
 | `nuke_di.integration` | A supported integration or the framework's own lifespan around `async with deps` |
 | Catching `SystemExit` for startup failures | Catch `ConnectError` or `InitializeDependencyError` directly |
+| `Dependencies(clients=..., connect_clients=...)` | `Dependencies(settings=None)` and explicit `resolve()` or `mock()` calls before startup |
+| `copy.deepcopy(deps)` | Create a fresh container and resolve the clients it needs. |
+| `deps.connect_clients` or writes to `deps.clients` | Read `deps.clients` for a snapshot. Register test Replacements with `mock()` or `override()`. |
+| `deps.clients[Database]` to retrieve a connected client | `deps.resolve(Database)` returns the typed client if startup already included it. |
+| Reusing an injected callable across disconnects | Call `deps.inject(handler)` for each new lifecycle. |
+| Optional or positional-only client parameters | Use a concrete client type that can be passed by keyword. |
+| Setting timeout environment variables before importing `DI` | Set them before the first connect. See [Configuration](configuration.md). |

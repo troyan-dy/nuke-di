@@ -52,6 +52,8 @@ This project uses nuke-di. A dependency is a `nuke_di.Client` subclass whose `__
 dependencies as type-hinted arguments; I/O goes in `async def connect()` / `disconnect()`, never in `__init__`.
 Functions, `@entrypoint` functions, FastAPI / Litestar / FastStream / aiogram handlers, MCP tools and taskiq tasks take clients by type hint;
 a Starlette or Quart app lists them in `clients = nuke_di.asgi.lifespan(DI, ...)` and calls `clients.get(...)`.
+Build new clients and bind functions before connecting. `resolve()` can look up a client the
+container already holds while connected. Create fresh client bindings after a flush or disconnect.
 
 Do not write what nuke-di rejects:
 - provider or factory functions: wrap a third-party object in a Client that creates it in connect();

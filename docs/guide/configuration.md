@@ -12,8 +12,18 @@
 CONNECT_TIMEOUT_SECONDS=5 python -m app.report
 ```
 
-The container settings are read when a `Dependencies` instance is created. You can also pass
-them explicitly:
+When no settings are supplied, the container reads these environment variables at its first
+`connect()`. This includes the global `DI`, so applications can load environment configuration
+after importing it. The container keeps the first valid settings it reads, including across
+a flush or a failed client connection. If the environment supplies an invalid setting, correct
+it before retrying startup.
+
+To supply settings explicitly, pass a `DependenciesSettings` object. Fields omitted when
+constructing the object use their environment defaults at that point. Setting every field
+explicitly makes the configuration independent of the environment.
+
+`DependenciesSettings` rejects negative values and `NaN` with `ValueError`. Zero expires
+immediately, and `inf` removes the corresponding limit.
 
 ```python
 from nuke_di import Dependencies, DependenciesSettings

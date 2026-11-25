@@ -55,6 +55,9 @@ def not_a_client(client_class: Any) -> InvalidSignatureError:
     return InvalidSignatureError(f"{type_name(client_class)} is not a client: subclass Client")
 
 
-def resolve_refused(client_class: Any) -> RuntimeError:
+def resolve_refused(client_class: Any, state: str | None) -> RuntimeError:
     # `type_name`, not `qualname`: `client_class` may be no class at all
-    return state_error(f"resolve({type_name(client_class)})")
+    call = f"resolve({type_name(client_class)})"
+    if state == "disconnecting":
+        return RuntimeError(f"{call}: the container is disconnecting")
+    return state_error(call)

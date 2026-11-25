@@ -21,9 +21,11 @@ Full manual in one file: https://raw.githubusercontent.com/troyan-dy/nuke-di/mas
   container; `Dependencies()` is a fresh one.
 - **Lifecycle**: build the tree (`DI.resolve(client_class)`, `DI.inject(func)`, `@entrypoint` or a
   framework `setup()`), then `async with DI:` connects every client, dependencies first, and
-  disconnects them in reverse on exit. Nothing is resolved while the container is connected.
+  disconnects them in reverse on exit. During startup and while connected, `resolve()`
+  can return a client the container already holds. Build new clients before connecting.
 - **A function takes clients by type hint** too: `DI.inject(handler)` binds every argument whose
-  type hint is a client; the other arguments stay for the caller.
+  type hint is a client. The caller supplies other arguments. Optional and positional-only
+  clients are rejected. Bind the function again before the next start after a flush or disconnect.
 
 ```python
 from nuke_di import DI, Client
@@ -180,7 +182,7 @@ Each of these was proposed and rejected; the container has no API for them and w
 | `bind(Protocol, Impl)`, an `__init__` argument typed with a `Protocol` / ABC, qualifiers (`Annotated[Postgres, "replica"]`), `list[Plugin]` multibinding | Depend on the concrete client; a subclass per instance; `mock()` / `override()` in tests | [ADR-0008](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0008-clients-depend-on-concrete-clients.md) |
 | Request / session / message scopes, a client per request | A long-lived `Client` with a method that opens the per-request object | [ADR-0006](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0006-clients-live-as-long-as-the-container.md) |
 | Retries, backoff or "wait until ready" loops in `connect()` | Let `connect()` raise; the orchestrator restarts the process | [ADR-0009](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0009-connect-is-fail-fast.md) |
-| I/O in `__init__`, or `DI.resolve()` inside a handler or while connected | `__init__` stores, `connect()` does I/O; resolve at startup | The tree is built before anything connects |
+| I/O in `__init__`, or building a new client while connected | Store arguments in `__init__`, do I/O in `connect()`, and resolve new clients before startup | The container needs the full dependency tree at startup |
 | FastAPI `Depends(get_db)` or `DI.inject` per route to reach a client | A route argument typed with the client, after `setup(app)` | The integration does it |
 | Process options, signal handlers or task supervision in DI | Use the application or framework lifecycle | `@entrypoint` only runs a module with connected clients |
 
@@ -208,6 +210,7 @@ Each of these was proposed and rejected; the container has no API for them and w
   client both depend on.
 - `RuntimeError: ... already resolved, call mock() before resolve() or inject()`: move the
   `mock()` / `override()` above the first `resolve()` / `inject()` / `TestClient(app)`.
-- `RuntimeError: ... the container is already connected`: resolve before `async with DI`.
+- If resolving a new client raises `RuntimeError`, build it before `async with DI`. If an
+  injected callable raises because its clients were flushed, call `inject()` again before the next start.
 
 Every exception: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/errors.md

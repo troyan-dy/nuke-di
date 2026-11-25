@@ -87,13 +87,6 @@ def test_mock_after_resolve_raises() -> None:
         dep.mock(InnerDeps)
 
 
-def test_mock_refuses_a_client_already_registered_for_connection() -> None:
-    dep = Dependencies(connect_clients=[InnerDeps()])
-
-    with pytest.raises(RuntimeError, match="InnerDeps is already resolved"):
-        dep.mock(InnerDeps)
-
-
 class _EqualClasses(type):
     """A metaclass whose classes all compare equal."""
 

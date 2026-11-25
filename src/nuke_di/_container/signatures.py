@@ -7,7 +7,7 @@ import inspect
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, get_type_hints
 
-from nuke_di._container.arguments import VARIADIC, argument_problem, init_arguments
+from nuke_di._container.arguments import VARIADIC, Argument, argument_problem, init_arguments
 from nuke_di._container.messages import hints_error, names, signature_error
 from nuke_di.errors import InvalidSignatureError
 from nuke_di.naming import sname
@@ -54,23 +54,59 @@ def client_arguments(
     return arguments
 
 
-def client_hints(container: "Dependencies", func: Callable[..., Any]) -> dict[str, Any]:
-    """
-    The type hints of the arguments of `func`; fail on an argument without one.
-    """
-    # get_type_hints silently skips unannotated arguments, so they are looked up in the signature
-    for argument in inspect.signature(func).parameters.values():
-        if argument.kind in VARIADIC:
-            continue
-        if argument.annotation is inspect.Parameter.empty:
-            raise InvalidSignatureError(f'Argument "{argument.name}" of "{sname(func)}" has no type hint')
-
+def injected_arguments(
+    container: "Dependencies",
+    func: Callable[..., Any],
+) -> dict[str, type[Client]]:
+    """Read and validate the client arguments before resolving any of them."""
+    arguments = _annotated_arguments(func)
     try:
-        hints: dict[str, Any] = get_type_hints(func)
+        hints = _injected_hints(func, arguments)
     except NameError as exc:
         raise hints_error(container, sname(func), exc) from exc
-    hints.pop("return", None)
+    return _read_injected_arguments(func, arguments, hints)
+
+
+def _injected_hints(
+    func: Callable[..., Any],
+    arguments: list[Argument],
+) -> dict[str, Any]:
+    hints = get_type_hints(func)
+    if inspect.isclass(func):
+        # Callable classes may declare extra client keywords as class annotations.
+        names = {argument.name for argument in arguments}
+        extra = (name for name in hints if name not in names)
+        arguments.extend(Argument(name, False, False) for name in extra)
+        # Actual constructor parameters use their evaluated annotations.
+        hints.update(get_type_hints(func.__init__))
     return hints
+
+
+def _read_injected_arguments(
+    func: Callable[..., Any],
+    arguments: list[Argument],
+    hints: dict[str, Any],
+) -> dict[str, type[Client]]:
+    clients: dict[str, type[Client]] = {}
+    for argument in arguments:
+        hint: Any = hints.get(argument.name)
+        problem = argument_problem(argument, hint, caller_owned=True)
+        if problem is not None:
+            raise InvalidSignatureError(f'Argument "{argument.name}" of "{sname(func)}" {problem}')
+        if isclient(hint):
+            clients[argument.name] = hint
+    return clients
+
+
+def _annotated_arguments(func: Callable[..., Any]) -> list[Argument]:
+    arguments = []
+    for parameter in inspect.signature(func).parameters.values():
+        if parameter.kind in VARIADIC:
+            continue
+        if parameter.annotation is inspect.Parameter.empty:
+            raise InvalidSignatureError(f'Argument "{parameter.name}" of "{sname(func)}" has no type hint')
+        arguments.append(Argument(parameter.name, parameter.kind is parameter.POSITIONAL_ONLY, False))
+    return arguments
 
 
 def _read_arguments(

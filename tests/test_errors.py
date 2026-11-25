@@ -80,7 +80,7 @@ async def test_disconnect_continues_after_failure() -> None:
         ...
 
     assert TrackedClient.disconnected
-    assert dep.connect_clients == []
+    assert not dep.clients
 
 
 async def test_connected_state_guards() -> None:
@@ -104,7 +104,7 @@ def test_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONNECT_TIMEOUT_SECONDS", "5")
 
     assert DependenciesSettings().connect_timeout == 5
-    assert Dependencies().settings.connect_timeout == 5
+    assert Dependencies().settings is None
 
 
 def test_settings_default(monkeypatch: pytest.MonkeyPatch) -> None:

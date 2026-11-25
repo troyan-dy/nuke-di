@@ -9,8 +9,8 @@ from mypy.options import Options
 from mypy.plugin import CheckerPluginInterface
 from mypy.types import CallableType, Type, TypeOfAny
 
-from nuke_di.mypy.hints import any_of, client, optional_client, surely_no_client
-from nuke_di.mypy.names import METADATA, NUKE_DI, class_name, display_names, type_name
+from nuke_di.mypy.hints import any_of, client, optional_client_problem, surely_no_client
+from nuke_di.mypy.names import METADATA, NUKE_DI, display_names, type_name
 
 
 class Argument(NamedTuple):
@@ -95,13 +95,11 @@ def argument_problem(argument: Argument, options: Options) -> str | None:
     does; `None` for an argument it fills or leaves to its default.
     """
     hint = argument.hint
-    if argument.has_default:
-        return None
     if hint is None:
-        return "has no type hint"
-    optional = optional_client(hint)
-    if optional is not None:
-        return f"is {class_name(optional)} | None, a client cannot be optional"
+        return None if argument.has_default else "has no type hint"
+    problem = optional_client_problem(hint)
+    if problem is not None or argument.has_default:
+        return problem
     if surely_no_client(hint):
         return f"is {type_name(hint, options)}, which is not a client"
     return None

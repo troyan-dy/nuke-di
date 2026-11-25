@@ -305,6 +305,8 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
   connect order, connect and resolution errors
 - [The container](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/container.md): `Dependencies` and the global `DI`, `resolve()`, `inject()`,
   `mock()`, `override()`
+- [Lifecycle guarantees](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/lifecycle.md): ordering,
+  failures, cancellation and their regression tests
 - [Executable modules](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md): `@entrypoint`, explicit process control and migration from 2.x
 - Frameworks: [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md),
   [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), [MCP servers](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md) on the SDK and on FastMCP, [aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md),
@@ -398,7 +400,8 @@ Each `connect()` is bounded by `CONNECT_TIMEOUT_SECONDS` (default `30`) and each
 `disconnect()` is logged, and the other clients still shut down. The whole disconnect, whatever
 the depth of the tree, is bounded by `DISCONNECT_DEADLINE_SECONDS` (default `20`): a client
 still disconnecting when it runs out is cut off, and the clients that have not started
-disconnecting by then are skipped, with one log record that names them.
+disconnecting by then are skipped, with one log record that names them. See
+[Lifecycle guarantees](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/lifecycle.md) for rollback, cancellation and integration behavior.
 
 ## Dataclass clients
 
@@ -649,15 +652,18 @@ CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
 InvalidSignatureError: UserRepository is not a client: subclass Client
 ```
 
-An argument of `__init__` is filled with a client when its type hint is a client. Any other
-argument needs a default, which is left alone. These fail with `InvalidSignatureError`:
+An argument of `__init__` is filled with a client when its type hint is a client. Ordinary
+constructor arguments need a default, which the container leaves alone. For a function passed
+to `inject()`, the caller supplies ordinary arguments. Both signatures require client arguments
+to use a concrete client type and accept keywords. An optional client is rejected even if it
+has a default of `None`.
 
-| `__init__` argument without a default | Message                                           |
-|---------------------------------------|---------------------------------------------------|
-| no type hint                          | `has no type hint`                                |
-| a type that is not a client           | `is UserRepository, which is not a client`        |
-| `Client \| None`                      | `is Postgres \| None, a client cannot be optional` |
-| a client, positional-only (`/`)       | `is positional-only, a client is passed by keyword` |
+| Invalid argument | `InvalidSignatureError` message |
+|---|---|
+| Missing type hint | `has no type hint` |
+| Required constructor argument with a non-client type | `is UserRepository, which is not a client` |
+| `Client \| None` | `is Postgres \| None, a client cannot be optional` |
+| Positional-only client (`/`) | `is positional-only, a client is passed by keyword` |
 
 A class that is not a client at all, asked for with `resolve()`, fails with `UserRepository is not a client: subclass Client` before anything is built.
 
@@ -761,34 +767,61 @@ Found 2 errors in 1 file (checked 1 source file)
 
 # The container
 
-`Dependencies` is the container. `DI` is a ready-to-use global instance; create your own
-when you need isolation, e.g. in tests.
+`Dependencies(settings=None)` creates a container. `DI` provides a shared global container.
+Each container compares by identity, is hashable, and shows its state, clients and Replacements
+in `repr()`. The read-only `clients` mapping is a snapshot from registered client classes to
+their instances. Create a fresh container when a separate lifecycle is needed.
 
-| Method               | Description                                                             |
-|----------------------|-------------------------------------------------------------------------|
-| `resolve(client_class)`       | Build `client_class` and its dependency tree. Idempotent for `Client`.           |
-| `inject(func)`       | Return `functools.partial(func, ...)` with client arguments bound. Every argument of `func` except `*args` / `**kwargs` must have a type hint. |
-| `connect()`          | Call `connect()` on every resolved client, each after its dependencies. |
-| `disconnect()`       | Call `disconnect()` on every client, each after its consumers, then `flush()` the container. |
-| `async with`         | `connect()` on enter, `disconnect()` on exit.                           |
-| `mock(client_class, new=None)`| Register a Replacement for `client_class` (an autospec mock by default) until the next `flush()`. Must come before `client_class` is resolved. |
-| `override(client_class, new=None)` | A Replacement for the duration of a `with` block, then `flush()`; see [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md). |
-| `flush()`            | Forget every resolved client.                                           |
+| Method | Description |
+|---|---|
+| `resolve(client_class)` | Return the typed instance already held by the container. Build a new instance and its dependencies while disconnected. |
+| `inject(func)` | Build the clients of `func` and return a callable with those arguments bound. |
+| `connect()` | Connect every resolved client after its dependencies. |
+| `disconnect()` | Disconnect each client after its consumers and clear the resolved clients. |
+| `async with` | Connect on entry and disconnect on exit. |
+| `mock(client_class, new=None)` | Register a Replacement before the client is resolved. It lasts until the next flush. |
+| `override(client_class, new=None)` | Register a Replacement for a `with` block. See [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md). |
+| `flush()` | Forget resolved clients while disconnected. Active overrides retain their Replacements. |
 
-The result of `inject()` keeps the return type of the function, while its remaining arguments are
-untyped: a type checker cannot subtract the client arguments from a signature.
-
-`resolve`, `inject`, `mock`, `override` and `flush` only work while the container is disconnected:
-the whole tree is built before startup.
+Resolve clients and bind callables before startup. During startup and while connected, `resolve()`
+can return an existing client or Replacement, preserving its type. Asking for a new client in
+either state raises `RuntimeError`. Wait for startup to finish before using a client's resources.
+`inject()`, `mock()`, `override()` and `flush()` require a disconnected container.
+While disconnecting, `connected` remains true until cleanup clears the registry, and every
+`resolve()` call raises `RuntimeError`.
+See [Lifecycle guarantees](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/lifecycle.md) for failures and cancellation.
 
 ```python
+from nuke_di import Client, Dependencies
+
+
+class Database(Client):
+    def fetch(self, user_id: int) -> str:
+        return f"user-{user_id}"
+
+
+async def handler(user_id: int, db: Database) -> str:
+    return db.fetch(user_id)
+
+
 async def main() -> None:
     deps = Dependencies()
-    injected = deps.inject(handler)  # build the tree
-    async with deps:  # connect
-        await injected(42)
-        deps.resolve(Cache)  # RuntimeError: resolve(Cache): the container is already connected; ...
+    injected = deps.inject(handler)  # builds Database
+    async with deps:
+        db = deps.resolve(Database)  # returns the same Database, with its type
+        assert db is deps.clients[Database]
+        assert await injected(42) == "user-42"
 ```
+
+An injected callable preserves the function's return type and whether an async function must
+be awaited. The mypy plugin also checks the remaining parameters. Each regular parameter needs
+a type hint, and the caller still supplies non-client arguments. Client parameters must use a
+concrete client type and accept keyword arguments. See [signature errors](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#when-the-tree-cannot-be-built).
+
+When `flush()` or `disconnect()` clears the resolved clients, a callable that holds any of
+those clients raises `RuntimeError` before it runs. A coroutine checks this when awaited,
+and a generator checks when iteration starts. Bind the function again with `inject()` before reconnecting. The callable can still be used
+before the first connect, for example with test Replacements.
 
 The container is safe to resolve from several threads: one lock per container serializes `resolve`,
 `inject`, `mock`, `override` and `flush`, so a singleton asked for by two threads at once is built once.
@@ -818,12 +851,59 @@ for thread in threads:
     thread.start()
 for thread in threads:
     thread.join()
-print("instances:", Postgres.instances, "clients:", len(deps.connect_clients))
+print("instances:", Postgres.instances, "clients:", len(deps.clients))
 ```
 
 ```text
 instances: 1 clients: 2
 ```
+
+<!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/lifecycle.md -->
+
+# Lifecycle guarantees
+
+Build the required clients with `resolve()` or `inject()`, then enter `async with deps`.
+The context manager calls `connect()` on entry and `disconnect()` on exit, including when
+the body raises. You can call the same methods directly if an application owns the context.
+
+## Ordering and failures
+
+| Situation | Guarantee | Regression test |
+|---|---|---|
+| Startup | A client starts as soon as its dependencies finish connecting. Independent clients can connect concurrently. | [Dependency ordering](https://github.com/troyan-dy/nuke-di/blob/master/tests/test_connect_order.py), `test_dependency_connects_before_consumer` and `test_independent_clients_connect_concurrently` |
+| Normal shutdown | A client disconnects after all its consumers finish. A Replacement participates in neither phase. | [Consumer ordering and Replacements](https://github.com/troyan-dy/nuke-di/blob/master/tests/test_connect_order.py), `test_dependency_disconnects_after_every_consumer` and `test_consumer_of_a_mock_waits_for_nothing` |
+| A client fails during startup | The container cancels unfinished startup work, disconnects clients that connected, and clears its resolved clients before reporting the failure. | [Startup rollback](https://github.com/troyan-dy/nuke-di/blob/master/tests/test_connect_cleanup.py), `test_failure_disconnects_connected_clients` and `test_failure_resets_container` |
+| A connect times out | `ConnectTimeoutError` reports the client whose connect took too long. Startup rolls back. | [Connect timeout](https://github.com/troyan-dy/nuke-di/blob/master/tests/test_errors.py), `test_connect_timeout` |
+| A client cancels its own connect task | Startup fails with `ConnectError` and rolls back. Waiting consumers are cancelled without starting, including when the hook requests cancellation just before returning. | [Self-cancelled connect](https://github.com/troyan-dy/nuke-di/blob/master/tests/test_connect_cleanup.py), `test_self_cancelled_connect_rolls_back` and `test_pending_self_cancellation_prevents_starting_consumers` |
+| The caller cancels startup | The container rolls back clients that connected and propagates cancellation. A new cancellation during rollback can interrupt cleanup. | [Cancelled startup and rollback](https://github.com/troyan-dy/nuke-di/blob/master/tests/test_connect_cleanup.py), `test_cancellation_disconnects_connected_clients` and `test_cancelled_rollback_flushes` |
+| A disconnect fails, times out or cancels its own task | The failure is logged. Dependencies can still disconnect. | [Disconnect failure and timeout](https://github.com/troyan-dy/nuke-di/blob/master/tests/test_connect_order.py), `test_failed_disconnect_still_releases_its_dependencies` and `test_timed_out_disconnect_still_releases_its_dependencies`. [Self-cancelled disconnect](https://github.com/troyan-dy/nuke-di/blob/master/tests/test_connect_cleanup.py), `test_self_cancelled_disconnect_releases_dependencies` |
+| The disconnect deadline expires | A disconnect still in progress is timed out. Clients that have yet to start are skipped and named in the log. The same deadline applies during startup rollback. | [Disconnect and rollback deadlines](https://github.com/troyan-dy/nuke-di/blob/master/tests/test_connect_order.py), `test_deadline_bounds_a_chain_of_hung_disconnects` and `test_deadline_bounds_the_rollback_of_a_failed_connect` |
+| The caller cancels shutdown | Cancellation propagates and the container clears its resolved clients. Some clients may have been skipped. | [Cancelled shutdown](https://github.com/troyan-dy/nuke-di/blob/master/tests/test_connect_cleanup.py), `test_cancelled_disconnect_waits_for_the_clients_disconnecting_and_flushes` |
+
+The [timeout settings](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/configuration.md) bound each client operation and the overall
+shutdown. Clients should cooperate with cancellation. A client whose startup fails partway
+through is responsible for releasing resources it acquired during that call.
+
+## When clients are available
+
+`connected` is true from the start of connection through the end of disconnection. An
+already resolved client can be looked up during startup and while connected. During
+disconnection, `resolve()` raises `RuntimeError` even for a previously resolved client.
+Once disconnection clears the resolved clients, build and bind the clients for the next run
+before starting it. See [The container](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/container.md) for the rules for `inject()`.
+
+## Entry points and framework lifespans
+
+`@entrypoint` injects the function's clients and runs the function inside the container's
+context. Importing the module keeps the function available for direct calls.
+[The executable-module tests](https://github.com/troyan-dy/nuke-di/blob/master/tests/test_entrypoint.py) run the module in a subprocess.
+
+Framework adapters connect the container before the application's own startup work and
+disconnect it after the application's shutdown work. A failing connection prevents app
+startup. ASGI and FastAPI exercise these guarantees in
+[the ASGI lifespan tests](https://github.com/troyan-dy/nuke-di/blob/master/tests/test_asgi.py) and
+[the FastAPI lifecycle tests](https://github.com/troyan-dy/nuke-di/blob/master/tests/test_fastapi.py).
+The application or framework owns process signals and its background tasks.
 
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md -->
 
@@ -910,6 +990,13 @@ processes, use the framework's own command and lifespan. See
 | `CONNECT_CONCURRENCY` | Clients start as their dependencies become ready |
 | `nuke_di.integration` | A supported integration or the framework's own lifespan around `async with deps` |
 | Catching `SystemExit` for startup failures | Catch `ConnectError` or `InitializeDependencyError` directly |
+| `Dependencies(clients=..., connect_clients=...)` | `Dependencies(settings=None)` and explicit `resolve()` or `mock()` calls before startup |
+| `copy.deepcopy(deps)` | Create a fresh container and resolve the clients it needs. |
+| `deps.connect_clients` or writes to `deps.clients` | Read `deps.clients` for a snapshot. Register test Replacements with `mock()` or `override()`. |
+| `deps.clients[Database]` to retrieve a connected client | `deps.resolve(Database)` returns the typed client if startup already included it. |
+| Reusing an injected callable across disconnects | Call `deps.inject(handler)` for each new lifecycle. |
+| Optional or positional-only client parameters | Use a concrete client type that can be passed by keyword. |
+| Setting timeout environment variables before importing `DI` | Set them before the first connect. See [Configuration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/configuration.md). |
 
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md -->
 
@@ -3563,7 +3650,7 @@ async def test_greet_with_fake() -> None:
         async with DI:
             print(await injected(1))
 
-    print("after the block:", DI.clients)
+    print("after the block:", dict(DI.clients))
 
 
 async def test_greet_with_autospec() -> None:
@@ -3582,7 +3669,7 @@ The async tests in this section use [pytest-asyncio](https://pypi.org/project/py
 ```console
 $ pytest -q -s test_greet.py
 Hello, alice!
-after the block: OrderedDict()
+after the block: {}
 .Hello, bob!
 .
 2 passed in 0.01s
@@ -3603,18 +3690,18 @@ The rules:
 
 - **`override()` starts from a container without resolved clients.** Flushing on exit would
   otherwise silently drop what was resolved before the block, so it raises
-  `ConnectError: override(Database) needs a container without resolved clients, found: Database, UserService`.
+  `RuntimeError: override(Database) needs a container without resolved clients, found: Database, UserService`.
   Call `DI.flush()` first or use the `global_di` fixture below.
 - **One Replacement per class.** `mock(client_class)` called again returns the Replacement
   already registered; `mock(client_class, other)` and `override(client_class)` raise
-  `ConnectError: Database already has a replacement`.
+  `RuntimeError: Database already has a replacement`.
 - **Replacements are not connected.** Their `connect()` / `disconnect()` are never called, and they
   do not take part in the [connect order](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#connect-order).
-- **How long a Replacement lasts.** One from `mock()` is dropped by the next `flush()`, including the
-  one at the end of `disconnect()`: a test that connects the container more than once should use
-  `override()`, whose Replacement survives every `flush()` until its block ends. An exception inside
-  the block propagates unchanged; leaving the block normally while the container is still connected
-  raises `RuntimeError`.
+- **How long a Replacement lasts.** One from `mock()` lasts until the next flush, including the
+  one at the end of `disconnect()`. Use `override()` to keep the Replacement across
+  several starts, and call `inject()` again before each start to refresh callable bindings.
+  An exception inside the block propagates unchanged. Leaving the block normally while the
+  container is still connected raises `RuntimeError`.
 - **Nesting.** Blocks for different classes nest as long as each one opens before anything is
   resolved, e.g. `with DI.override(Database), DI.override(Clock):`; leaving the inner block keeps the
   outer Replacement.
@@ -3745,8 +3832,18 @@ cycles without running anything; the test runs every `__init__` too, so it also 
 CONNECT_TIMEOUT_SECONDS=5 python -m app.report
 ```
 
-The container settings are read when a `Dependencies` instance is created. You can also pass
-them explicitly:
+When no settings are supplied, the container reads these environment variables at its first
+`connect()`. This includes the global `DI`, so applications can load environment configuration
+after importing it. The container keeps the first valid settings it reads, including across
+a flush or a failed client connection. If the environment supplies an invalid setting, correct
+it before retrying startup.
+
+To supply settings explicitly, pass a `DependenciesSettings` object. Fields omitted when
+constructing the object use their environment defaults at that point. Setting every field
+explicitly makes the configuration independent of the environment.
+
+`DependenciesSettings` rejects negative values and `NaN` with `ValueError`. Zero expires
+immediately, and `inf` removes the corresponding limit.
 
 ```python
 from nuke_di import Dependencies, DependenciesSettings
@@ -3765,7 +3862,7 @@ deps = Dependencies(settings=DependenciesSettings(connect_timeout=5, disconnect_
 | `ConnectTimeoutError` | A client's `connect()` exceeded `CONNECT_TIMEOUT_SECONDS` |
 | `InvalidSignatureError` | A client or a function signature cannot be resolved. See [When the tree cannot be built](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md#when-the-tree-cannot-be-built). |
 | `CircularDependencyError` | Clients depend on each other in a cycle. A subclass of `InvalidSignatureError`. |
-| `RuntimeError` | An operation is invalid for the state of the container, such as resolving after connect or replacing an already resolved client |
+| `RuntimeError` | An operation is invalid for the container's state, such as building a new client after startup has begun, replacing a resolved client, or calling a callable bound before a flush |
 
 `ConnectError` and `InitializeDependencyError` are ordinary exceptions. The original failure
 is available as `__cause__`. Frameworks report startup failure through their own lifespan.
@@ -3773,7 +3870,8 @@ is available as `__cause__`. Frameworks report startup failure through their own
 nuke-di logs through the standard `logging` module under `nuke_di`. Use `DEBUG` to see the
 client lifecycle as it happens. Errors name the failing client or the dependency path.
 
-See [Executable modules](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md) for how a decorated module runs.
+See [Lifecycle guarantees](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/lifecycle.md) for cleanup and cancellation, and
+[Executable modules](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md) for how a decorated module runs.
 
 <!-- Source: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/agents.md -->
 
@@ -3829,6 +3927,8 @@ This project uses nuke-di. A dependency is a `nuke_di.Client` subclass whose `__
 dependencies as type-hinted arguments; I/O goes in `async def connect()` / `disconnect()`, never in `__init__`.
 Functions, `@entrypoint` functions, FastAPI / Litestar / FastStream / aiogram handlers, MCP tools and taskiq tasks take clients by type hint;
 a Starlette or Quart app lists them in `clients = nuke_di.asgi.lifespan(DI, ...)` and calls `clients.get(...)`.
+Build new clients and bind functions before connecting. `resolve()` can look up a client the
+container already holds while connected. Create fresh client bindings after a flush or disconnect.
 
 Do not write what nuke-di rejects:
 - provider or factory functions: wrap a third-party object in a Client that creates it in connect();

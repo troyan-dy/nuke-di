@@ -304,6 +304,8 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
   connect order, connect and resolution errors
 - [The container](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/container.md): `Dependencies` and the global `DI`, `resolve()`, `inject()`,
   `mock()`, `override()`
+- [Lifecycle guarantees](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/lifecycle.md): ordering,
+  failures, cancellation and their regression tests
 - [Executable modules](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md): `@entrypoint`, explicit process control and migration from 2.x
 - Frameworks: [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md),
   [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), [MCP servers](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md) on the SDK and on FastMCP, [aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md),

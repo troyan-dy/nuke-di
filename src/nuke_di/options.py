@@ -32,6 +32,8 @@ class DependenciesSettings:
 
     def __post_init__(self) -> None:
         # Written so that NaN fails too: every comparison with it is False
+        if not self.connect_timeout >= 0:
+            raise ValueError(f"connect_timeout must be >= 0, got {self.connect_timeout}")
         if not self.disconnect_timeout >= 0:
             raise ValueError(f"disconnect_timeout must be >= 0, got {self.disconnect_timeout}")
         if not self.disconnect_deadline >= 0:

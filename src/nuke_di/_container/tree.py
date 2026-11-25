@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, TypeAlias
 
 from nuke_di._container.messages import init_error, path
+from nuke_di._container.registry import Registration
 from nuke_di._container.signatures import client_arguments
 from nuke_di.errors import CircularDependencyError
 from nuke_di.logs import CONTAINER_LOGGER, fields
@@ -67,13 +68,13 @@ def resolve_tree(container: "Dependencies", client_class: type[Client]) -> Clien
             # The `continue` of the else resumes this `while`, skipping the `break` that opens that frame.
             for key, dependency in pending:  # noqa: WPS327
                 # Not kept in a local: an `__init__` that flushes the container replaces the dict
-                inst = container.clients.get(dependency)
-                if inst is None:
+                entry = container._clients.get(dependency)
+                if entry is None:
                     # Before the arguments after it, which is the order of a recursion
                     waiting.append((client_class, arguments, init, pending, key))
                     client_class = dependency
                     break
-                init[key] = inst
+                init[key] = entry.client
             else:
                 # Every argument is in `init`: the client is built and its frame closed. Off the path before
                 # `__init__`, so an `__init__` that resolves on its own sees the path of its consumers.
@@ -84,12 +85,8 @@ def resolve_tree(container: "Dependencies", client_class: type[Client]) -> Clien
                 except Exception as exc:
                     raise init_error(container, client_class, exc) from exc
 
-                dependencies = {arg: (arguments[arg], init[arg]) for arg in init}
-                container._dependencies[id(inst)] = dependencies
-                container.connect_clients.append(inst)
-                # Published last: the lock-free lookup of resolve() hands out a singleton that the container
-                # accounts for
-                container.clients[client_class] = inst
+                # Publish the instance and its declared relationships together.
+                container._clients[client_class] = Registration(inst, tuple(arguments.values()))
 
                 if not waiting:
                     return inst

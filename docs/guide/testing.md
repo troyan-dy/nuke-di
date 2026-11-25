@@ -44,7 +44,7 @@ async def test_greet_with_fake() -> None:
         async with DI:
             print(await injected(1))
 
-    print("after the block:", DI.clients)
+    print("after the block:", dict(DI.clients))
 
 
 async def test_greet_with_autospec() -> None:
@@ -63,7 +63,7 @@ The async tests in this section use [pytest-asyncio](https://pypi.org/project/py
 ```console
 $ pytest -q -s test_greet.py
 Hello, alice!
-after the block: OrderedDict()
+after the block: {}
 .Hello, bob!
 .
 2 passed in 0.01s
@@ -84,18 +84,18 @@ The rules:
 
 - **`override()` starts from a container without resolved clients.** Flushing on exit would
   otherwise silently drop what was resolved before the block, so it raises
-  `ConnectError: override(Database) needs a container without resolved clients, found: Database, UserService`.
+  `RuntimeError: override(Database) needs a container without resolved clients, found: Database, UserService`.
   Call `DI.flush()` first or use the `global_di` fixture below.
 - **One Replacement per class.** `mock(client_class)` called again returns the Replacement
   already registered; `mock(client_class, other)` and `override(client_class)` raise
-  `ConnectError: Database already has a replacement`.
+  `RuntimeError: Database already has a replacement`.
 - **Replacements are not connected.** Their `connect()` / `disconnect()` are never called, and they
   do not take part in the [connect order](clients.md#connect-order).
-- **How long a Replacement lasts.** One from `mock()` is dropped by the next `flush()`, including the
-  one at the end of `disconnect()`: a test that connects the container more than once should use
-  `override()`, whose Replacement survives every `flush()` until its block ends. An exception inside
-  the block propagates unchanged; leaving the block normally while the container is still connected
-  raises `RuntimeError`.
+- **How long a Replacement lasts.** One from `mock()` lasts until the next flush, including the
+  one at the end of `disconnect()`. Use `override()` to keep the Replacement across
+  several starts, and call `inject()` again before each start to refresh callable bindings.
+  An exception inside the block propagates unchanged. Leaving the block normally while the
+  container is still connected raises `RuntimeError`.
 - **Nesting.** Blocks for different classes nest as long as each one opens before anything is
   resolved, e.g. `with DI.override(Database), DI.override(Clock):`; leaving the inner block keeps the
   outer Replacement.

@@ -156,7 +156,7 @@ class Nested(Client):
 
 class Fine(Client):
     def __init__(
-        self, db: Database, inner: Outer.Inner, retries: int = 3, *args: object, cache: Database | None = None
+        self, db: Database, inner: Outer.Inner, retries: int = 3, *args: object, cache: str | None = None
     ) -> None:
         self.db, self.inner = db, inner
 
@@ -518,6 +518,7 @@ def test_inject_job_and_worker_start_the_path_at_the_function(tmp_path: Path) ->
 
         def dynamic_entrypoint(func: Any) -> None:
             entrypoint(func)
+            DI.inject(func)
         """,
     )
 
@@ -599,6 +600,7 @@ def test_inject_returns_the_function_without_its_clients(tmp_path: Path) -> None
                 "def (user_id: int, *, page: int, size: int =, **extra: str) -> typing.Coroutine[Any, Any, str]"
             ),
         ),
+        ("app.py", 36, 'Argument "#0" of "positional_only" is positional-only, a client is passed by keyword'),
         ("app.py", 36, any_function),
         (
             "app.py",
@@ -607,7 +609,7 @@ def test_inject_returns_the_function_without_its_clients(tmp_path: Path) -> None
         ),
         ("app.py", 37, any_function),
         ("app.py", 38, revealed.format("def (*Any, **Any) -> app.Database")),
-        # A positional-only client fails the call of the partial: the result keeps the type of `inject()`
+        ("app.py", 39, 'Argument "#0" of "positional_default" is positional-only, a client is passed by keyword'),
         ("app.py", 39, any_function),
         ("app.py", 41, 'Too many positional arguments for "first"'),
         ("app.py", 44, 'Too many positional arguments for "middle"'),

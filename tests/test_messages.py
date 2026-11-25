@@ -75,14 +75,18 @@ async def connected(client_class: type[Client]) -> Dependencies:
 async def test_resolve_inject_mock_override_name_the_call_and_the_state() -> None:
     deps = await connected(Users)
 
+    class Absent(Client):
+        """A client that has not been resolved."""
+
     def handler(users: Users) -> None: ...
 
     expected = re.escape(
-        "the container is already connected; resolve, inject, mock and override only work before connect(), "
+        "the container is already connected; new clients, inject, mock and override require an idle container; "
+        "use them before connect(), "
         "flush() after disconnect()"
     )
-    with pytest.raises(RuntimeError, match=rf"^resolve\(Database\): {expected}$"):
-        deps.resolve(Database)
+    with pytest.raises(RuntimeError, match=rf"^resolve\(Absent\): {expected}$"):
+        deps.resolve(Absent)
     with pytest.raises(RuntimeError, match=rf"^inject\(handler\): {expected}$"):
         deps.inject(handler)
     with pytest.raises(RuntimeError, match=rf"^mock\(Database\): {expected}$"):
@@ -225,7 +229,7 @@ def test_a_non_client_is_refused_before_connect() -> None:
     deps = Dependencies()
     with pytest.raises(InvalidSignatureError):
         deps.resolve(Settings)  # type: ignore[type-var]
-    assert not deps.connect_clients
+    assert not deps.clients
 
 
 # #64: unambiguous names

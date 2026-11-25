@@ -5,7 +5,7 @@ What a type hint is to the container: a client it fills, an optional client it r
 from mypy.nodes import TypeInfo
 from mypy.types import AnyType, Instance, NoneType, Type, TypeOfAny, UnboundType, UnionType, get_proper_type
 
-from nuke_di.mypy.names import CLIENT, type_statement
+from nuke_di.mypy.names import CLIENT, class_name, type_statement
 
 
 def client(hint: Type) -> TypeInfo | None:
@@ -67,3 +67,14 @@ def surely_no_client(hint: Type) -> bool:
     if isinstance(hint, AnyType):
         return hint.type_of_any == TypeOfAny.explicit
     return not isinstance(hint, UnboundType)
+
+
+def optional_client_problem(hint: Type) -> str | None:
+    optional = optional_client(hint)
+    return None if optional is None else f"is {class_name(optional)} | None, a client cannot be optional"
+
+
+def client_problem(hint: Type, found: TypeInfo | None, *, positional_only: bool) -> str | None:
+    if found is None:
+        return optional_client_problem(hint)
+    return "is positional-only, a client is passed by keyword" if positional_only else None

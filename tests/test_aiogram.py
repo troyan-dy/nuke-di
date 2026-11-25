@@ -486,7 +486,7 @@ async def test_failed_connect_fails_startup_and_forgets_clients() -> None:
         await dp.emit_startup(bot=BOT)
 
     assert not deps.connected
-    assert deps.connect_clients == []
+    assert not deps.clients
     with pytest.raises(RuntimeError, match=r"Broken is not connected: start the dispatcher"):
         await dp.feed_update(BOT, update())
 

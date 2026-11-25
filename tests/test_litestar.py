@@ -331,7 +331,7 @@ def test_failed_connect_fails_startup_and_forgets_clients() -> None:
     assert excinfo.group_contains(ConnectError, match=r"Broken.connect\(\) raised")
 
     assert not deps.connected
-    assert deps.connect_clients == []
+    assert not deps.clients
 
 
 def test_two_apps_with_their_own_containers() -> None:

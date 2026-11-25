@@ -11,9 +11,9 @@ from nuke_di._container.disconnect import Disconnect
 from nuke_di._container.messages import names
 from nuke_di._container.order import (
     LifecycleCancellation,
+    connect_client,
     dependencies_among,
     in_dependency_order,
-    within,
 )
 from nuke_di.errors import ConnectError, ConnectTimeoutError, InitializeDependencyError
 from nuke_di.logs import CONTAINER_LOGGER, client_fields, fields
@@ -43,10 +43,9 @@ class Connect:
     def __init__(self, container: "Dependencies") -> None:
         self._container = container
         self._cancellation = LifecycleCancellation()
-        settings = container.settings
-        self._timeout = settings.connect_timeout
+        self._timeout: float = 0
         # Clients whose connect() finished, so a failure knows what to roll back
-        self._connected: list[Client] = []
+        self._connected: dict[type[Client], Client] = {}
         self._total = 0
         self._names: dict[type, str] = {}
 
@@ -63,6 +62,8 @@ class Connect:
             if error is None:
                 raise
         else:
+            with self._container._lock:
+                self._container._state = "connected"
             if clients:
                 _log_summary(self._total, duration)
             return
@@ -70,8 +71,8 @@ class Connect:
         # Preserve the client's own exception context after leaving TaskGroup's exception handler.
         raise error
 
-    async def client(self, client: Client) -> None:
-        name = self._names[type(client)]
+    async def client(self, key: type[Client], client: Client) -> None:
+        name = self._names[key]
         debug = logger.isEnabledFor(logging.DEBUG)
         if debug:
             logger.debug(
@@ -84,7 +85,7 @@ class Connect:
 
         started = time.perf_counter()
         try:
-            await within(self._timeout, client.connect())
+            await connect_client(key, client, self._timeout, self._connected)
         except TimeoutError as exc:
             duration = time.perf_counter() - started
             raise _timeout_failure(name, duration, self._timeout) from exc
@@ -94,7 +95,6 @@ class Connect:
                 raise
             raise failure from exc
 
-        self._connected.append(client)
         duration = time.perf_counter() - started
         if debug:
             logger.debug(
@@ -114,7 +114,7 @@ class Connect:
                 extra=client_fields(name, duration),
             )
 
-    async def _connect(self, clients: list[Client], prior_cancels: int) -> float:
+    async def _connect(self, clients: dict[type[Client], Client], prior_cancels: int) -> float:
         started = time.perf_counter()
         # A client connects once its dependencies have. The first failure cancels clients still connecting or waiting.
         dependencies = dependencies_among(self._container, clients)
@@ -148,16 +148,18 @@ class Connect:
             task.uncancel()
             task.cancel(*cancellation.args)
 
-    def _snapshot(self) -> list[Client]:
+    def _snapshot(self) -> dict[type[Client], Client]:
         container = self._container
         with container._lock:
             if container.connected:
                 raise already_connected("connect()")
 
-            # Resolve either finishes before the snapshot or fails once the container is connected.
-            container.connected = True
+            # Read settings before starting so invalid configuration leaves the registry idle.
+            self._timeout = container._settings().connect_timeout
             self._names = names(container)
-            return list(container.connect_clients)
+            clients = container._lifecycle_clients()
+            container._state = "connecting"
+            return clients
 
     def _failure(self, name: str, duration: float, exc: BaseException) -> Exception | None:
         # A self-cancelled client must fail the group, or its consumers wait forever.
