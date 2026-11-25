@@ -168,7 +168,7 @@ Python 3.11.7, 3.12.5, 3.13.14 and 3.14.6, each in a fresh `uv` environment from
   [#32](https://github.com/troyan-dy/nuke-di/issues/32).
 - **`inject()` takes 8–10 µs** to bind a function with two clients. The `partial` it returns adds
   47–87 ns to a call that takes 37–42 ns without it.
-- **In 2.x, a per-consumer client cost 0.2–1.3 µs more per consumer** than the shared instance of a `Client` at 100
+- **In this baseline, a per-consumer client cost 0.2–1.3 µs more per consumer** than the shared instance of a `Client` at 100
   and 1000 consumers: a fresh instance is built from the cached arguments of its class.
 - **The test cycle is `resolve()` plus the mock.** The autospec of `mock()` costs 0.65–0.9 ms; `override()`
   with an instance costs the same as a `resolve()` in a second container, 0.10–0.11 ms for 100 clients.

@@ -34,7 +34,7 @@ def check_mockable(
             raise ConnectError(f"{name} already has a replacement")
         return current
     # Consumers resolved before would keep the real client while the caller holds the Replacement
-    if client_class in container.clients:
+    if is_resolved(container, client_class):
         raise ConnectError(f"{name} is already resolved, call mock() before resolve() or inject()")
     return None
 
@@ -83,6 +83,12 @@ def register_replacement(
 ) -> None:
     container.clients[client_class] = replacement
     container._replacements[client_class] = replacement
+
+
+def is_resolved(container: "Dependencies", client_class: type[Client]) -> bool:
+    # The caller may explicitly provide clients to connect without registering their classes in the cache.
+    classes = map(id, map(type, container.connect_clients))
+    return client_class in container.clients or id(client_class) in classes
 
 
 def autospec(client_class: type[Client]) -> Any:
