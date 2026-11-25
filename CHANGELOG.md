@@ -6,6 +6,41 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-11-26
+
+### Changed
+
+- Use `@entrypoint` for a module executable. It injects clients and runs one async function
+  inside the container lifecycle. Modules that take launch arguments or need process supervision
+  use an explicit `main()`. See [migration from 2.x](https://github.com/troyan-dy/nuke-di/blob/v3.0.0/docs/guide/workers-and-jobs.md#migrating-from-2x).
+- Raise ordinary exceptions for dependency initialization and connection failures. Container
+  state errors use `RuntimeError`. Framework lifespans report DI errors directly and wrap an
+  explicit client `SystemExit` as a startup failure.
+- Construct containers with `Dependencies(settings=None)`. Client instances are stored once per
+  class, `clients` is a read-only snapshot, and containers compare by identity. `resolve()`
+  returns already resolved clients and Replacements during startup and while connected.
+- Reject optional and positional-only client arguments in both constructors and `inject()`.
+  Call `inject()` again before reusing a callable that captured clients after a flush or disconnect.
+- Read default container settings at the first `connect()`. Reject negative or NaN connect timeouts.
+
+### Fixed
+
+- Roll back startup if a client cancels its own `connect()` task. During shutdown, a
+  self-cancelled client releases its dependencies so their cleanup can continue.
+
+### Removed
+
+- Remove `connect_clients` and constructor arguments for pre-populating client instances.
+- Remove the `@job` and `@worker` runtime, including launch parameters, hooks, grace periods,
+  exit-code policies, `Shutdown` and `BackgroundTasks`.
+- Remove public graph and timing objects. Dependency paths and lifecycle logs remain available
+  for diagnosis.
+- Remove `client_dataclass` and `CONNECT_CONCURRENCY`. Use `dataclasses.dataclass` on a `Client`
+  subclass. Clients start concurrently as their dependencies become ready.
+- Make shared integration helpers private. Continue using the framework-specific adapters.
+- Remove `NotSingletonClient`. A container shares one instance of each `Client` class across all consumers.
+  Use a method on a client to create fresh state for an operation.
+
 ## [2.0.4] - 2026-11-25
 
 The library is unchanged.
@@ -177,7 +212,7 @@ the mypy and pytest plugins behave as in 1.19.0; the names below changed to sati
 
 ### Documentation
 
-- [Writing an integration](docs/guide/integrations.md#per-container) says which frameworks `per_container=True`
+- The 1.x integration guide says which frameworks `per_container=True`
   fits, now that no shipped integration uses it, and documents the `Binding(cls, container, framework)`
   constructor and its `cls` and `instance`; the [FastAPI](docs/guide/fastapi.md) rules say which container's
   clients an app gets, mounted apps included; in every language. ADR-0003 has a dated revisit with the
@@ -964,7 +999,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v2.0.4...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/troyan-dy/nuke-di/compare/v2.0.4...v3.0.0
 [2.0.4]: https://github.com/troyan-dy/nuke-di/compare/v2.0.3...v2.0.4
 [2.0.3]: https://github.com/troyan-dy/nuke-di/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/troyan-dy/nuke-di/compare/v2.0.1...v2.0.2

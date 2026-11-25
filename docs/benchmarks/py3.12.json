@@ -2319,7 +2319,7 @@
     },
     {
       "scenario": "resolve(), cold",
-      "shape": "N consumers of a NotSingletonClient",
+      "shape": "N consumers with per-consumer instances",
       "n": 10,
       "unit": "s",
       "median": 6.333351484499872e-05,
@@ -2351,7 +2351,7 @@
     },
     {
       "scenario": "resolve(), cold",
-      "shape": "N consumers of a NotSingletonClient",
+      "shape": "N consumers with per-consumer instances",
       "n": 100,
       "unit": "s",
       "median": 0.0005537915276363492,
@@ -2383,7 +2383,7 @@
     },
     {
       "scenario": "resolve(), cold",
-      "shape": "N consumers of a NotSingletonClient",
+      "shape": "N consumers with per-consumer instances",
       "n": 1000,
       "unit": "s",
       "median": 0.0054608749924227595,

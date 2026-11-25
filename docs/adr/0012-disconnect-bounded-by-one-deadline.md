@@ -7,3 +7,10 @@
 - **Redefine `DISCONNECT_TIMEOUT_SECONDS` as the budget of the whole disconnect**: rejected. One hung client would then consume the budget of every client after it, and the clients with nothing wrong would be skipped; the per-client timeout exists to prevent exactly that. It would also change the meaning of a variable deployments already set, a breaking change. Keeping both bounds, each with one meaning, is not.
 - **One `asyncio.timeout()` around the whole dependency-ordered run**: rejected. It cancels the TaskGroup, and the `CancelledError` each client's `disconnect()` then sees cannot be told apart from a cancellation from outside: the running clients would be recorded `"cancelled"` instead of `"timed_out"`, and the clients waiting for their consumers would never be told apart from the ones that were skipped. Checking the shared deadline per client, when it takes its `CONNECT_CONCURRENCY` slot, costs one `loop.time()`, a subtraction and a `min()`, with no extra timer or task, and leaves outside cancellation as it was.
 - **A new `Outcome` value, such as `"skipped"`, for the clients not started before the deadline**: rejected. `None` already means that the phase never started, as for the clients still waiting for their dependencies when a `connect()` fails; a new literal would break code that matches on the existing ones, and the skip is reported by its log record.
+
+## Revisited in 3.0
+
+The deadline still covers disconnect and startup rollback. An application or framework owns
+the process shutdown budget and should allow for this container cleanup within it. The
+container reports timed-out and skipped clients in lifecycle logs. Public timing records and
+the concurrency cap were removed.

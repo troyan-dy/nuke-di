@@ -10,7 +10,6 @@ data:
   OUTBOX_POLL_SECONDS: "1"
   DISCONNECT_TIMEOUT_SECONDS: "5"
   DISCONNECT_DEADLINE_SECONDS: "15"
-  SHUTDOWN_GRACE_SECONDS: "10"
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -65,8 +64,8 @@ spec:
     metadata:
       labels: {app: service-layout-outbox}
     spec:
-      # SIGTERM sets Shutdown: the worker finishes its batch within SHUTDOWN_GRACE_SECONDS 10, then a chain
-      # of 3 clients (Outbox, Database, Settings) disconnects within DISCONNECT_DEADLINE_SECONDS: 10 + 15 = 25 < 30
+      # The worker handles SIGTERM by finishing its current batch, then the container disconnects.
+      # Set the pod grace period to cover the application's work plus DISCONNECT_DEADLINE_SECONDS.
       terminationGracePeriodSeconds: 30
       containers:
         - name: outbox
@@ -89,7 +88,7 @@ spec:
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
-      backoffLimit: 0  # a failed cleanup (exit code 1 or 2) waits for the next schedule
+      backoffLimit: 0  # a failed cleanup waits for the next schedule
       template:
         spec:
           restartPolicy: Never
@@ -97,7 +96,6 @@ spec:
             - name: cleanup
               image: registry.example.com/service-layout:1.0
               command: ["python", "-m", "service_layout.jobs.cleanup"]
-              args: ["--older-than-days", "7"]
               envFrom:
                 - configMapRef: {name: service-layout}
               volumeMounts:

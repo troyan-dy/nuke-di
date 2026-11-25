@@ -12,10 +12,10 @@ from faststream import Depends, FastStream, TestApp
 from faststream.asgi import AsgiFastStream
 from faststream.nats import NatsBroker, NatsRouter, TestNatsBroker
 
-from nuke_di import DI, BackgroundTasks, Client, Dependencies, NotSingletonClient, Shutdown
+from nuke_di import DI, Client, ConnectError, Dependencies
 from nuke_di.fastapi import setup as fastapi_setup
 from nuke_di.faststream import _FASTSTREAM, setup
-from nuke_di.integration.testing import check
+from tests.integration_contract.check import check
 
 events: list[str] = []
 
@@ -52,8 +52,8 @@ class FakeDatabase(Database):
         return "alice"
 
 
-class Session(NotSingletonClient):
-    """A client built for every argument that takes it."""
+class Session(Client):
+    """A client shared by arguments of the same type."""
 
 
 class Broken(Client):
@@ -204,7 +204,7 @@ async def sessions(first: Session, second: Session) -> None:
     events.append(f"same session: {same}")
 
 
-async def test_sync_handler_and_not_singleton_clients() -> None:
+async def test_sync_handler_and_shared_clients() -> None:
     app = make_app(Dependencies())
     broker_of(app).subscriber("sync")(sync_greet)
     broker_of(app).subscriber("sessions")(sessions)
@@ -213,7 +213,7 @@ async def test_sync_handler_and_not_singleton_clients() -> None:
         await broker.publish("bob", "sync")
         await broker.publish(None, "sessions")
 
-    assert events == ["sync bob Session", "same session: False"]
+    assert events == ["sync bob Session", "same session: True"]
 
 
 # --- lifecycle -------------------------------------------------------------------------------------------
@@ -252,24 +252,6 @@ async def test_app_lifespan_and_hooks_run_inside_connected_clients() -> None:
     ]
 
 
-async def loop(shutdown: Shutdown, tasks: BackgroundTasks) -> None:
-    events.append(f"shutdown set: {shutdown.is_set()}")
-
-
-async def test_shutdown_is_set_and_tasks_stop_before_disconnect() -> None:
-    deps = Dependencies()
-    app = make_app(deps)
-    broker_of(app).subscriber("loop")(loop)
-
-    async with TestNatsBroker(broker_of(app)) as broker, TestApp(app):
-        await broker.publish(None, "loop")
-        shutdown = deps.clients[Shutdown]
-
-    assert events == ["shutdown set: False"]
-    assert isinstance(shutdown, Shutdown)
-    assert shutdown.is_set()
-
-
 async def broken(kafka: Broken) -> None: ...
 
 
@@ -278,14 +260,12 @@ async def test_failed_connect_fails_startup_and_forgets_clients() -> None:
     app = make_app(deps)
     broker_of(app).subscriber("broken")(broken)
 
-    with pytest.raises(
-        RuntimeError, match=r"nuke-di clients failed to start: Broken.connect\(\) raised OSError: unreachable"
-    ):
+    with pytest.raises(ConnectError, match=r"Broken.connect\(\) raised OSError: unreachable"):
         async with TestNatsBroker(broker_of(app)), TestApp(app):
             ...
 
     assert not deps.connected
-    assert deps.connect_clients == []
+    assert not deps.clients
 
 
 async def test_container_connected_before_startup_is_left_alone() -> None:

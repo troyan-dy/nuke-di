@@ -2,61 +2,48 @@
 
 ← [Documentation](../../README.md#documentation)
 
-## Client and NotSingletonClient
+## Client
 
-Every dependency is a subclass of one of two base classes:
-
-| Base class           | Instances                                          |
-|----------------------|----------------------------------------------------|
-| `Client`             | Singleton: one instance per container              |
-| `NotSingletonClient` | A new instance for every consumer that declares it |
+Every dependency subclasses `Client`. A container builds one instance per client class and shares it
+with every consumer.
 
 ```python
-from nuke_di import Client, Dependencies, NotSingletonClient
+from nuke_di import Client, Dependencies
 
 
 class Settings(Client):
     pass
 
 
-class HttpSession(NotSingletonClient):
-    pass
-
-
 class Orders(Client):
-    def __init__(self, settings: Settings, http: HttpSession) -> None:
+    def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.http = http
 
 
 class Payments(Client):
-    def __init__(self, settings: Settings, http: HttpSession) -> None:
+    def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.http = http
 
 
 deps = Dependencies()
 orders = deps.resolve(Orders)
 payments = deps.resolve(Payments)
 
-print(orders.settings is payments.settings)  # one Settings for the whole container
-print(orders.http is payments.http)  # every consumer gets its own HttpSession
-print(deps.resolve(Orders) is orders)  # resolve() is idempotent for a Client
+print(orders.settings is payments.settings)
+print(deps.resolve(Orders) is orders)
 ```
 
 ```text
 True
-False
 True
 ```
 
 A client declares its own dependencies as annotated `__init__` arguments. Only arguments
 annotated with a client type are injected, and resolution is recursive.
 
-A client lives as long as its container. There are no per-request or per-message clients, and none
-are planned ([ADR-0006](../adr/0006-clients-live-as-long-as-the-container.md)): a transaction or anything else that lives for one request is
-opened in the handler through a method of a client. `NotSingletonClient` is still supported, but it
-is slated for removal in a future major version, so do not build new code on it.
+A client lives as long as its container. For state that lives for one request or message, such as a
+transaction, use a client method that opens it in the handler
+([ADR-0006](../adr/0006-clients-live-as-long-as-the-container.md)).
 
 ## connect() and disconnect()
 
@@ -83,17 +70,19 @@ Each `connect()` is bounded by `CONNECT_TIMEOUT_SECONDS` (default `30`) and each
 `disconnect()` is logged, and the other clients still shut down. The whole disconnect, whatever
 the depth of the tree, is bounded by `DISCONNECT_DEADLINE_SECONDS` (default `20`): a client
 still disconnecting when it runs out is cut off, and the clients that have not started
-disconnecting by then are skipped, with one log record that names them.
+disconnecting by then are skipped, with one log record that names them. See
+[Lifecycle guarantees](lifecycle.md) for rollback, cancellation and integration behavior.
 
 ## Dataclass clients
 
-`client_dataclass` turns a class into a `Client` and a dataclass at once, so the fields
-become the injected dependencies. Subclass `Client` as well: the decorator is typed as an
-identity, so the base class is what tells mypy and pyright that `Checkout` is a client; without
-it the class is a client at runtime only:
+Use `dataclasses.dataclass` on a `Client` subclass. The generated `__init__` declares its
+fields as annotated arguments, which the container resolves in the same way as a handwritten
+constructor.
 
 ```python
-from nuke_di import Client, Dependencies, client_dataclass
+from dataclasses import dataclass
+
+from nuke_di import Client, Dependencies
 
 
 class Postgres(Client):
@@ -104,7 +93,7 @@ class Payments(Client):
     pass
 
 
-@client_dataclass(frozen=True)
+@dataclass(frozen=True)
 class Checkout(Client):
     pg: Postgres
     payments: Payments
@@ -119,8 +108,6 @@ print(isinstance(checkout, Client))
 Checkout(pg=<__main__.Postgres object at 0x...>, payments=<__main__.Payments object at 0x...>)
 True
 ```
-
-It accepts the same keyword arguments as `dataclasses.dataclass`.
 
 ## Connect order
 
@@ -203,7 +190,7 @@ $ python connect_order.py
 0.25s  Http connected
 0.30s  Postgres connected
 0.35s  Consumer connected
-INFO Connected 7 clients in 0.35s (slowest: Postgres 0.30s, Consumer 0.30s, Http 0.20s)
+INFO Connected 7 clients in 0.35s
 -- application is running --
 ```
 
@@ -219,176 +206,7 @@ many have connected so far: `Connecting client Consumer (2/7 connected)`, and th
 `disconnect()`.
 
 Only dependencies declared in `__init__` are ordered. If a client needs another one to be
-connected first, declare it as a dependency. Set `CONNECT_CONCURRENCY` to limit how many
-clients connect at once; a client waiting for its dependencies does not take a slot.
-
-## Startup timings
-
-The container measures every client's `connect()` and `disconnect()`, so a slow startup
-names its culprit. After a successful `connect()` it logs a summary at `INFO`, and a
-`WARNING` for every client that used more than half of `CONNECT_TIMEOUT_SECONDS`, long
-before that client starts failing with a timeout:
-
-```python
-# startup.py
-import asyncio
-import logging
-
-from nuke_di import Client, Dependencies, DependenciesSettings
-
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-
-
-class Postgres(Client):
-    async def connect(self) -> None:
-        await asyncio.sleep(0.2)
-
-
-class Kafka(Client):
-    async def connect(self) -> None:
-        await asyncio.sleep(1.6)
-
-    async def disconnect(self) -> None:
-        await asyncio.sleep(0.3)
-
-
-class Orders(Client):
-    def __init__(self, pg: Postgres, kafka: Kafka) -> None:
-        self.pg, self.kafka = pg, kafka
-
-
-async def main() -> None:
-    deps = Dependencies(settings=DependenciesSettings(connect_timeout=3))
-    deps.resolve(Orders)
-    async with deps:
-        print("-- application is running --")
-
-    for t in deps.timings:
-        print(
-            f"{t.name:<8} connect {t.connect:.2f}s {t.connect_outcome:<3}  "
-            f"disconnect {t.disconnect:.2f}s {t.disconnect_outcome}"
-        )
-
-
-asyncio.run(main())
-```
-
-```console
-$ python startup.py
-INFO Connected 3 clients in 1.60s (slowest: Kafka 1.60s, Postgres 0.20s, Orders 0.00s)
-WARNING Client Kafka took 1.60s to connect, more than half of CONNECT_TIMEOUT_SECONDS (3s)
--- application is running --
-Postgres connect 0.20s ok   disconnect 0.00s ok
-Kafka    connect 1.60s ok   disconnect 0.30s ok
-Orders   connect 0.00s ok   disconnect 0.00s ok
-```
-
-`deps.timings` holds one `ClientTiming` per client of the last `connect()`, in resolution
-order, so a client comes after its dependencies. It outlives `disconnect()`, so it can be read
-once the container has stopped. In a FastAPI app, the lifespan you pass to `FastAPI()` runs
-inside the connected container, so it sees the connect timings. A worker or a job gets the same
-list as [`Run.clients`](workers-and-jobs.md#startup-metrics-and-structured-logs).
-
-| `ClientTiming` field | Value |
-|----------------------|-------|
-| `name`               | The class name of the client |
-| `connect`            | Seconds spent in `connect()`, not counting the wait for `CONNECT_CONCURRENCY`; `None` if `connect()` never ran |
-| `connect_outcome`    | `"ok"`, `"failed"`, `"timed_out"`, `"cancelled"`, or `None` if `connect()` never started |
-| `disconnect`, `disconnect_outcome` | The same for `disconnect()`; `None` until the client disconnects, and for good if it was skipped after `DISCONNECT_DEADLINE_SECONDS` |
-
-When a client fails to connect, the clients still connecting end up `"cancelled"`, the
-clients still waiting for their dependencies keep `None`, and the clients that had connected
-are rolled back, so they get a `disconnect_outcome`. A client skipped after
-`DISCONNECT_DEADLINE_SECONDS` keeps `None` for `disconnect` and `disconnect_outcome`. The library only measures: exporting the
-timings as metrics or spans is up to your code.
-
-## The graph
-
-The dependency graph exists only inside a running process: the `DEBUG` log is the only place
-that shows which clients an entrypoint pulls in and what each one waits for. `graph()` returns
-the same picture as data, before `connect()` or after it:
-
-```python
-# graph.py
-from nuke_di import Client, Dependencies
-
-
-class Postgres(Client):
-    pass
-
-
-class Redis(Client):
-    pass
-
-
-class Payments(Client):
-    def __init__(self, pg: Postgres) -> None:
-        self.pg = pg
-
-
-class Checkout(Client):
-    def __init__(self, pg: Postgres, redis: Redis, payments: Payments) -> None:
-        self.pg, self.redis, self.payments = pg, redis, payments
-
-
-deps = Dependencies()
-deps.resolve(Checkout)
-nodes = {node.name: node for node in deps.graph().nodes}
-for node in nodes.values():
-    print(f"{node.name:<8} needs {list(node.dependencies)}")
-print("shared:", nodes["Checkout"].dependencies["pg"] is nodes["Payments"].dependencies["pg"])
-print(deps.graph().to_mermaid())
-```
-
-```console
-$ python graph.py
-Postgres needs []
-Redis    needs []
-Payments needs ['pg']
-Checkout needs ['pg', 'redis', 'payments']
-shared: True
-graph BT
-  Postgres
-  Redis
-  Payments
-  Checkout
-  Postgres --> Payments
-  Postgres --> Checkout
-  Redis --> Checkout
-  Payments --> Checkout
-```
-
-GitHub renders the Mermaid text in a README, a pull request or an issue, so a project can show
-its architecture without a running process:
-
-```mermaid
-graph BT
-  Postgres
-  Redis
-  Payments
-  Checkout
-  Postgres --> Payments
-  Postgres --> Checkout
-  Redis --> Checkout
-  Payments --> Checkout
-```
-
-`Graph.nodes` holds one `Node` per resolved client, in resolution order, so a client comes after
-its dependencies. It is a snapshot: `flush()` empties it, apart from the Replacements of the open
-`override()` blocks, which survive every `flush()`.
-
-| `Node` field   | Value |
-|----------------|-------|
-| `name`         | The class name of the client |
-| `client_class` | The class the consumers asked for |
-| `singleton`    | `True` for a `Client`, `False` for a `NotSingletonClient` |
-| `replacement`  | The object registered with `mock()` or `override()` in place of `client_class`; `None` for a real client |
-| `dependencies` | The clients of the `__init__` arguments, by argument name |
-
-A `NotSingletonClient` gets one node per instance, all with the same name; `to_mermaid()` numbers
-them from the second one (`Session`, `Session_2`). A Replacement is drawn with a
-dashed border and the name of the object in its place: `Postgres: AsyncMock`. Nodes compare by
-identity, so the `shared: True` above says that `Checkout` and `Payments` got the same `Postgres`.
+connected first, declare it as a dependency.
 
 ## When a client fails to connect
 
@@ -444,9 +262,8 @@ Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable <- OSError('b
 connected: False
 ```
 
-The same cleanup happens when `connect()` itself is cancelled. `ConnectError` derives from
-`SystemExit`, so an application that does not catch it stops, which is usually what you want
-when a dependency is down. Mocked clients are not connected, and nothing waits for them.
+The same cleanup happens when `connect()` itself is cancelled. The original failure is available
+as the `__cause__` of `ConnectError`. Replacements do not take part in startup.
 
 ## When the tree cannot be built
 
@@ -502,27 +319,29 @@ except InvalidSignatureError as exc:
 ```text
 InvalidSignatureError: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)
 CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
-InvalidSignatureError: UserRepository is not a client: subclass Client or NotSingletonClient
+InvalidSignatureError: UserRepository is not a client: subclass Client
 ```
 
-An argument of `__init__` is filled with a client when its type hint is a client. Any other
-argument needs a default, which is left alone. These fail with `InvalidSignatureError`:
+An argument of `__init__` is filled with a client when its type hint is a client. Ordinary
+constructor arguments need a default, which the container leaves alone. For a function passed
+to `inject()`, the caller supplies ordinary arguments. Both signatures require client arguments
+to use a concrete client type and accept keywords. An optional client is rejected even if it
+has a default of `None`.
 
-| `__init__` argument without a default | Message                                           |
-|---------------------------------------|---------------------------------------------------|
-| no type hint                          | `has no type hint`                                |
-| a type that is not a client           | `is UserRepository, which is not a client`        |
-| `Client \| None`                      | `is Postgres \| None, a client cannot be optional` |
-| a client, positional-only (`/`)       | `is positional-only, a client is passed by keyword` |
+| Invalid argument | `InvalidSignatureError` message |
+|---|---|
+| Missing type hint | `has no type hint` |
+| Required constructor argument with a non-client type | `is UserRepository, which is not a client` |
+| `Client \| None` | `is Postgres \| None, a client cannot be optional` |
+| Positional-only client (`/`) | `is positional-only, a client is passed by keyword` |
 
-A class that is not a client at all, asked for with `resolve()`, fails with `UserRepository is not a client: subclass Client or NotSingletonClient` before anything is built.
+A class that is not a client at all, asked for with `resolve()`, fails with `UserRepository is not a client: subclass Client` before anything is built.
 
 Clients that depend on each other in a cycle fail with `CircularDependencyError`, a subclass of
 `InvalidSignatureError`, and a type hint that cannot be evaluated, e.g. a class defined inside a
 function or imported under `TYPE_CHECKING`, with an `InvalidSignatureError` that says so. When the
 error comes from `inject()`, the path starts at the function:
-`(resolving handler -> Checkout -> Profiles)`. In a [worker or a job](workers-and-jobs.md)
-each of these fails the run with exit code `1` before anything connects.
+`(resolving handler -> Checkout -> Profiles)`. In an [executable module](workers-and-jobs.md), these errors stop startup before anything connects.
 
 ## Checking the tree with mypy
 
@@ -534,7 +353,7 @@ process or a test runs. Enable it in `pyproject.toml`:
 plugins = ["nuke_di.mypy"]
 ```
 
-At every `resolve()`, `inject()`, `@job` and `@worker` the plugin walks the `__init__` of every
+At every `resolve()`, `inject()`, `@entrypoint` the plugin walks the `__init__` of every
 client the call would build, as the container does, and reports what the container would raise,
 with the same message:
 
@@ -542,7 +361,7 @@ with the same message:
 # tree.py
 from typing import Protocol, reveal_type
 
-from nuke_di import DI, Client, job
+from nuke_di import DI, Client, entrypoint
 
 
 class Postgres(Client):
@@ -581,7 +400,7 @@ DI.resolve(Checkout)
 reveal_type(DI.inject(greet))
 
 
-@job
+@entrypoint
 async def settle(orders: Orders) -> None:
     pass
 ```
@@ -595,7 +414,7 @@ Found 2 errors in 1 file (checked 1 source file)
 ```
 
 - Every row of the table above is checked, cycles too, and so is an argument without a type hint
-  in the function given to `inject()`, `@job` or `@worker`. An error is reported at the call that
+  in the function given to `inject()`, `@entrypoint`. An error is reported at the call that
   would raise it, with the path from that call; a tree with several errors reports them all, where
   the container stops at the first.
 - `inject()` returns the function without its client arguments, the type of the `partial` it

@@ -10,7 +10,7 @@ from dataclasses import dataclass, make_dataclass
 from types import ModuleType
 from typing import cast
 
-from nuke_di import Client, NotSingletonClient
+from nuke_di import Client
 
 
 @dataclass
@@ -32,7 +32,7 @@ class Tree:
 
 def client(
     name: str,
-    deps: Sequence[type[NotSingletonClient]] = (),
+    deps: Sequence[type[Client]] = (),
     base: type = Client,
     module: ModuleType | None = None,
 ) -> type[Client]:
@@ -54,7 +54,7 @@ def client(
 
 def _in_module(
     name: str,
-    deps: Sequence[type[NotSingletonClient]],
+    deps: Sequence[type[Client]],
     base: type,
     module: ModuleType,
 ) -> type:

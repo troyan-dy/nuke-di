@@ -1,6 +1,6 @@
 ---
 name: nuke-di
-description: Use when writing, changing, reviewing or testing Python code that uses nuke-di (import nuke_di) - Client classes, DI.resolve / DI.inject, @job, @worker, nuke_di.fastapi / litestar / faststream / mcp / fastmcp / aiogram / taskiq / asgi, mock() / override(), the di / global_di pytest fixtures. Gives the whole model and the recipes, and keeps out the designs nuke-di rejects - provider functions, interface binding, per-request scopes and retries in connect().
+description: Use when writing, changing, reviewing or testing Python code that uses nuke-di (import nuke_di) - Client classes, DI.resolve / DI.inject, @entrypoint, nuke_di.fastapi / litestar / faststream / mcp / fastmcp / aiogram / taskiq / asgi, mock() / override(), the di / global_di pytest fixtures. Gives the whole model and the recipes, and keeps out the designs nuke-di rejects - provider functions, interface binding, per-request scopes and retries in connect().
 ---
 
 # nuke-di
@@ -19,11 +19,13 @@ Full manual in one file: https://raw.githubusercontent.com/troyan-dy/nuke-di/mas
   `async def disconnect()`. Both are optional.
 - **One instance per container**: a `Client` lives as long as its container. `DI` is the global
   container; `Dependencies()` is a fresh one.
-- **Lifecycle**: build the tree (`DI.resolve(client_class)`, `DI.inject(func)`, `@job`, `@worker` or a
+- **Lifecycle**: build the tree (`DI.resolve(client_class)`, `DI.inject(func)`, `@entrypoint` or a
   framework `setup()`), then `async with DI:` connects every client, dependencies first, and
-  disconnects them in reverse on exit. Nothing is resolved while the container is connected.
+  disconnects them in reverse on exit. During startup and while connected, `resolve()`
+  can return a client the container already holds. Build new clients before connecting.
 - **A function takes clients by type hint** too: `DI.inject(handler)` binds every argument whose
-  type hint is a client; the other arguments stay for the caller.
+  type hint is a client. The caller supplies other arguments. Optional and positional-only
+  clients are rejected. Bind the function again before the next start after a flush or disconnect.
 
 ```python
 from nuke_di import DI, Client
@@ -76,39 +78,35 @@ the methods the application needs. There is no other way to register it.
 
 ```python
 import os
-from dataclasses import field
+from dataclasses import dataclass, field
 
-from nuke_di import Client, client_dataclass
+from nuke_di import Client
 
 
-@client_dataclass(frozen=True)
-class Settings(Client):  # keep the Client base: it is what the type checker sees
+@dataclass(frozen=True)
+class Settings(Client):
     database_url: str = field(default_factory=lambda: os.environ["DATABASE_URL"])
 ```
 
-`@client_dataclass` turns the fields into injected dependencies, like `__init__` arguments.
+The generated `__init__` supplies the same annotations as a handwritten constructor.
 
 **Two instances of one kind** (a primary and a replica) are two classes: `class Replica(Postgres)`
 with its own settings. **Several plugins** are a client that takes each of them in `__init__`.
 **An implementation per environment** is a client that picks one from its settings in `connect()`
 and delegates to it.
 
-**A process**: one decorated async function per module, defined last. It parses its other
-annotated arguments from the command line (`Annotated[T, Option(help=..., short=...)]`), connects
-the clients, runs and exits with a meaningful code. Run it with `python -m app.jobs.sync`.
+**An executable module** uses one `@entrypoint` on an async function defined last. Run the
+module with `python -m app.report`. The decorator injects clients and runs the function
+inside the container context. A normal import returns the function unchanged. To accept launch
+arguments or manage tasks, put an explicit `main()` in the application.
 
 ```python
-from nuke_di import Shutdown, job, worker
+from nuke_di import entrypoint
 
 
-@job  # runs once
-async def sync(pg: Postgres, day: datetime.date) -> None: ...
-
-
-@worker  # runs until SIGTERM / SIGINT
-async def consume(queue: Queue, shutdown: Shutdown) -> None:
-    while not shutdown.is_set():
-        await handle(await queue.get())
+@entrypoint
+async def main(reports: Reports) -> None:
+    await reports.publish()
 ```
 
 **Frameworks**: handlers take clients by type hint, with no `Depends` / `Provide` / `inject()`
@@ -137,11 +135,9 @@ per handler.
   the worker connects the clients, a process that only kicks tasks connects none. A client argument of a
   task takes `= TaskiqDepends()` as its default, so type checkers accept `.kiq()` without it.
   Run `taskiq worker --max-fails 1`, so a failed connect exits the process instead of looping.
-- A server with no DI of its own (grpc.aio, aiohttp, websockets, APScheduler, Textual, a Temporal worker): no
-  integration. A `@worker` builds and starts it, `await shutdown.wait()`, stops it within its own timeout
-  below `SHUTDOWN_GRACE_SECONDS`; the class whose methods are the handlers (servicer, views, APScheduler
-  jobs, activities) is a `Client`. Workflows never take clients. See
-  [Servers inside a worker](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/servers-in-workers.md).
+- A server can own its lifecycle directly. Resolve its clients before entering `async with deps`,
+  run the server with connected clients, and finish its work before leaving the context.
+  See [Servers with an explicit lifespan](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/servers-in-workers.md).
 
 A framework without dependency injection (Starlette, Quart, aiohttp, a plain ASGI app) lists the
 clients its handlers take: `from nuke_di.asgi import lifespan`; `clients = lifespan(DI, UserService)`;
@@ -173,7 +169,7 @@ def test_api() -> None:  # the global DI, e.g. a FastAPI app; a Replacement is n
 
 - `di` gives a fresh `Dependencies`, `global_di` the global `DI` flushed around the test. Async
   tests need pytest-asyncio (`asyncio_mode = auto`).
-- A job or a handler can also be called directly with `AsyncMock()` arguments: importing the
+- An entrypoint or a handler can also be called directly with `AsyncMock()` arguments: importing the
   module does not run it.
 
 ## Do not write
@@ -184,17 +180,17 @@ Each of these was proposed and rejected; the container has no API for them and w
 |---|---|---|
 | Provider or factory functions, `@provide`, generator providers, registering an instance or a lambda | A `Client` subclass that creates the object in `connect()` | [ADR-0005](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0005-third-party-objects-as-client-classes.md) |
 | `bind(Protocol, Impl)`, an `__init__` argument typed with a `Protocol` / ABC, qualifiers (`Annotated[Postgres, "replica"]`), `list[Plugin]` multibinding | Depend on the concrete client; a subclass per instance; `mock()` / `override()` in tests | [ADR-0008](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0008-clients-depend-on-concrete-clients.md) |
-| Request / session / message scopes, a client per request, new code on `NotSingletonClient` | A long-lived `Client` with a method that opens the per-request object | [ADR-0006](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0006-clients-live-as-long-as-the-container.md) |
+| Request / session / message scopes, a client per request | A long-lived `Client` with a method that opens the per-request object | [ADR-0006](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0006-clients-live-as-long-as-the-container.md) |
 | Retries, backoff or "wait until ready" loops in `connect()` | Let `connect()` raise; the orchestrator restarts the process | [ADR-0009](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0009-connect-is-fail-fast.md) |
-| I/O in `__init__`, or `DI.resolve()` inside a handler or while connected | `__init__` stores, `connect()` does I/O; resolve at startup | The tree is built before anything connects |
+| I/O in `__init__`, or building a new client while connected | Store arguments in `__init__`, do I/O in `connect()`, and resolve new clients before startup | The container needs the full dependency tree at startup |
 | FastAPI `Depends(get_db)` or `DI.inject` per route to reach a client | A route argument typed with the client, after `setup(app)` | The integration does it |
-| `DI.resolve(...)` plus `asyncio.run()` boilerplate around a process | `@job` / `@worker` | They own the lifecycle and the exit code |
+| Process options, signal handlers or task supervision in DI | Use the application or framework lifecycle | `@entrypoint` only runs a module with connected clients |
 
 ## Check the result
 
 - **mypy plugin**: with `plugins = ["nuke_di.mypy"]` under `[tool.mypy]`, `mypy` reports an
   argument that is not a client, a missing type hint and a cycle at every `resolve()`, `inject()`,
-  `@job` and `@worker`, with the path to it.
+  `@entrypoint`, with the path to it.
 - **A wiring test** builds every entrypoint without connecting anything; it also runs every
   `__init__`:
 
@@ -204,12 +200,6 @@ Each of these was proposed and rejected; the container has no API for them and w
       Dependencies().inject(entrypoint)
   ```
 
-- **The graph as data**: `deps.graph().nodes` lists every client a container built, dependencies
-  first; `node.client_class` is the class and `node.dependencies` maps each `__init__` argument to its
-  node. Answer "does `OrderService` depend on `Database`" from it, or print
-  `deps.graph().to_mermaid()`. A JSON form is a recipe in the guide:
-  https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/agents.md#the-graph-as-json
-
 ## Errors
 
 - `InvalidSignatureError ... which is not a client`: an argument of a client's `__init__` is typed
@@ -218,8 +208,9 @@ Each of these was proposed and rejected; the container has no API for them and w
   alone. A function given to `inject()` keeps its non-client arguments for the caller instead.
 - `CircularDependencyError`: two clients need each other; extract the shared part into a third
   client both depend on.
-- `ConnectError: ... already resolved, call mock() before resolve() or inject()`: move the
+- `RuntimeError: ... already resolved, call mock() before resolve() or inject()`: move the
   `mock()` / `override()` above the first `resolve()` / `inject()` / `TestClient(app)`.
-- `ConnectError: ... the container is already connected`: resolve before `async with DI`.
+- If resolving a new client raises `RuntimeError`, build it before `async with DI`. If an
+  injected callable raises because its clients were flushed, call `inject()` again before the next start.
 
 Every exception: https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/errors.md

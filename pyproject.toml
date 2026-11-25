@@ -1,6 +1,6 @@
 [project]
 name = "nuke-di"
-version = "2.0.4"
+version = "3.0.0"
 description = "Simplest type-hint based dependency injection for async Python projects"
 readme = "README.md"
 license = "MIT"
@@ -18,10 +18,6 @@ keywords = [
   "async",
   "type-hints",
   "lifecycle",
-  "worker",
-  "background-jobs",
-  "graceful-shutdown",
-  "cli",
   "fastapi",
   "litestar",
   "aiogram",
@@ -149,7 +145,6 @@ extend-immutable-calls = ["fastmcp.dependencies.Depends"]
 [tool.mypy]
 files = ["src", "tests", "scripts", "benchmarks", "examples"]
 # The solutions an agent eval grades are projects of their own, with module names of the examples
-exclude = ["^benchmarks/agents/reference/"]
 # Every example is a package run from examples/, which is where its imports start
 mypy_path = "examples"
 strict = true

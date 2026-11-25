@@ -7,10 +7,10 @@ from typing import Any
 
 from aiogram import Dispatcher
 
+from nuke_di._integration import running
 from nuke_di.aiogram.middleware import _Clients
 from nuke_di.aiogram.scan import find
 from nuke_di.core import DI, Dependencies
-from nuke_di.integration import running
 
 
 def setup(dp: Dispatcher, container: Dependencies = DI) -> None:

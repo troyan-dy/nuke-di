@@ -1,12 +1,11 @@
-import asyncio
 from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from nuke_di import DI, Dependencies
+from nuke_di import DI
 
 from fastapi_app.api import app
-from fastapi_app.clients import Database, UserCache
+from fastapi_app.clients import Database
 
 
 class FakeDatabase(Database):
@@ -41,15 +40,3 @@ def test_websocket(client: TestClient) -> None:
         assert ws.receive_text() == "tester"
         ws.send_text("1")
         assert ws.receive_text() == "not found"
-
-
-async def test_cache_refreshes(di: Dependencies, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(UserCache, "refresh_seconds", 0.01)
-    db = FakeDatabase()
-    di.mock(Database, db)
-    cache = di.resolve(UserCache)
-    async with di:
-        assert cache.get(8) is None
-        db.users[8] = "newcomer"
-        await asyncio.sleep(0.05)
-        assert cache.get(8) == "newcomer"

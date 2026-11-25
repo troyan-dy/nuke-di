@@ -15,10 +15,10 @@ from litestar.response.base import ASGIResponse
 from litestar.testing import TestClient
 from litestar.types import Receive, Scope, Send
 
-from nuke_di import DI, BackgroundTasks, Client, Dependencies, NotSingletonClient, Shutdown
-from nuke_di.integration.testing import check
+from nuke_di import DI, Client, ConnectError, Dependencies
 from nuke_di.litestar import ClientPlugin
 from nuke_di.litestar.plugin import _LITESTAR
+from tests.integration_contract.check import check
 
 if TYPE_CHECKING:
     from decimal import Decimal
@@ -78,8 +78,8 @@ class Billing(Client):
     """A second client, for handlers that take two."""
 
 
-class Session(NotSingletonClient):
-    """A client built for every argument that takes it."""
+class Session(Client):
+    """A client shared by arguments of the same type."""
 
 
 class Broken(Client):
@@ -143,11 +143,11 @@ def sessions(first: Session, second: Session) -> bool:
     return first is second
 
 
-def test_sync_handler_and_not_singleton_client_per_argument() -> None:
+def test_sync_handler_arguments_share_a_client() -> None:
     app = make_app(Dependencies(), [sessions])
 
     with TestClient(app) as client:
-        assert client.get("/sessions").json() is False
+        assert client.get("/sessions").json() is True
 
 
 @get("/billing")
@@ -315,24 +315,6 @@ def test_app_lifespan_and_hooks_run_inside_connected_clients() -> None:
     ]
 
 
-@get("/loop")
-async def loop(shutdown: Shutdown, tasks: BackgroundTasks) -> bool:
-    return shutdown.is_set()
-
-
-def test_shutdown_is_set_and_app_restarts() -> None:
-    deps = Dependencies()
-    app = make_app(deps, [loop])
-
-    for _ in range(2):
-        with TestClient(app) as client:
-            assert client.get("/loop").json() is False
-            shutdown = deps.clients[Shutdown]
-        assert isinstance(shutdown, Shutdown)
-        assert shutdown.is_set()
-        assert not deps.connected
-
-
 @get("/broken")
 async def broken(kafka: Broken) -> None: ...
 
@@ -346,10 +328,10 @@ def test_failed_connect_fails_startup_and_forgets_clients() -> None:
         with TestClient(app):
             ...
 
-    assert excinfo.group_contains(RuntimeError, match=r"nuke-di clients failed to start: Broken.connect\(\) raised")
+    assert excinfo.group_contains(ConnectError, match=r"Broken.connect\(\) raised")
 
     assert not deps.connected
-    assert deps.connect_clients == []
+    assert not deps.clients
 
 
 def test_two_apps_with_their_own_containers() -> None:

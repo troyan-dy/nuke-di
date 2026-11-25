@@ -33,7 +33,7 @@ The clients connect before the broker starts consuming and disconnect after it s
 
 - **A broker run without a FastStream app**, e.g. a broker started inside a FastAPI lifespan or FastStream's own FastAPI router: `setup()` takes the app.
 - **Clients in `on_startup` / `lifespan` hooks by type hint**: those run before or around the brokers; they reach clients through the container.
-- **Per-message clients**: as everywhere, a `Client` is one per container and a `NotSingletonClient` one per argument.
+- **Per-message clients**: as everywhere, a `Client` is one per container.
 
 ## Public API
 

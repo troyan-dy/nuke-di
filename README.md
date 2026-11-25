@@ -13,15 +13,14 @@ creates every client once and drives its async lifecycle: `connect()` on startup
 `disconnect()` on shutdown. Every client starts as soon as its own dependencies have
 connected, concurrently with every other client that is ready.
 
-On top of that, one decorator turns an async function into a process with command-line
-arguments, and FastAPI, Litestar, FastStream and aiogram handlers, MCP tools and taskiq tasks take clients by type hint
-the same way.
+FastAPI, Litestar, FastStream and aiogram handlers, MCP tools and taskiq tasks take clients
+by type hint. An optional `@entrypoint` runs an async function when its module is executed.
 
 It was extracted from the DI layer of a production Python microservice framework
 and has no runtime dependencies.
 
 - [Installation](#installation) · [Quick start](#quick-start) · [Principles](#principles) · [Performance](#performance)
-- Examples: [a job with command-line arguments](#a-job-with-command-line-arguments) · [FastAPI](#fastapi)
+- Examples: [an executable module](#an-executable-module) · [FastAPI](#fastapi)
 - [Documentation](#documentation)
 
 ## Installation
@@ -178,115 +177,32 @@ On its own, `resolve()` costs 3.5–6.3 µs per client, so a tree of 1000 client
 and `connect()` adds 13–18 µs per client. [docs/benchmarks.md](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md) explains every
 scenario, records the baseline on Python 3.11–3.14 and has the whole comparison with its method.
 
-## A job with command-line arguments
-
-One decorator turns an async function into the main program of a process. Clients are injected, and every
-other annotated argument becomes a command-line option, typed and validated:
+## An executable module
 
 ```python
-# sync.py
-import datetime
-import enum
-from typing import Annotated
-
-from nuke_di import Client, Option, job
+# report.py
+from nuke_di import Client, entrypoint
 
 
-class Postgres(Client):
-    async def connect(self) -> None:
-        print("postgres: connected")
-
-    async def disconnect(self) -> None:
-        print("postgres: disconnected")
-
-    async def upsert(self, table: str, rows: list[str]) -> None:
-        print(f"postgres: upserted {len(rows)} rows into {table}")
+class Reports(Client):
+    async def publish(self) -> None:
+        print("Report published")
 
 
-class Warehouse(Client):
-    async def changes(self, table: str, day: datetime.date) -> list[str]:
-        return [f"{table}:{day}:{n}" for n in range(3)]
-
-
-class Mode(enum.Enum):
-    INCREMENTAL = "incremental"
-    FULL = "full"
-
-
-@job
-async def sync(
-    pg: Postgres,
-    warehouse: Warehouse,
-    day: Annotated[datetime.date, Option(help="Day to copy, YYYY-MM-DD", short="d")],
-    tables: Annotated[
-        list[str] | None, Option(help="Table to copy, repeat for several; all by default", short="t")
-    ] = None,
-    mode: Mode = Mode.INCREMENTAL,
-    dry_run: Annotated[bool, Option(help="Read the changes, write nothing")] = False,
-) -> None:
-    """Copy one day of changes from the warehouse into Postgres."""
-    print(f"sync: {mode.name} copy of {day}")
-    for table in tables or ["users", "orders"]:
-        rows = await warehouse.changes(table, day)
-        if dry_run:
-            print(f"sync: would upsert {len(rows)} rows into {table}")
-        else:
-            await pg.upsert(table, rows)
+@entrypoint
+async def main(reports: Reports) -> None:
+    await reports.publish()
 ```
-
-No `main()`, no `asyncio.run()`, no `argparse`: the decorator resolves and connects the clients, parses
-the command line, runs the function and exits with a meaningful code:
 
 ```console
-$ python sync.py --day 2026-10-01
-postgres: connected
-sync: INCREMENTAL copy of 2026-10-01
-postgres: upserted 3 rows into users
-postgres: upserted 3 rows into orders
-postgres: disconnected
-
-$ python sync.py -d 2026-10-01 -t users --mode FULL --dry-run
-postgres: connected
-sync: FULL copy of 2026-10-01
-sync: would upsert 3 rows into users
-postgres: disconnected
+$ python -m report
+Report published
 ```
 
-`--help` is generated from the signature and the docstring (Python 3.13+ prints `-d, --day DAY` instead of
-`-d DAY, --day DAY`):
-
-```console
-$ python sync.py --help
-usage: sync.py [-h] -d DAY [-t TABLES] [--mode {INCREMENTAL,FULL}]
-               [--dry-run | --no-dry-run]
-
-Copy one day of changes from the warehouse into Postgres.
-
-options:
-  -h, --help            show this help message and exit
-  -d DAY, --day DAY     Day to copy, YYYY-MM-DD
-  -t TABLES, --tables TABLES
-                        Table to copy, repeat for several; all by default
-  --mode {INCREMENTAL,FULL}
-                        (default: INCREMENTAL)
-  --dry-run, --no-dry-run
-                        Read the changes, write nothing (default: False)
-```
-
-A wrong command line is rejected before any client is connected, with exit code `2`:
-
-```console
-$ python sync.py -d 2026-10-01 --mode full
-usage: sync.py [-h] -d DAY [-t TABLES] [--mode {INCREMENTAL,FULL}]
-               [--dry-run | --no-dry-run]
-sync.py: error: argument --mode: invalid choice: 'full' (choose from INCREMENTAL, FULL)
-Run sync.sync failed: argument --mode: invalid choice: 'full' (choose from INCREMENTAL, FULL)
-$ echo $?
-2
-```
-
-`@worker` does the same for a process that runs until SIGTERM, with a graceful shutdown. Both are
-described in [Workers and jobs](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md).
+The decorator resolves the function's clients, connects them, runs the function and disconnects
+the clients on exit. A normal import leaves the function available for a test or another caller.
+See [Executable modules](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md)
+for migration and an explicit `main()` with application-owned arguments.
 
 ## FastAPI
 
@@ -384,27 +300,27 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
 
 ## Documentation
 
-- [Clients](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md): `Client` and `NotSingletonClient`, the lifecycle, dataclass clients,
-  connect order, startup timings, the dependency graph, connect and resolution errors
+- [Clients](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md): `Client`, the lifecycle, dataclass clients,
+  connect order, connect and resolution errors
 - [The container](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/container.md): `Dependencies` and the global `DI`, `resolve()`, `inject()`,
   `mock()`, `override()`
-- [Workers and jobs](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md): `@job` and `@worker`, command-line parameters,
-  `Shutdown`, the grace period, background tasks, exit codes, hooks, Kubernetes
+- [Lifecycle guarantees](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/lifecycle.md): ordering,
+  failures, cancellation and their regression tests
+- [Executable modules](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/workers-and-jobs.md): `@entrypoint`, explicit process control and migration from 2.x
 - Frameworks: [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md), [Litestar](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/litestar.md),
   [FastStream](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/faststream.md), [MCP servers](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/mcp.md) on the SDK and on FastMCP, [aiogram](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/aiogram.md),
   [taskiq](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/taskiq.md), [Starlette, Quart and any ASGI app](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/asgi.md),
-  [servers inside a worker](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/servers-in-workers.md) for grpc.aio, aiohttp, websockets, APScheduler,
-  Textual and Temporal, and [writing an integration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/integrations.md) for another framework with `nuke_di.integration`
+  and [servers with an explicit lifespan](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/servers-in-workers.md)
 - [Testing](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/testing.md): `mock()`, `override()`, the pytest fixtures, checking the wiring
-- [Configuration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/configuration.md): timeouts, concurrency and the grace period
+- [Configuration](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/configuration.md): client timeouts and the disconnect deadline
 - [Errors](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/errors.md): every exception and when it is raised
-- [Examples](https://github.com/troyan-dy/nuke-di/blob/master/examples/README.md): 23 runnable scenarios, from a one-off script and a queue worker
+- [Examples](https://github.com/troyan-dy/nuke-di/blob/master/examples/README.md): runnable scenarios, from a one-off script and a queue worker
   to FastAPI, Litestar, FastStream, aiogram, taskiq, Starlette, an MCP server and a whole service, each with its output
   and tests
 - [Benchmarks](https://github.com/troyan-dy/nuke-di/blob/master/docs/benchmarks.md): every scenario, the baseline on Python 3.11–3.14 and the comparison
   with other libraries
 - [Coding agents](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/agents.md): the Agent Skill, a block for `AGENTS.md`,
-  [`llms.txt`](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms.txt), Context7, the graph as JSON
+  [`llms.txt`](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/llms.txt), Context7
 - [Development](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/development.md): the checks, coverage and releases
 
 ## License

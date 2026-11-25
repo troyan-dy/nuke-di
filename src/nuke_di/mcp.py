@@ -16,9 +16,9 @@ from typing import Annotated, Any, get_args, get_origin, get_type_hints
 from mcp.server.mcpserver import MCPServer, Resolve
 from mcp.server.mcpserver.exceptions import InvalidSignature
 
+from nuke_di._integration import Binding, DependsFramework, client_of, unique, wrap_lifespan
+from nuke_di._integration.hints import _first_marker
 from nuke_di.core import DI, Dependencies
-from nuke_di.integration import Binding, DependsFramework, client_of, unique, wrap_lifespan
-from nuke_di.integration.hints import _first_marker
 from nuke_di.naming import sname
 
 __all__ = ("setup",)

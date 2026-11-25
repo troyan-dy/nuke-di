@@ -10,9 +10,9 @@ from litestar.constants import RESERVED_KWARGS
 from litestar.handlers import BaseRouteHandler, HTTPRouteHandler, WebsocketRouteHandler
 from litestar.handlers.websocket_handlers import WebsocketListenerRouteHandler
 
-from nuke_di.integration import client_of
+from nuke_di._integration import client_of
 from nuke_di.naming import sname
-from nuke_di.types import NotSingletonClient
+from nuke_di.types import Client
 
 
 def _markers() -> tuple[Any, ...]:
@@ -46,7 +46,7 @@ class _Clients:
 
     def __init__(self, app_dependencies: dict[str, Any]) -> None:
         self.app_dependencies = app_dependencies
-        self.found: dict[str, type[NotSingletonClient]] = {}
+        self.found: dict[str, type[Client]] = {}
         # Where each name was found first, for the error about a name taken by two clients
         self.places: dict[str, Any] = {}
 
@@ -97,7 +97,7 @@ class _Clients:
         self,
         call: Any,
         name: str,
-        client: type[NotSingletonClient],
+        client: type[Client],
         provided: dict[str, Any],
     ) -> None:
         if name in RESERVED_KWARGS:
@@ -108,7 +108,7 @@ class _Clients:
         if name not in provided:
             self._record(name, client, call)
 
-    def _record(self, name: str, client: type[NotSingletonClient], call: Any) -> None:
+    def _record(self, name: str, client: type[Client], call: Any) -> None:
         recorded = self.found.setdefault(name, client)
         place = self.places.setdefault(name, call)
         if recorded is not client:

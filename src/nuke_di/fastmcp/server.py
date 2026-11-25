@@ -13,9 +13,9 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from nuke_di._integration import Binding, running, unique
 from nuke_di.core import DI, Dependencies
 from nuke_di.fastmcp.signatures import _bind
-from nuke_di.integration import Binding, running, unique
 
 # Where FastMCP takes the functions of a server: its decorators come here too
 _REGISTRATIONS = ("add_tool", "add_resource", "add_prompt")

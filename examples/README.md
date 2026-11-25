@@ -33,28 +33,22 @@ docker run -d --rm --name nats -p 4222:4222 nats:2.10
 |---------------------------------------------|-----------------------------------------------------------------------------|
 | [hello](hello/)                             | The smallest program: two clients, `inject()` and `async with DI`           |
 | [settings](settings/)                       | Configuration from environment variables as a client, replaced in tests     |
-| [not_singleton](not_singleton/)             | `Client` against `NotSingletonClient`: which instances are shared           |
-| [dataclass_clients](dataclass_clients/)     | `@client_dataclass` instead of a hand-written `__init__`                    |
-| [graph](graph/)                             | Who needs whom in a real tree, its Mermaid diagram and its startup         |
+| [dataclass_clients](dataclass_clients/)     | `@dataclass` on a `Client` subclass                    |
 | [startup_failures](startup_failures/)       | A dependency that is down or hangs, and a tree that cannot be built         |
 
 ### Scripts and jobs
 
 | Example                                     | Scenario                                                                    |
 |---------------------------------------------|-----------------------------------------------------------------------------|
-| [plain_script](plain_script/)               | A one-off script with its own container, without `@job`                     |
-| [cli_job](cli_job/)                         | A `@job` with command-line parameters, `--help` and exit codes              |
+| [plain_script](plain_script/)               | A one-off script with its own container, and an explicit `main()`                     |
 | [http_job](http_job/)                       | An `httpx.AsyncClient` wrapped as a client, requests made concurrently      |
-| [hooks_metrics](hooks_metrics/)             | Run hooks, startup timings as metrics and JSON logs                         |
 
 ### Workers and queues
 
 | Example                                     | Scenario                                                                    |
 |---------------------------------------------|-----------------------------------------------------------------------------|
-| [sqlite_queue](sqlite_queue/)               | A task queue on a SQLite table: a job enqueues, a worker consumes           |
+| [sqlite_queue](sqlite_queue/)               | A task queue on a SQLite table: one command enqueues, another drains it           |
 | [nats_worker](nats_worker/)                 | A worker subscribed to NATS with nats-py, in a queue group                  |
-| [periodic_worker](periodic_worker/)         | Work every N seconds that stops at once on SIGTERM                          |
-| [background_tasks](background_tasks/)       | A heartbeat and a refresher next to the main loop; a crash fails the process |
 
 ### Frameworks
 
@@ -72,5 +66,5 @@ docker run -d --rm --name nats -p 4222:4222 nats:2.10
 
 | Example                                     | Scenario                                                                    |
 |---------------------------------------------|-----------------------------------------------------------------------------|
-| [testing](testing/)                         | A cookbook of tests: `mock()`, `override()`, fixtures, jobs, workers, wiring |
+| [testing](testing/)                         | A cookbook of tests: `mock()`, `override()`, fixtures, entrypoints, wiring |
 | [service_layout](service_layout/)           | One service, three processes: an API, an outbox worker and a cleanup job, with Kubernetes manifests |

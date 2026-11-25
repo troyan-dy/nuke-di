@@ -1,9 +1,8 @@
 # Plain script
 
 A one-off asyncio script that seeds a SQLite database with demo customers, using its own
-`Dependencies()` container and no `@job`. Use this shape for a developer helper, a notebook cell or a
-step inside a program that already owns `asyncio.run()` and its command line: when you need the
-clients and their lifecycle, but not parameters, signal handling, exit codes or hooks.
+`Dependencies()` container. Use this shape for a developer helper, a notebook cell or a program
+that owns its event loop, command line or signal handling.
 
 | File           | What it holds                                                                    |
 |----------------|----------------------------------------------------------------------------------|
@@ -52,5 +51,4 @@ $ uv run pytest -q plain_script
   `sqlite3` calls go through `asyncio.to_thread`.
 - The injected function takes its remaining arguments by keyword (`injected(rows=...)`): the
   clients are bound as keywords, so a positional argument would collide with them.
-- Switch to `@job` (see `cli_job/`) once the script needs command-line options, an exit code a
-  scheduler can read, or a clean stop on SIGTERM.
+- For a shell command that takes arguments, see the application-owned CLI in the [HTTP job](../http_job/).

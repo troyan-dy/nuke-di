@@ -1,85 +1,95 @@
 """
-How the clients of one connect() or disconnect() take their turns: in dependency order, a few at a time, each step
-bounded by a timeout and measured.
+How the clients of one connect() or disconnect() take their turns: in dependency order, each step bounded by a timeout.
 """
 
 import asyncio
-import contextlib
-import time
-from collections.abc import Callable, Coroutine, Iterator, Mapping
-from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Final, Literal, TypeAlias
+from collections.abc import Callable, Coroutine
+from typing import TYPE_CHECKING, Any, TypeAlias
 
-from nuke_di.options import DependenciesSettings
-from nuke_di.timings import ClientTiming, Outcome
-from nuke_di.types import NotSingletonClient
+from nuke_di._container.registry import ClientClass
+from nuke_di.types import Client
 
 if TYPE_CHECKING:
     from nuke_di.core import Dependencies
 
-Limiter: TypeAlias = asyncio.Semaphore | contextlib.nullcontext[None]
 # The step of one client, run once the clients it waits for are done
-_Step: TypeAlias = Callable[[NotSingletonClient], Coroutine[Any, Any, None]]
-# The class asked for and the client passed, for one `__init__` argument of a client
-_Dependency: TypeAlias = tuple[type[NotSingletonClient], NotSingletonClient]
-# The arguments of a client that takes no client
-_NO_ARGUMENTS: Final[Mapping[str, _Dependency]] = MappingProxyType({})
+_Step: TypeAlias = Callable[[ClientClass, Client], Coroutine[Any, Any, None]]
+
+
+class LifecycleCancellation:
+    """Distinguish a client's cancellation from cancellation of the lifecycle task group."""
+
+    def __init__(self) -> None:
+        self.task = asyncio.current_task()
+        self.prior_requests = 0 if self.task is None else self.task.cancelling()
+
+    def group_is_cancelling(self) -> bool:
+        # TaskGroup cancels the owner on a sibling failure too. Requests already handled by the owner do not count.
+        return self.task is None or self.task.cancelling() > self.prior_requests
 
 
 async def in_dependency_order(
-    clients: list[NotSingletonClient],
-    waits_for: dict[int, list[int]],
+    clients: dict[ClientClass, Client],
+    waits_for: dict[ClientClass, list[ClientClass]],
     step: _Step,
+    prior_cancels: int,
 ) -> None:
     """
-    Run `step` for every client of `clients` concurrently, each once `step` has returned for the clients it
-    `waits_for`, by `id()`.
+    Run each client after the declared classes it waits for.
 
     A client that `step` raised for releases no one: in a connect, the consumers of a failed client must not start
     before the group cancels them. The first exception cancels every step still running or waiting.
     """
-    done = {id(client): asyncio.Event() for client in clients}
+    # Deliver a pending cancellation before starting clients. An already handled request only leaves a count.
+    if prior_cancels:
+        await asyncio.sleep(0)
+    done = {key: asyncio.Event() for key in clients}
 
     async with asyncio.TaskGroup() as group:
-        for client in clients:
-            group.create_task(_step_when_ready(client, step, waits_for, done))
+        for key, client in clients.items():
+            group.create_task(_step_when_ready(key, client, step, waits_for, done))
 
 
 async def _step_when_ready(
-    client: NotSingletonClient,
+    key: ClientClass,
+    client: Client,
     step: _Step,
-    waits_for: dict[int, list[int]],
-    done: dict[int, asyncio.Event],
+    waits_for: dict[ClientClass, list[ClientClass]],
+    done: dict[ClientClass, asyncio.Event],
 ) -> None:
-    key = id(client)
     for other in waits_for[key]:
         # A barrier on the events of the dependencies: gather would add a Task per edge, and change the order
         await done[other].wait()  # noqa: WPS476
-    await step(client)
+    await step(key, client)
     done[key].set()
 
 
-def dependencies_among(container: "Dependencies", clients: list[NotSingletonClient]) -> dict[int, list[int]]:
-    """
-    The dependencies of every client of `clients` that are among `clients`, by `id()`: a Replacement is never
-    connected, so nothing waits for it.
-    """
-    ids = set(map(id, clients))
-    dependencies = container._dependencies
-    return {
-        id(client): [
-            id(dependency)
-            for _, dependency in dependencies.get(id(client), _NO_ARGUMENTS).values()
-            if id(dependency) in ids
-        ]
-        for client in clients
-    }
+def dependencies_among(
+    container: "Dependencies",
+    clients: dict[ClientClass, Client],
+) -> dict[ClientClass, list[ClientClass]]:
+    """Keep declared edges between the selected clients, excluding replacements and unstarted clients."""
+    registrations = container._clients
+    selected = {}
+    for key in clients:
+        declared = registrations[key].dependencies or ()
+        selected[key] = [other for other in declared if other in clients]
+    return selected
 
 
-def make_limiter(settings: DependenciesSettings) -> Limiter:
-    if settings.connect_concurrency == 0:
-        return contextlib.nullcontext()
-    return asyncio.Semaphore(settings.connect_concurrency)
+async def connect_client(
+    key: ClientClass,
+    client: Client,
+    seconds: float,
+    connected: dict[ClientClass, Client],
+) -> None:
+    await within(seconds, client.connect())
+    connected[key] = client
+    # A hook can request cancellation and return before it next suspends. Roll it back too, rather than
+    # releasing its consumers while TaskGroup is still deciding whether the child succeeded.
+    task = asyncio.current_task()
+    if task is not None and task.cancelling():
+        await asyncio.sleep(0)
 
 
 async def within(seconds: float, coro: Coroutine[Any, Any, None]) -> None:
@@ -95,49 +105,3 @@ async def within(seconds: float, coro: Coroutine[Any, Any, None]) -> None:
         raise TimeoutError
     async with asyncio.timeout(seconds):
         await coro
-
-
-def cancelled_from_outside() -> bool:
-    """
-    Whether the task is being cancelled, as opposed to a client raising a CancelledError of its own, e.g. re-raised
-    from a task it awaited.
-    """
-    task = asyncio.current_task()
-    return task is None or task.cancelling() > 0
-
-
-@contextlib.contextmanager
-def measure(
-    timing: ClientTiming,
-    phase: Literal["connect", "disconnect"],
-    *,
-    done: list[Any] | None = None,
-    client: object = None,
-) -> Iterator[None]:
-    """
-    Record how long the block took and how it ended as the `phase` of `timing`, then append `client` to `done`.
-    """
-    started = time.perf_counter()
-    outcome: Outcome = "failed"
-    try:
-        yield
-    except TimeoutError:
-        outcome = "timed_out"
-        raise
-    except asyncio.CancelledError:
-        # Another client failed, or the whole connect or disconnect was cancelled
-        outcome = "cancelled"
-        raise
-    else:
-        outcome = "ok"
-    finally:
-        # Both fields in one statement: a third one in this finally would take a helper, a call per client
-        timing.__dict__.update(
-            {
-                phase: time.perf_counter() - started,
-                f"{phase}_outcome": outcome,
-            }
-        )
-        # However the block ended, and once its timing is recorded
-        if done is not None:
-            done.append(client)

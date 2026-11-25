@@ -1,5 +1,5 @@
 """
-The `resolve` and `not_singleton` scenarios: resolve() of a tree, cold, on a second container and from the cache.
+The `resolve` scenario: resolve() of a tree, cold, on a second container and from the cache.
 """
 
 import itertools
@@ -7,10 +7,10 @@ from collections.abc import Callable, Iterator
 from functools import partial
 from typing import Final
 
-from nuke_di import Client, Dependencies, NotSingletonClient
+from nuke_di import Client, Dependencies
 from suite.measure import Measurement, collect, measure
 from suite.shapes import SHAPES
-from suite.trees import Tree, built, client, shape_label
+from suite.trees import Tree, built, shape_label
 
 COLD: Final = "resolve(), cold"
 SEEN: Final = "resolve(), second container, classes seen before"
@@ -67,24 +67,3 @@ def _resolve_figures(
         warm = collect(partial(warm_resolve, deps, tree.root), repeat)
         yield Measurement("resolve(), warm", label, size, warm, per_client=False)
     tree.discard()
-
-
-def not_singleton_scenario(sizes: list[int], repeat: int) -> Iterator[Measurement]:
-    bases: dict[str, type] = {
-        "N consumers of a Client": Client,
-        "N consumers of a NotSingletonClient": NotSingletonClient,
-    }
-    for shape, base in bases.items():
-        for size in sizes:
-            samples = collect(partial(cold_resolve, partial(consumers, base, size)), repeat)
-            yield Measurement(COLD, shape, size, samples)
-
-
-def consumers(base: type, size: int) -> Tree:
-    """
-    One root over `size` consumers of one `Session`, a `Client` or a `NotSingletonClient`.
-    """
-    session = client("Session", base=base)
-    middle = [client(f"Consumer{number}", [session]) for number in range(size)]
-    root = client("Root", middle)
-    return Tree(root, [session, *middle, root])

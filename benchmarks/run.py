@@ -25,10 +25,10 @@ from suite.scenarios import scenarios
 from suite.table import table
 from suite.web import Get, serving
 
-from nuke_di import NotSingletonClient
+from nuke_di import Client
 
 
-async def _in_order(clients: list[NotSingletonClient]) -> None:
+async def _in_order(clients: list[Client]) -> None:
     for instance in clients:
         await instance.connect()
     for instance in reversed(clients):

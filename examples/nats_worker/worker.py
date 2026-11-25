@@ -2,7 +2,7 @@ import asyncio
 import functools
 
 from nats.aio.msg import Msg
-from nuke_di import Shutdown, worker
+from nuke_di import entrypoint
 from pydantic import ValidationError
 
 from nats_worker.clients import SUBJECT, Nats, Order, Orders
@@ -18,18 +18,20 @@ async def process_order(msg: Msg, orders: Orders) -> None:
         print(f"worker: skipped an invalid message {msg.data!r}")
         return
     print(f"worker: order {order.id}: {order.quantity} x {order.product}")
-    await asyncio.sleep(0.5)  # the actual work
+    await asyncio.sleep(0.5)  # stand-in for the work
     await orders.save(order)
     print(f"worker: order {order.id} saved")
 
 
-@worker
-async def consume(nats: Nats, orders: Orders, shutdown: Shutdown) -> None:
-    """Handle the orders published on nats_worker.orders until SIGTERM or SIGINT."""
+@entrypoint
+async def consume(nats: Nats, orders: Orders) -> None:
+    """Receive orders until the process is interrupted."""
     handler = functools.partial(process_order, orders=orders)
     subscription = await nats.connection.subscribe(SUBJECT, queue=QUEUE_GROUP, cb=handler)
     print(f"worker: listening on {SUBJECT}, queue group {QUEUE_GROUP}")
-    await shutdown.wait()
-    # Stop receiving and finish the messages already delivered to this replica
-    await subscription.drain()  # type: ignore[no-untyped-call]  # nats-py leaves drain() unannotated
-    print("worker: stopped")
+    try:
+        await asyncio.Future()
+    finally:
+        # Finish deliveries while the connection and the other clients are still available.
+        await subscription.drain()  # type: ignore[no-untyped-call]
+        print("worker: stopped")

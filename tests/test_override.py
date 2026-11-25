@@ -2,7 +2,7 @@ from unittest.mock import NonCallableMock
 
 import pytest
 
-from nuke_di import DI, Client, ConnectError, Dependencies
+from nuke_di import DI, Client, Dependencies
 
 
 class Database(Client):
@@ -83,14 +83,14 @@ def test_override_after_resolve_raises() -> None:
     dep = Dependencies()
     dep.resolve(Users)
 
-    with pytest.raises(ConnectError, match="needs a container without resolved clients"), dep.override(Database):
+    with pytest.raises(RuntimeError, match="needs a container without resolved clients"), dep.override(Database):
         ...
 
 
 async def test_override_exit_while_connected_raises() -> None:
     dep = Dependencies()
 
-    with pytest.raises(ConnectError, match=r"override\(Database\) exited while the container is connected"):
+    with pytest.raises(RuntimeError, match=r"override\(Database\) exited while the container is connected"):
         with dep.override(Database):
             dep.resolve(Users)
             await dep.connect()
@@ -132,7 +132,7 @@ def test_override_needs_container_without_resolved_clients() -> None:
     dep.resolve(Clock)
 
     expected = r"override\(Database\) needs a container without resolved clients, found: Clock"
-    with pytest.raises(ConnectError, match=expected), dep.override(Database):
+    with pytest.raises(RuntimeError, match=expected), dep.override(Database):
         ...
 
     assert Clock in dep.clients
@@ -143,7 +143,7 @@ def test_nested_override_after_resolve_raises() -> None:
 
     with dep.override(Database):
         dep.resolve(Users)
-        with pytest.raises(ConnectError, match="found: Clock, Users"), dep.override(Clock):
+        with pytest.raises(RuntimeError, match="found: Clock, Users"), dep.override(Clock):
             ...
 
 
@@ -151,7 +151,7 @@ def test_override_of_replaced_client_raises() -> None:
     dep = Dependencies()
     dep.mock(Database)
 
-    with pytest.raises(ConnectError, match="Database already has a replacement"), dep.override(Database):
+    with pytest.raises(RuntimeError, match="Database already has a replacement"), dep.override(Database):
         ...
 
 
@@ -168,9 +168,9 @@ async def test_override_keeps_exception_while_connected() -> None:
     assert dep.clients == {}
 
 
-def test_override_when_connected_raises() -> None:
+async def test_override_when_connected_raises() -> None:
     dep = Dependencies()
-    dep.connected = True
 
-    with pytest.raises(ConnectError, match="already connected"), dep.override(Database):
-        ...
+    async with dep:
+        with pytest.raises(RuntimeError, match="already connected"), dep.override(Database):
+            ...

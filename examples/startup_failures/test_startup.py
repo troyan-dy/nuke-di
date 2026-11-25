@@ -2,7 +2,6 @@ import pytest
 from nuke_di import (
     CircularDependencyError,
     Client,
-    ClientTiming,
     ConnectError,
     ConnectTimeoutError,
     Dependencies,
@@ -16,7 +15,7 @@ from startup_failures.resolution import Audit, Checkout
 from startup_failures.resolution import Orders as CyclicOrders
 
 
-async def test_connect_error_rolls_back(di: Dependencies) -> None:
+async def test_connect_error_rolls_back(di: Dependencies, capsys: pytest.CaptureFixture[str]) -> None:
     di.resolve(Orders)
 
     with pytest.raises(ConnectError, match=r"Kafka\.connect\(\) raised OSError") as excinfo:
@@ -24,16 +23,7 @@ async def test_connect_error_rolls_back(di: Dependencies) -> None:
 
     assert isinstance(excinfo.value.__cause__, OSError)
     assert not di.connected
-    outcomes = {timing.name: outcomes_of(timing) for timing in di.timings}
-    assert outcomes == {
-        "Postgres": ("ok", "ok"),
-        "Kafka": ("failed", None),
-        "Orders": (None, None),
-    }
-
-
-def outcomes_of(timing: ClientTiming) -> tuple[str | None, str | None]:
-    return timing.connect_outcome, timing.disconnect_outcome
+    assert capsys.readouterr().out.splitlines() == ["postgres: connected", "postgres: disconnected"]
 
 
 async def test_hanging_connect_times_out() -> None:

@@ -133,7 +133,7 @@ $ taskiq worker app.tasks:broker --workers 1
 [2026-10-10 18:40:00,853][taskiq.worker][INFO   ][MainProcess] Starting 1 worker processes.
 [2026-10-10 18:40:00,859][taskiq.process-manager][INFO   ][MainProcess] Started process worker-0 with pid 56252
 database: connected
-[2026-10-10 18:40:01,084][nuke_di.core][INFO   ][worker-0] Connected 2 clients in 0.00s (slowest: Database 0.00s, UserService 0.00s)
+[2026-10-10 18:40:01,084][nuke_di][INFO   ][worker-0] Connected 2 clients in 0.00s
 [2026-10-10 18:40:01,091][taskiq.receiver.receiver][INFO   ][worker-0] Listening started.
 [2026-10-10 18:40:03,815][taskiq.receiver.receiver][INFO   ][worker-0] Executing task app.tasks:send_report with ID: e987ddad37444fa5a0ade0174578c9f2
 Hello, user-42!
@@ -178,18 +178,17 @@ The rules:
 - **Lifespan.** The clients connect before the other `WORKER_STARTUP` handlers, including those registered
   before `setup()`, and disconnect after `broker.shutdown()` has run the `WORKER_SHUTDOWN` handlers, the
   middlewares and the result backend; on an `InMemoryBroker`, after the tasks still running have finished.
-  `Shutdown` and `BackgroundTasks` behave as in [FastAPI](fastapi.md). `taskiq worker` gives
+  `taskiq worker` gives
   `broker.shutdown()` `--shutdown-timeout` seconds, 5 by default, and the whole disconnect may take
   `DISCONNECT_DEADLINE_SECONDS`, 20 by default: set `--shutdown-timeout` above the time of your
   `WORKER_SHUTDOWN` handlers plus `DISCONNECT_DEADLINE_SECONDS`, or lower the deadline, or a slow
   disconnect is cut off midway.
-- **A failed start.** A failed `connect()` fails `broker.startup()` with a `RuntimeError`, and the worker
+- **A failed start.** A failed `connect()` fails `broker.startup()` with `ConnectError`, and the worker
   process dies. taskiq's process manager restarts it for ever by default (`--max-fails -1`), so the
   orchestrator never sees a crash and the dead dependency is tried again every second. Run the worker with
   `--max-fails 1`: it then exits with code 255, and the orchestrator restarts it with its own backoff, as
   `connect()` is fail-fast in nuke-di.
-- **Instances.** As with `inject()`, a `Client` is one instance per container, and a `NotSingletonClient` is
-  one instance per argument that declares it, not one per task.
+- **Instances.** As with `inject()`, arguments of the same client class share the container's instance.
 - **The function stays a function.** Its signature shows `Annotated[UserService, TaskiqDepends(...)]` to
   taskiq, as in [FastAPI](fastapi.md); `await send_report(1, users)` calls it with clients passed by hand.
   A function that takes clients serves either taskiq or FastAPI: one bound to FastAPI is refused with a

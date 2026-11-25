@@ -85,7 +85,7 @@ The in-memory `Client` of either library runs the lifespan. `server.call_tool()`
 |---|---|---|
 | 1 | A wrapper around the tool, as #67 proposed? | No: `mcp` 2.0 added `Resolve`, the SDK's own dependency marker, which fills an argument and drops it from the schema. The tool stays the user's function, and no ADR-0003 departure is needed for wrapping. |
 | 2 | `__signature__` or annotations for the SDK? | Annotations: the SDK finds `Resolve` with `get_type_hints()`, which ignores `__signature__`. They are restored once the tool is added, since the `Tool` keeps what it read. |
-| 3 | When are the clients found? | When a tool is added; the SDK reads it then, and a tool added before `setup()` fails at once with the `TypeError` of `NotSingletonClient`, whose message names `setup()`. |
+| 3 | When are the clients found? | When a tool is added; the SDK reads it then, and a tool added before `setup()` fails at once with the `TypeError` of `Client`, whose message names `setup()`. |
 | 4 | One module or two? | Two, named after the package the user imports from; the mechanisms differ (annotations for a time, signatures for good), and so do the extras. |
 | 5 | `per_container` for FastMCP | `False`: uncalled-for keeps `_signature_cache` and `_parameter_cache` per function forever, and FastMCP `lru_cache`s the wrapper it builds, so a second rewrite would never be read. |
 | 6 | Resources and prompts | FastMCP: yes, through the same `Depends`. SDK: no, it has no resolver there; a wrapper would be the only way. |

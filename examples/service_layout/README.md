@@ -9,13 +9,13 @@ service_layout/
 ├── clients.py          Settings, Database (sqlite3), Broker, and the repositories Outbox and Orders
 ├── models.py           Order and OutboxRow, what the repositories hand out
 ├── api.py              FastAPI: POST /orders, GET /orders/{id}, GET /health
-├── workers/outbox.py   @worker relay: pending outbox rows -> Broker, then marked sent
-├── jobs/cleanup.py     @job cleanup --older-than-days N: deletes old sent rows
+├── workers/outbox.py   relay loop: pending outbox rows -> Broker, then marked sent
+├── jobs/cleanup.py     @entrypoint cleanup: deletes old sent rows
 ├── k8s.yaml            Deployments for the API and the worker, a CronJob for the job
 └── tests/
     ├── test_wiring.py  every entrypoint resolves: the worker, the job, the app's startup
     ├── test_api.py     TestClient against a SQLite file in tmp_path
-    └── test_outbox.py  the worker stopped through Shutdown, the job directly and on SQLite
+    └── test_outbox.py  worker stop and job behavior on SQLite
 ```
 
 Every process takes only the clients it needs, and the container connects only those: the API
@@ -67,7 +67,8 @@ $ curl -s localhost:8000/orders/3
 {"detail":"order 3 not found"}
 ```
 
-The worker relays both events, then waits for new rows until Ctrl+C:
+The worker relays both events and waits for new rows. Send SIGTERM on POSIX to finish the current
+batch and close its clients.
 
 ```console
 $ uv run python -m service_layout.workers.outbox
@@ -76,39 +77,18 @@ database: connected
 outbox: relaying
 outbox: published row 1 to orders
 outbox: published row 2 to orders
-^C
 outbox: stopped
 database: disconnected
 broker: disconnected
-$ echo $?
-130
 ```
 
-The job, with its generated `--help`; the rows were sent seconds ago, so only `--older-than-days 0`
-deletes them:
+The cleanup job keeps rows that were sent within the past seven days:
 
 ```console
-$ uv run python -m service_layout.jobs.cleanup --help
-usage: python -m service_layout.jobs.cleanup [-h]
-                                             [--older-than-days OLDER_THAN_DAYS]
-
-Delete the outbox rows that were sent long enough ago.
-
-options:
-  -h, --help            show this help message and exit
-  --older-than-days OLDER_THAN_DAYS
-                        Delete the rows sent at least this many days ago
-                        (default: 7)
 $ uv run python -m service_layout.jobs.cleanup
 database: connected
 cleanup: deleted 0 sent outbox rows older than 7 days
 database: disconnected
-$ uv run python -m service_layout.jobs.cleanup --older-than-days 0
-database: connected
-cleanup: deleted 2 sent outbox rows older than 0 days
-database: disconnected
-$ echo $?
-0
 ```
 
 ## Test
@@ -126,16 +106,14 @@ $ uv run pytest -q service_layout
 | Process | Kubernetes object | Command | Stops on |
 |---------|-------------------|---------|----------|
 | API     | Deployment `service-layout-api` | `uvicorn service_layout.api:app` | SIGTERM: uvicorn drains, the lifespan disconnects the clients |
-| Worker  | Deployment `service-layout-outbox` | `python -m service_layout.workers.outbox` | SIGTERM: `Shutdown` is set, the batch is finished, exit code `143` |
-| Job     | CronJob `service-layout-cleanup`, `0 3 * * *` | `python -m service_layout.jobs.cleanup --older-than-days 7` | Returns: exit code `0`; `1` or `2` marks the Job failed |
+| Worker  | Deployment `service-layout-outbox` | `python -m service_layout.workers.outbox` | SIGTERM: the worker finishes its batch and returns |
+| Job     | CronJob `service-layout-cleanup`, `0 3 * * *` | `python -m service_layout.jobs.cleanup` | Returns after cleanup; an unhandled error marks the Job failed |
 
-One ConfigMap feeds all three, so they agree on `SERVICE_DB` and the timeouts. Each Deployment's
-`terminationGracePeriodSeconds: 30` covers its worst case,
-`SHUTDOWN_GRACE_SECONDS + DISCONNECT_DEADLINE_SECONDS`, whatever the chain of dependencies: for the
-worker `10 + 15 = 25` (`Outbox` → `Database` → `Settings`), for the API uvicorn's
-`--timeout-graceful-shutdown 5` plus `15` (`Orders` → `Outbox` → `Database` → `Settings`), with
-`DISCONNECT_TIMEOUT_SECONDS` 5 still bounding each client's `disconnect()`. SQLite on a shared volume keeps the example
-self-contained; a real service points `Database` at Postgres and drops the volume.
+One ConfigMap feeds all three. The API's grace period covers uvicorn's five-second request drain and
+the container's fifteen-second disconnect deadline. Set the worker's pod grace period to cover the
+time its current batch can take plus the container's disconnect deadline. The per-client disconnect
+timeout is five seconds. SQLite on a shared volume keeps the example self-contained; a real service
+can use PostgreSQL and drop the volume.
 
 ## What to look at
 
@@ -143,8 +121,8 @@ self-contained; a real service points `Database` at Postgres and drops the volum
   and the job import the clients they need and never build them.
 - `Orders.create` writes the order and its outbox row in one transaction, through `Outbox.add`, so an
   order is never stored without its event; `Outbox` is a dependency of `Orders`, so it connects first and disconnects last.
-- The worker sleeps with `asyncio.wait_for(shutdown.wait(), poll_seconds)`: an idle worker stops at
-  once on SIGTERM instead of finishing its sleep.
+- The worker's `main()` sets its own `asyncio.Event` on SIGTERM. The relay waits on that event
+  between polls and finishes the current batch before returning.
 - The wiring test starts the real app with `override(Database)`, so it catches a broken `__init__`
   anywhere in the routes' trees but the replaced `Database`, with no database file. The API and
   worker tests point `Settings` at a SQLite file in `tmp_path` by passing a real

@@ -7,11 +7,11 @@ from functools import partial
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
+from nuke_di._integration import wrap_lifespan
 from nuke_di.core import DI, Dependencies
 from nuke_di.fastapi.bindings import _APP_BINDINGS, _AppBindings
 from nuke_di.fastapi.routes import _route_class
 from nuke_di.fastapi.tracking import _include_router, _router_bindings, _track, _WebSocketAdder
-from nuke_di.integration import wrap_lifespan
 from nuke_di.naming import sname
 
 

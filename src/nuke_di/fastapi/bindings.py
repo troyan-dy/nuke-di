@@ -10,8 +10,8 @@ from fastapi import Depends, params
 from fastapi.routing import APIRoute
 from starlette.requests import HTTPConnection
 
+from nuke_di._integration import Binding, DependsFramework, bind
 from nuke_di.core import Dependencies
-from nuke_di.integration import Binding, DependsFramework, bind
 from nuke_di.naming import sname
 
 # Where an app set up by setup() keeps its _AppBindings

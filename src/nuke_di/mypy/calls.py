@@ -1,5 +1,5 @@
 """
-The checks of the calls that build clients, `resolve()`, `inject()`, `@job` and `@worker`, and the type
+The checks of the calls that build clients, `resolve()`, `inject()`, `@entrypoint`, and the type
 `inject()` returns.
 """
 
@@ -7,11 +7,11 @@ from collections import defaultdict
 from types import MappingProxyType
 from typing import Final
 
-from mypy.nodes import ARG_NAMED, ARG_NAMED_OPT, ARG_OPT, ARG_POS, ARG_STAR, ArgKind
+from mypy.nodes import ARG_NAMED, ARG_NAMED_OPT, ARG_OPT, ARG_POS, ARG_STAR, ArgKind, TypeInfo
 from mypy.plugin import FunctionContext, MethodContext
 from mypy.types import CallableType, ProperType, Type, TypeOfAny, get_proper_type
 
-from nuke_di.mypy.hints import any_of, client
+from nuke_di.mypy.hints import any_of, client, client_problem
 from nuke_di.mypy.names import INDIRECT_DEPS_HOOK
 from nuke_di.mypy.tree import Tree
 
@@ -38,15 +38,16 @@ class _Calls:
 
     def check_inject(self, ctx: MethodContext) -> Type:
         func = first_argument(ctx)
-        # A class is injected through its class annotations, not its `__init__`: left to the container
-        if not isinstance(func, CallableType) or func.is_type_obj():
+        if not isinstance(func, CallableType):
             return ctx.default_return_type
         clients = self._check_function(ctx, func)
-        narrowed = None if clients is None else without_clients(func, clients)
-        return ctx.default_return_type if narrowed is None else narrowed
+        # Classes can declare extra injectable keywords as class attributes, which mypy cannot see here.
+        if func.is_type_obj() or clients is None:
+            return ctx.default_return_type
+        return without_clients(func, clients)
 
-    def check_entrypoint(self, ctx: MethodContext | FunctionContext) -> Type:
-        # `job(hooks=...)` has no function yet: its decorator is checked when it is applied
+    def check_entrypoint(self, ctx: FunctionContext) -> Type:
+        # A dynamically typed function is validated by the runtime.
         func = first_argument(ctx)
         if isinstance(func, CallableType) and not func.is_type_obj():
             self._check_function(ctx, func)
@@ -60,9 +61,9 @@ class _Calls:
         name = (func.name or "function").partition(" of ")[0]
         tree = self._tree(ctx, root=name)
         # Every argument has a type hint before any client is resolved, as
-        # `nuke_di._container.signatures.client_hints` checks
+        # `nuke_di._container.signatures.injected_arguments` checks
         _check_annotations(tree, func, name)
-        clients = _walk_clients(tree, func)
+        clients = _walk_clients(tree, func, name)
         return None if tree.failed else clients
 
     def _tree(self, ctx: MethodContext | FunctionContext, root: str | None) -> Tree:
@@ -79,29 +80,18 @@ def first_argument(ctx: MethodContext | FunctionContext) -> ProperType | None:
     return get_proper_type(given[0]) if given else None
 
 
-def without_clients(func: CallableType, clients: list[int]) -> CallableType | None:
+def without_clients(func: CallableType, clients: list[int]) -> CallableType:
     """
     The type of `partial(func, **clients)`: `func` without the client arguments.
 
     An argument after a client one is passed by keyword: a positional one would land on the client's place.
     """
-    if _positional_only_client(func, clients):
-        # A positional-only client: the partial fails when it is called, the result keeps the type of `inject()`
-        return None
     kept = _kept(func, clients)
     return func.copy_modified(
         arg_kinds=[kind for _, kind in kept],
         arg_names=[func.arg_names[index] for index, _ in kept],
         arg_types=[func.arg_types[index] for index, _ in kept],
     )
-
-
-def _positional_only_client(func: CallableType, clients: list[int]) -> bool:
-    for index in clients:
-        positional = func.arg_kinds[index] in _BY_KEYWORD
-        if positional and func.arg_names[index] is None:
-            return True
-    return False
 
 
 def _kept(func: CallableType, clients: list[int]) -> list[tuple[int, ArgKind]]:
@@ -127,14 +117,27 @@ def _check_annotations(tree: Tree, func: CallableType, name: str) -> None:
             tree.fail(f'Argument "{argument}" of "{name}" has no type hint', path=False)
 
 
-def _walk_clients(tree: Tree, func: CallableType) -> list[int]:
-    """
-    Walk the clients of the arguments of `func`, but `*args` and `**kwargs`; their indexes.
-    """
+def _walk_clients(tree: Tree, func: CallableType, name: str) -> list[int]:
+    """Validate and walk the clients of the function, returning their argument indexes."""
     clients = []
     for index, kind in enumerate(func.arg_kinds):
-        found = None if kind.is_star() else client(func.arg_types[index])
+        if kind.is_star():
+            continue
+        found = _checked_client(tree, func, index, name)
         if found is not None:
             clients.append(index)
             tree.walk(found)
     return clients
+
+
+def _checked_client(tree: Tree, func: CallableType, index: int, name: str) -> TypeInfo | None:
+    hint = func.arg_types[index]
+    argument = func.arg_names[index]
+    found = client(hint)
+    positional = func.arg_kinds[index] in _BY_KEYWORD and argument is None
+    problem = client_problem(hint, found, positional_only=positional)
+    if problem is None:
+        return found
+    argument = argument or f"#{index}"
+    tree.fail(f'Argument "{argument}" of "{name}" {problem}', path=False)
+    return None

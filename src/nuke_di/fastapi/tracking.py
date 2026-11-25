@@ -8,8 +8,8 @@ from typing import Any, TypeAlias
 
 from fastapi import APIRouter
 
+from nuke_di._integration import Binding, unique
 from nuke_di.fastapi.bindings import _bind_dependencies, _bind_route, _ContainerRoute
-from nuke_di.integration import Binding, unique
 
 # An included router with the clients of the dependencies given to include_router()
 _Include: TypeAlias = tuple[APIRouter, list[Binding]]

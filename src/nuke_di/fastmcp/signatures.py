@@ -12,8 +12,8 @@ from typing import Any, get_type_hints
 
 from fastmcp.dependencies import Dependency, Depends
 
+from nuke_di._integration import Binding, Framework, client_of
 from nuke_di.core import Dependencies
-from nuke_di.integration import Binding, Framework, client_of
 from nuke_di.naming import sname
 
 # FastMCP fills a parameter whose default is `Depends(fn)` by calling `fn`, and leaves it out of the schema; a

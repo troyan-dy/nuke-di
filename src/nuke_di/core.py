@@ -1,20 +1,20 @@
 import contextlib
 import threading
-from collections import OrderedDict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any, TypeAlias, TypeVar, cast, overload
+from types import MappingProxyType
+from typing import Any, Literal, TypeAlias, TypeVar, cast, overload
 
 from nuke_di._container import (
     Connect,
     already_connected,
     disconnect_all,
     inject_function,
-    log_startup,
     not_a_client,
     resolve_locked,
     resolve_refused,
 )
+from nuke_di._container.registry import BindingLifetime, ClientClass, Registration
 from nuke_di._container.replacements import (
     autospec,
     check_mockable,
@@ -23,19 +23,17 @@ from nuke_di._container.replacements import (
     exit_override,
     register_replacement,
 )
-from nuke_di.graph import Graph, snapshot
+from nuke_di.naming import display_names
 from nuke_di.options import DependenciesSettings
-from nuke_di.timings import ClientTiming
-from nuke_di.types import ClientT, NotSingletonClient, isnotsingleton
+from nuke_di.types import Client, ClientT, isclient
 
 ReturnT = TypeVar("ReturnT")
 
-# The class asked for and the client passed, for one `__init__` argument; the class a Replacement stands in for and
-# the Replacement
-_Dependency: TypeAlias = tuple[type[NotSingletonClient], NotSingletonClient]
+_Override: TypeAlias = tuple[ClientClass, Client]
+_Lifecycle: TypeAlias = Literal["connecting", "connected", "disconnecting"]
 
 
-@dataclass(repr=False)
+@dataclass(eq=False, repr=False)
 class Dependencies:  # noqa: WPS214
     """
     The container: resolves clients from type hints and drives their connect / disconnect lifecycle.
@@ -51,40 +49,32 @@ class Dependencies:  # noqa: WPS214
     connected, or fails after it.
     """
 
-    clients: OrderedDict[type[NotSingletonClient], NotSingletonClient] = field(default_factory=OrderedDict)
-    connect_clients: list[NotSingletonClient] = field(default_factory=list)
-    settings: DependenciesSettings = field(default_factory=DependenciesSettings)
-    connected: bool = field(default=False, init=False)
-    # One entry per client of the last connect(), in resolution order: a client after its dependencies; kept after
-    # disconnect()
-    timings: list[ClientTiming] = field(default_factory=list, init=False)
-    # The entries of `timings` by `id()` of their client, until the container is flushed
-    _timings: dict[int, ClientTiming] = field(default_factory=dict, init=False)
-    # The class asked for and the client passed, per `__init__` argument of every client in `connect_clients`, keyed
-    # by `id()`: dataclass clients may be unhashable. Orders connect() and disconnect(), and makes `graph()`; the
-    # class tells a Replacement apart from the clients it stands in for.
-    _dependencies: dict[int, dict[str, _Dependency]] = field(default_factory=dict, init=False)
-    # Replacements registered by `mock()` and `override()`, a subset of `clients`
-    _replacements: dict[type[NotSingletonClient], NotSingletonClient] = field(default_factory=dict, init=False)
-    # Replacements of the open `override()` blocks, outermost first; `flush()` keeps them
-    _overrides: list[_Dependency] = field(default_factory=list, init=False)
+    settings: DependenciesSettings | None = None
+    _clients: dict[ClientClass, Registration] = field(default_factory=dict, init=False)
+    _state: _Lifecycle | None = field(default=None, init=False)
+    _binding_lifetime: BindingLifetime = field(default_factory=BindingLifetime, init=False)
+    # Replacements of open override blocks, outermost first. They survive a flush.
+    _overrides: list[_Override] = field(default_factory=list, init=False)
     # Clients being resolved right now, the open frames of `resolve_tree()`, outermost first: finds cycles and names
     # the path in errors
-    _resolving: list[type[NotSingletonClient]] = field(default_factory=list, init=False)
+    _resolving: list[type[Client]] = field(default_factory=list, init=False)
     # The same classes, for the cycle check: the list would be scanned once per client, as long as the depth
-    _resolving_set: set[type[NotSingletonClient]] = field(default_factory=set, init=False)
+    _resolving_set: set[type[Client]] = field(default_factory=set, init=False)
     # The function `inject()` is resolving for, named first in the path but never part of a cycle
     _injecting: Callable[..., Any] | None = field(default=None, init=False)
     # Serializes the methods that build or drop clients across threads; reentrant, a client's `__init__` may resolve
-    _lock: threading.RLock = field(default_factory=threading.RLock, init=False, compare=False)
+    _lock: threading.RLock = field(default_factory=threading.RLock, init=False)
 
-    def __getstate__(self) -> dict[str, Any]:
-        # A copy is another container, so it gets a lock of its own; an RLock cannot be copied or pickled anyway
-        return {key: attribute for key, attribute in self.__dict__.items() if key != "_lock"}
+    def __repr__(self) -> str:
+        with self._lock:
+            names = display_names(self._clients)
+            resolved = self._lifecycle_clients()
+            clients = ", ".join(names[key] for key in resolved)
+            replacements = ", ".join(names[key] for key in names if key not in resolved)
+            return f"Dependencies(connected={self.connected}, clients=[{clients}], replacements=[{replacements}])"
 
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        self.__dict__.update(state)
-        self._lock = threading.RLock()
+    def __copy__(self) -> "Dependencies":
+        raise TypeError("Dependencies cannot be copied; create a fresh container")
 
     async def __aenter__(self) -> None:
         await self.connect()
@@ -92,66 +82,52 @@ class Dependencies:  # noqa: WPS214
     async def __aexit__(self, *args: Any) -> None:
         await self.disconnect()
 
+    @property
+    def clients(self) -> Mapping[ClientClass, Client]:
+        """A read-only snapshot of resolved clients and replacements, in registration order."""
+        with self._lock:
+            return MappingProxyType({key: entry.client for key, entry in self._clients.items()})
+
+    @property
+    def connected(self) -> bool:
+        """Whether the container is reserved by an active lifecycle, including startup and teardown."""
+        return self._state is not None
+
     def flush(self) -> None:
         with self._lock:
             if self.connected:
                 raise already_connected("flush()")
 
-            self.clients = OrderedDict()
-            self.connect_clients = []
-            self._dependencies = {}
-            self._timings = {}
-            self._replacements = {}
-            for client_class, replacement in self._overrides:
-                register_replacement(self, client_class, replacement)
+            self._reset()
 
     async def connect(self) -> None:
-        duration = await Connect(self).run()
-        # Logged from here: the records name this module, `core`
-        log_startup(self.timings, self.settings.connect_timeout, duration)
+        await Connect(self).run()
 
     async def disconnect(self) -> None:
         await disconnect_all(self)
 
     def resolve(self, client_class: type[ClientT]) -> ClientT:
-        """
-        Idempotent operation.
-        """
-        if self.connected:
-            raise resolve_refused(client_class)
+        """Return a registered client. Only an idle container can build a missing client."""
+        state = self._state
+        if state == "disconnecting":
+            raise resolve_refused(client_class, state)
 
-        # A resolved singleton is handed out without the lock: it is complete once it is in `clients`, and a lookup
-        # in a dict is safe next to a writer on every build of CPython. The cold path takes the lock once for the
-        # whole tree, so a tree of a thousand clients pays for one acquire, not a thousand.
+        # Read the lifecycle before looking up the cache. An overlapping reset can only replace the cache
+        # with fresh registrations. A lookup that starts during teardown is refused above.
         try:
-            inst = self.clients.get(client_class)
+            entry = self._clients.get(client_class)
         except TypeError:
-            # An unhashable argument, `resolve({})`, is no client either: it gets the message below, not a bare
-            # TypeError from the lookup
-            inst = None
-        if inst is not None:
-            return cast(ClientT, inst)
+            entry = None
+        if entry is not None:
+            return cast(ClientT, entry.client)
 
-        # A plain class would be built and appended, and the process would die at connect() with an
-        # AttributeError on `connect`; a type checker sees the bound, `Any` and `# type: ignore` do not. Checked
-        # after the lookup, which never finds a non-client since mock() refuses one too: the check costs about
-        # 60 ns, a warm hit must not pay it
-        if not isnotsingleton(client_class):
+        if state is not None:
+            raise resolve_refused(client_class, state)
+        if not isclient(client_class):
             raise not_a_client(client_class)
 
         with self._lock:
-            # Checked again under the lock, where connect() flips it
-            if self.connected:
-                raise resolve_refused(client_class)
             return resolve_locked(self, client_class)
-
-    def graph(self) -> Graph:
-        """
-        A snapshot of the resolved clients with their dependencies.
-
-        `flush()` empties it, apart from the Replacements of the open `override()` blocks, which it keeps.
-        """
-        return snapshot(self._replacements, self.connect_clients, self._dependencies)
 
     def inject(self, func: Callable[..., ReturnT]) -> Callable[..., ReturnT]:
         """
@@ -177,7 +153,7 @@ class Dependencies:  # noqa: WPS214
         """
         Register a Replacement for `client_class`, an autospec mock by default; `flush()` drops it.
         """
-        if not isnotsingleton(client_class):
+        if not isclient(client_class):
             raise not_a_client(client_class)
         with self._lock:
             current = check_mockable(self, client_class, new)
@@ -186,7 +162,7 @@ class Dependencies:  # noqa: WPS214
 
             replacement = autospec(client_class) if new is None else new
             register_replacement(self, client_class, replacement)
-            return self._replacements[client_class]
+            return replacement
 
     @overload
     def override(self, client_class: type[ClientT], new: None = None) -> contextlib.AbstractContextManager[Any]: ...
@@ -206,7 +182,7 @@ class Dependencies:  # noqa: WPS214
         with self._lock:
             name = check_overridable(self, client_class)
             replacement = self.mock(client_class, new)
-            entry: _Dependency = (client_class, replacement)
+            entry: _Override = (client_class, replacement)
             self._overrides.append(entry)
         try:
             yield replacement
@@ -216,6 +192,23 @@ class Dependencies:  # noqa: WPS214
             raise
 
         exit_override(self, entry, name)
+
+    def _reset(self) -> None:
+        with self._lock:
+            self._binding_lifetime.valid = False
+            self._binding_lifetime = BindingLifetime()
+            self._clients = {key: Registration(client, None) for key, client in self._overrides}
+            self._state = None
+
+    def _lifecycle_clients(self) -> dict[ClientClass, Client]:
+        entries = self._clients.items()
+        return {key: entry.client for key, entry in entries if entry.dependencies is not None}
+
+    def _settings(self) -> DependenciesSettings:
+        # Called under the lock when reserving the lifecycle. A failed read leaves settings unset.
+        if self.settings is None:
+            self.settings = DependenciesSettings()
+        return self.settings
 
 
 DI = Dependencies()

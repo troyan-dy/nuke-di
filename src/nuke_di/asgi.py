@@ -9,14 +9,14 @@ See docs/specs/asgi.md and docs/guide/asgi.md.
 from contextlib import AbstractAsyncContextManager
 from typing import TypeVar, cast
 
+from nuke_di._integration import Binding, Framework, running
 from nuke_di.core import Dependencies
-from nuke_di.integration import Binding, Framework, running
 from nuke_di.naming import sname
-from nuke_di.types import NotSingletonClient, isnotsingleton
+from nuke_di.types import Client, isclient
 
 __all__ = ("Lifespan", "lifespan")
 
-ClientT = TypeVar("ClientT", bound=NotSingletonClient)
+ClientT = TypeVar("ClientT", bound=Client)
 
 _ASGI = Framework(
     name="ASGI",
@@ -34,7 +34,7 @@ class Lifespan:
     `clients.get(UserService)`. `lifespan(container, *clients)` makes one.
     """
 
-    def __init__(self, container: Dependencies, *clients: type[NotSingletonClient]) -> None:
+    def __init__(self, container: Dependencies, *clients: type[Client]) -> None:
         if not isinstance(container, Dependencies):
             raise TypeError(
                 f"lifespan() takes the container first, then the clients, e.g. lifespan(DI, Database); "
@@ -42,8 +42,8 @@ class Lifespan:
             )
         for client_class in clients:
             # The class itself, as resolve() takes it: not `Annotated[Database, ...]`
-            if not isnotsingleton(client_class):
-                raise TypeError(f"{client_class!r} is not a client: subclass Client or NotSingletonClient")
+            if not isclient(client_class):
+                raise TypeError(f"{client_class!r} is not a client: subclass Client")
         self._container = container
         # Resolved on every startup, not now: a test replaces a client with override() before the app starts
         self._bindings = {each: Binding(each, container, _ASGI) for each in clients}
@@ -69,7 +69,7 @@ class Lifespan:
         return cast(ClientT, binding.instance)
 
 
-def lifespan(container: Dependencies, *clients: type[NotSingletonClient]) -> Lifespan:
+def lifespan(container: Dependencies, *clients: type[Client]) -> Lifespan:
     """
     A lifespan that connects `clients` and every client they depend on for the time the app runs, for a
     framework that calls `lifespan(app)` and enters the async context manager it returns, as Starlette does.

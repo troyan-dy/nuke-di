@@ -70,10 +70,8 @@ The rules:
   included. Subscribers may be declared before or after `setup(app)`.
 - **Lifespan.** The clients connect before the app's own `lifespan=` and `on_startup=` hooks and before
   the brokers start; they disconnect after the brokers stop and after the `after_shutdown=` hooks.
-  `Shutdown` and `BackgroundTasks` behave as in [FastAPI](fastapi.md). `setup()` works on an
-  `AsgiFastStream` too.
-- **Instances.** As with `inject()`, a `Client` is one instance per container, and a
-  `NotSingletonClient` is one instance per argument that declares it, not one per message.
+  `setup()` works on an `AsgiFastStream` too.
+- **Instances.** As with `inject()`, arguments of the same client class share the container's instance.
 - **The function stays a function.** Its signature shows `Annotated[UserService, Depends(...)]` to
   FastStream, as in [FastAPI](fastapi.md).
 - **One app at a time.** A subscriber function and its dependencies are rewritten once, whatever the
@@ -231,7 +229,7 @@ The rules:
   A client publishes from its methods, while the app runs.
 - **Not from `connect()` or `disconnect()`.** On a real broker, a `publish()` in `connect()` raises
   `faststream.exceptions.IncorrectState`, since the broker is not started yet, and the app fails to start
-  with `RuntimeError: nuke-di clients failed to start: Notifications.connect() raised IncorrectState`. In
+  with `ConnectError: Notifications.connect() raised IncorrectState`. In
   `disconnect()` it raises the same, since the broker is stopped already, but nuke-di only logs a failed
   `disconnect()` and the app exits normally. Under `TestNatsBroker` the first raises
   ``SetupError: You should setup `HandlerItem` at first.`` and the second passes silently, so the tests do
@@ -241,7 +239,7 @@ The rules:
 - **Under `TestNatsBroker`** the same broker object is patched, so the client publishes in memory and
   `show.mock` sees the message; `override(Notifications, ...)` replaces the client for every subscriber
   that takes it.
-- **A process without a FastStream app**, e.g. a `@job` that sends messages, owns its connection: there
+- **A process without a FastStream app**, such as a script that sends messages, owns its connection: there
   the broker is created in the client's `connect()` and stopped in its `disconnect()`, as `Nats` in
   [examples/faststream_nats/publish.py](../../examples/faststream_nats/publish.py).
 - **Several brokers**, `FastStream(first, second)`, work the same way: `setup(app)` fills the
@@ -250,7 +248,7 @@ The rules:
 ## One app at a time, in tests
 
 FastStream builds a subscriber again on every start, so nuke-di rewrites a subscriber function once,
-whatever the container (`per_container=False` in [Writing an integration](integrations.md)), and every
+whatever the container, and every
 app that starts fills it from its own container. Tests that start apps one after another can therefore
 give each one a container of its own, on the module-level broker:
 

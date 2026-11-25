@@ -9,3 +9,9 @@ A client is created when its container resolves it, connected once and disconnec
 - **`ScopedClient` driven by the frameworks' own dependency scoping** (#65): the same two methods, run per request through a generated `Depends` / `Provide` getter, with `DI.scoped()` for a worker loop. Needs a rule that a `Client` may not depend on a `ScopedClient`, one scoping rule per integration, a spec and changes in every place that treats `NotSingletonClient` as "any injectable".
 - **dishka-style scope enums** and **contextvar-driven middleware**: more concepts than the per-request lifecycle saves, and contextvars break for handlers run in threadpools.
 - **Reusing `NotSingletonClient` for per-request instances**: would silently change the meaning of existing code.
+
+## Revisited in 3.0
+
+`NotSingletonClient` was removed in [#129](https://github.com/troyan-dy/nuke-di/issues/129).
+To migrate, use `Client` for shared resources and move consumer-specific mutable state into
+objects a client method creates for each operation.

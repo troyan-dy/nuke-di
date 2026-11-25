@@ -8,7 +8,7 @@ from typing import Any, Final, NamedTuple
 
 from nuke_di._container.hints import optional_client, type_name
 from nuke_di.naming import qualname
-from nuke_di.types import isnotsingleton
+from nuke_di.types import isclient
 
 # `*args` and `**kwargs`: never filled by the container
 VARIADIC: Final = frozenset((inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD))
@@ -48,21 +48,17 @@ def init_arguments(init: Callable[..., Any]) -> list[Argument]:
     return _signature_arguments(init)
 
 
-def argument_problem(argument: Argument, hint: Any) -> str | None:
-    """
-    Why the container cannot fill `argument`, whose type hint is `hint`; None for a client, and for an argument
-    with a default, which is not the container's to fill.
-    """
-    if isnotsingleton(hint):
+def argument_problem(argument: Argument, hint: Any, *, caller_owned: bool = False) -> str | None:
+    """Explain why an argument cannot be bound. Ordinary arguments of an injected function are caller-owned."""
+    if isclient(hint):
         return "is positional-only, a client is passed by keyword" if argument.positional_only else None
-    if argument.has_default:
-        # Not ours to fill: the default stays
-        return None
-    if hint is None:
-        return "has no type hint"
     client = optional_client(hint)
     if client is not None:
         return f"is {qualname(client)} | None, a client cannot be optional"
+    if caller_owned or argument.has_default:
+        return None
+    if hint is None:
+        return "has no type hint"
     return f"is {type_name(hint)}, which is not a client"
 
 

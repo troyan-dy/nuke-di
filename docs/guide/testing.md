@@ -44,7 +44,7 @@ async def test_greet_with_fake() -> None:
         async with DI:
             print(await injected(1))
 
-    print("after the block:", DI.clients)
+    print("after the block:", dict(DI.clients))
 
 
 async def test_greet_with_autospec() -> None:
@@ -63,7 +63,7 @@ The async tests in this section use [pytest-asyncio](https://pypi.org/project/py
 ```console
 $ pytest -q -s test_greet.py
 Hello, alice!
-after the block: OrderedDict()
+after the block: {}
 .Hello, bob!
 .
 2 passed in 0.01s
@@ -79,23 +79,23 @@ The rules:
 
   ```python
   DI.inject(handler)  # resolves UserService -> Database
-  DI.mock(Database)  # ConnectError: Database is already resolved, call mock() before resolve() or inject()
+  DI.mock(Database)  # RuntimeError: Database is already resolved, call mock() before resolve() or inject()
   ```
 
 - **`override()` starts from a container without resolved clients.** Flushing on exit would
   otherwise silently drop what was resolved before the block, so it raises
-  `ConnectError: override(Database) needs a container without resolved clients, found: Database, UserService`.
+  `RuntimeError: override(Database) needs a container without resolved clients, found: Database, UserService`.
   Call `DI.flush()` first or use the `global_di` fixture below.
 - **One Replacement per class.** `mock(client_class)` called again returns the Replacement
   already registered; `mock(client_class, other)` and `override(client_class)` raise
-  `ConnectError: Database already has a replacement`.
+  `RuntimeError: Database already has a replacement`.
 - **Replacements are not connected.** Their `connect()` / `disconnect()` are never called, and they
   do not take part in the [connect order](clients.md#connect-order).
-- **How long a Replacement lasts.** One from `mock()` is dropped by the next `flush()`, including the
-  one at the end of `disconnect()`: a test that connects the container more than once should use
-  `override()`, whose Replacement survives every `flush()` until its block ends. An exception inside
-  the block propagates unchanged; leaving the block normally while the container is still connected
-  raises `ConnectError`.
+- **How long a Replacement lasts.** One from `mock()` lasts until the next flush, including the
+  one at the end of `disconnect()`. Use `override()` to keep the Replacement across
+  several starts, and call `inject()` again before each start to refresh callable bindings.
+  An exception inside the block propagates unchanged. Leaving the block normally while the
+  container is still connected raises `RuntimeError`.
 - **Nesting.** Blocks for different classes nest as long as each one opens before anything is
   resolved, e.g. `with DI.override(Database), DI.override(Clock):`; leaving the inner block keeps the
   outer Replacement.
@@ -154,83 +154,60 @@ test may be closed. `global_di` only protects the tests that request it: a test 
 `di` fixture keeps it, since a `conftest.py` fixture wins over a plugin one;
 `pytest -p no:nuke_di` turns the plugin off.
 
-**A job, directly.** Importing the module does not run the job, so call the function with
-mocks and parameters:
+**An entrypoint, directly.** A normal import leaves the function available for a test.
+For the [report example](workers-and-jobs.md#the-entrypoint-decorator), pass a mock for its client.
 
 ```python
-async def test_sync_copies_requested_tables() -> None:
-    pg, warehouse = AsyncMock(), AsyncMock()
-    warehouse.changes.return_value = ["row"]
+from unittest.mock import create_autospec
 
-    await sync(pg, warehouse, day=datetime.date(2026, 10, 1), tables=["users"])
+from app.clients import Reports
+from app.report import main
 
-    pg.upsert.assert_awaited_once_with("users", ["row"])
+
+async def test_report() -> None:
+    reports = create_autospec(Reports, instance=True)
+
+    await main(reports)
+
+    reports.publish.assert_awaited_once_with()
 ```
 
-**A job through a container**, with the clients wired as in production:
+**Through a container.** Use a separate container to exercise the same wiring as the application.
 
 ```python
-async def test_sync_with_container() -> None:
+from nuke_di import Dependencies
+
+from app.clients import Reports
+from app.report import main
+
+
+async def test_report_with_container() -> None:
     deps = Dependencies()
-    pg = deps.mock(Postgres)  # mocks first: resolve() and inject() reuse them
-    warehouse = deps.mock(Warehouse)
-    warehouse.changes.return_value = ["row"]
-    injected = deps.inject(sync)
+    reports = deps.mock(Reports)
+    run_report = deps.inject(main)
 
     async with deps:
-        await injected(day=datetime.date(2026, 10, 1), tables=["users"])
+        await run_report()
 
-    assert pg.upsert.await_args_list == [call("users", ["row"])]
+    reports.publish.assert_awaited_once_with()
 ```
 
-**Every entrypoint resolves.** Importing a module does not run its job or worker, and `inject()`
-builds the tree without connecting anything, so one test checks the wiring of every entrypoint in
-CI: a cycle, an argument without a type hint, a required argument that is not a client or an
-`__init__` that raises fails it with the same error a real run would print, and no database is
-needed:
+**An entrypoint wiring test.** `inject()` builds the tree without connecting anything. Check
+the signatures of your executable modules in CI without starting a database.
 
 ```python
 # test_wiring.py
-from collections.abc import Callable
-
-import pytest
+from inspect import signature
 
 from nuke_di import Dependencies
 
-from app.jobs import sync
-from app.workers import consumer
+from app.report import main
 
 
-@pytest.mark.parametrize("entrypoint", [sync.sync, consumer.consumer])
-def test_entrypoint_resolves(entrypoint: Callable[..., object]) -> None:
-    Dependencies().inject(entrypoint)  # runs every __init__, connects nothing
-```
-
-```console
-$ pytest -q test_wiring.py
-..                                                                       [100%]
-2 passed in 0.05s
+def test_report_wiring() -> None:
+    run_report = Dependencies().inject(main)
+    signature(run_report).bind()
 ```
 
 The [mypy plugin](clients.md#checking-the-tree-with-mypy) reports the same signature errors and
 cycles without running anything; the test runs every `__init__` too, so it also catches one that raises.
-
-Keep the container to get [the graph](clients.md#the-graph) of an entrypoint for its README:
-`deps = Dependencies(); deps.inject(sync.sync); print(deps.graph().to_mermaid())`.
-
-**A worker.** `Shutdown.set()` does what SIGTERM would do:
-
-```python
-async def test_consumer_stops_on_shutdown() -> None:
-    queue, shutdown = AsyncMock(), Shutdown()
-
-    async def last_message() -> str:
-        shutdown.set()  # what SIGTERM would do
-        return "message-1"
-
-    queue.get.side_effect = last_message
-
-    await consumer(queue, shutdown)
-
-    queue.get.assert_awaited_once()
-```

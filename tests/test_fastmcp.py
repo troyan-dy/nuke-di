@@ -18,11 +18,12 @@ from fastmcp.exceptions import ToolError
 from fastmcp.tools import Tool
 from mcp.types import TextContent, TextResourceContents
 
-from nuke_di import DI, Client, Dependencies
+from nuke_di import DI, Client, ConnectError, Dependencies
 from nuke_di.fastapi import setup as fastapi_setup
 from nuke_di.fastmcp import setup
 from nuke_di.fastmcp.signatures import _FASTMCP
-from nuke_di.integration.testing import Send, check
+from tests.integration_contract.check import check
+from tests.integration_contract.outcomes import Send
 from tests.sequences import repeated, single
 
 events: list[str] = []
@@ -481,9 +482,11 @@ async def test_failed_connect_fails_the_startup() -> None:
     server = make_server(container)
     server.tool(broken)
 
-    with pytest.raises(RuntimeError, match=r"nuke-di clients failed to start: Broken\.connect\(\) raised OSError"):
+    with pytest.raises((ConnectError, RuntimeError), match=r"Broken\.connect\(\) raised OSError") as raised:
         async with MCPClient(server):
             ...
+
+    assert isinstance(raised.value, ConnectError) or isinstance(raised.value.__cause__, ConnectError)
 
     assert not container.connected
     assert not container.clients

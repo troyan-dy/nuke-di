@@ -73,5 +73,4 @@ The same as in FastAPI: an `async def` with no arguments; before startup or afte
 | 7 | Walking the handlers | A throwaway `Router`: it lays out routers, controllers and listeners the way the app will, without mutating the user's objects. |
 | 8 | Lifespan order | Connect in the outermost lifespan, disconnect in the last `on_shutdown` hook: Litestar calls shutdown hooks after the lifespans, and they may use clients. |
 | 9 | Websocket listeners | Refused: their signature is parsed on declaration, so the rewrite comes too late and Litestar would warn or, in 3.0, fail. |
-| 10 | `NotSingletonClient` | One instance per argument name, since one provider serves a name. |
 | 11 | Minimum Litestar | 2.15, the first with `InitPlugin`; CI runs the Litestar tests on it. |

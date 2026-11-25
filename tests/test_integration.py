@@ -11,10 +11,10 @@ from typing import Annotated, Any, get_args, get_origin
 
 import pytest
 
-from nuke_di import Client, Dependencies
-from nuke_di import integration as integration_package
-from nuke_di.integration import Binding, DependsFramework, Framework, bind, running, unique
-from nuke_di.integration.testing import Send, check
+from nuke_di import Client, ConnectError, Dependencies
+from nuke_di._integration import DependsFramework, Framework, bind, running, unique
+from tests.integration_contract.check import check
+from tests.integration_contract.outcomes import Send
 
 # --- an integration on the kit, and integrations that break the contract ------------------------------------
 
@@ -126,7 +126,7 @@ async def test_check_reports_a_framework_that_never_calls_the_handler() -> None:
     assert "expected the events ['store: connected', 'Hello, store!', 'store: disconnected'], got []" in str(
         excinfo.value.exceptions[0]
     )
-    assert "the app started; expected a RuntimeError" in str(excinfo.value.exceptions[-1])
+    assert "the app started; expected a ConnectError" in str(excinfo.value.exceptions[-1])
 
 
 async def test_check_reports_a_wrong_error_and_a_container_left_resolved() -> None:
@@ -144,7 +144,7 @@ async def test_check_reports_a_wrong_error_and_a_container_left_resolved() -> No
         # Resolves the clients, then gives up before connect() and leaves them in the container
         for binding in bindings:
             container.resolve(binding.client_class)
-        raise RuntimeError("nuke-di clients failed to start: Broken.connect() raised OSError: unreachable")
+        raise ConnectError("Broken.connect() raised OSError: unreachable")
 
     with pytest.raises(ExceptionGroup) as excinfo:
         await check(TOY, toy_app, run_carelessly)
@@ -154,7 +154,7 @@ async def test_check_reports_a_wrong_error_and_a_container_left_resolved() -> No
     assert "the container was left connected or not flushed" in str(excinfo.value.exceptions[1])
 
 
-async def test_check_reports_a_connect_error_let_out() -> None:
+async def test_check_accepts_the_original_connect_error() -> None:
     @asynccontextmanager
     async def run_raw(toy: tuple[Toy, Dependencies], lifespan: bool) -> AsyncIterator[Send]:
         app, container = toy
@@ -163,17 +163,13 @@ async def test_check_reports_a_connect_error_let_out() -> None:
             async with toy_run(toy, lifespan) as send:
                 yield send
             return
-        # Connects without running(): the ConnectError, a SystemExit, escapes
+        # The container's original startup error meets the adapter contract.
         for binding in bind(app.handler, container, TOY):
             container.resolve(binding.client_class)
         await container.connect()
         yield lambda: None
 
-    with pytest.raises(ExceptionGroup) as excinfo:
-        await check(TOY, toy_app, run_raw)
-
-    assert notes(excinfo.value) == ["failed_connect"]
-    assert "expected a RuntimeError" in str(excinfo.value.exceptions[0])
+    await check(TOY, toy_app, run_raw)
 
 
 async def test_check_reports_a_system_exit_as_a_failed_case() -> None:
@@ -322,17 +318,3 @@ async def test_running_forgets_the_bindings_when_disconnect_raises(monkeypatch: 
 
 
 # --- the public names ------------------------------------------------------------------------------------
-
-
-def test_public_names() -> None:
-    assert set(integration_package.__all__) == {
-        "Binding",
-        "DependsFramework",
-        "Framework",
-        "bind",
-        "client_of",
-        "running",
-        "unique",
-        "wrap_lifespan",
-    }
-    assert Binding is integration_package.Binding

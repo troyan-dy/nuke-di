@@ -163,8 +163,7 @@ Telegram.
   of its routers, and disconnect after all their shutdown handlers, which aiogram calls for the routers
   after the dispatcher's. A startup handler that fails disconnects them again: `start_polling()` does not
   call the shutdown after a failed startup. A shutdown after a failed startup, which the webhook app calls
-  on cleanup, or a second shutdown runs the shutdown handlers with the arguments of the call alone. On
-  shutdown `Shutdown` is set and `BackgroundTasks` are stopped before the clients disconnect, as in a worker.
+  on cleanup, or a second shutdown runs the shutdown handlers with the arguments of the call alone.
 - **Handlers still running.** `start_polling()` handles each update in a task, and so does the webhook's
   `SimpleRequestHandler` with `handle_in_background=True`, its default; neither waits for them when it
   stops, so a handler that is still running when the clients disconnect finds them disconnected.
@@ -288,8 +287,8 @@ $ pytest -q tests/test_bot.py
 
 ## Errors
 
-**A client that fails to connect** fails the startup: `start_polling()` raises a plain `RuntimeError` from
-the `ConnectError` before its first request to Telegram, and the clients that connected are disconnected.
+**A client that fails to connect** fails the startup: `start_polling()` raises `ConnectError` before its first
+request to Telegram, and the clients that connected are disconnected.
 
 ```python
 # app/broken.py
@@ -329,12 +328,6 @@ OSError: broker kafka-1:9092 is unreachable
 Traceback (most recent call last):
   ...
 nuke_di.errors.ConnectError: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  ...
-RuntimeError: nuke-di clients failed to start: Kafka.connect() raised OSError: broker kafka-1:9092 is unreachable
 $ echo $?
 1
 ```

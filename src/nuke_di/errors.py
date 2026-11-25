@@ -1,7 +1,6 @@
 class InvalidSignatureError(TypeError):
     """
-    A signature cannot be injected: an argument without a type hint, a required `__init__` argument that is not
-    a client, or an entrypoint Parameter that cannot be parsed.
+    A client or function signature cannot be injected.
     """
 
 
@@ -13,11 +12,9 @@ class CircularDependencyError(InvalidSignatureError):
     """
 
 
-class ConnectError(SystemExit):
+class ConnectError(Exception):
     """
     An error occurred while connecting clients.
-
-    It is a `SystemExit` on purpose: a client that failed to start should stop the application.
     """
 
 
@@ -29,17 +26,7 @@ class ConnectTimeoutError(ConnectError):
     """
 
 
-class InitializeDependencyError(SystemExit):
+class InitializeDependencyError(Exception):
     """
     A dependency raised an exception during initialization.
     """
-
-
-class UsageError(Exception):
-    """
-    The command line does not match the Parameters of an entrypoint.
-    """
-
-    def __init__(self, message: str, usage: str) -> None:
-        super().__init__(message)
-        self.usage = usage

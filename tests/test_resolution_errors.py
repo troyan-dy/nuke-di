@@ -1,10 +1,10 @@
 from collections.abc import Callable
-from functools import partial
-from typing import Any, Literal, Protocol, cast
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol
 
 import pytest
 
-from nuke_di import CircularDependencyError, Client, Dependencies, InvalidSignatureError, client_dataclass
+from nuke_di import CircularDependencyError, Client, Dependencies, InvalidSignatureError
 
 
 class Chicken(Client):
@@ -80,6 +80,9 @@ class Callbacks(Client):
 class Handler(Client):
     feed: "Feed"
 
+    def __init__(self, **clients: "Feed") -> None:
+        self.clients = clients
+
 
 class Feed(Client):
     def __init__(self, handler: Handler) -> None:
@@ -107,7 +110,7 @@ class PositionalOnly(Client):
 
 
 class WithDefaults(Client):
-    def __init__(self, db: Database, retries: int = 3, label="main", cache: Database | None = None) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, db: Database, retries: int = 3, label="main", cache: str | None = None) -> None:  # type: ignore[no-untyped-def]
         self.db = db
         self.retries = retries
         self.label = label
@@ -119,7 +122,7 @@ class Variadic(Client):
         self.db = db
 
 
-@client_dataclass
+@dataclass
 class DataclassClient(Client):
     db: Database
     retries: int = 3
@@ -240,9 +243,9 @@ def test_inject_wraps_unresolvable_forward_reference() -> None:
 
 def test_inject_class_is_not_part_of_a_cycle() -> None:
     # inject() reads the class annotations, Feed depends on Handler through __init__: no cycle
-    injected = cast(partial[Handler], Dependencies().inject(Handler))
+    injected = Dependencies().inject(Handler)
 
-    assert isinstance(injected.keywords["feed"].handler, Handler)
+    assert isinstance(injected().clients["feed"].handler, Handler)
 
 
 def test_callable_and_empty_tuple_are_named_as_written() -> None:

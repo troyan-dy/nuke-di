@@ -12,8 +12,8 @@ from litestar.handlers import BaseRouteHandler
 from litestar.plugins import InitPlugin
 from litestar.routes import HTTPRoute
 
+from nuke_di._integration import Binding, Framework, running
 from nuke_di.core import DI, Dependencies
-from nuke_di.integration import Binding, Framework, running
 from nuke_di.litestar.handlers import _Clients
 
 # Litestar has no `Depends`: it matches dependencies by name, see `_Clients`

@@ -1,6 +1,6 @@
 # Dataclass clients
 
-A service layer whose classes are `@client_dataclass(frozen=True)`: the fields are the injected
+A service layer whose classes are `@dataclass(frozen=True)`: the fields are the injected
 dependencies, so a service with four of them needs no `__init__` that only copies its arguments
 to `self`. Useful once services have more dependencies than methods.
 

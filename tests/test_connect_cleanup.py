@@ -3,8 +3,9 @@ import sys
 
 import pytest
 
-from nuke_di import Client, ConnectError, Dependencies, NotSingletonClient
+from nuke_di import Client, ConnectError, ConnectTimeoutError, Dependencies, InitializeDependencyError
 from nuke_di._container.connect import Connect
+from nuke_di._container.registry import ClientClass
 from tests.sequences import single
 
 
@@ -76,6 +77,31 @@ class SelfCancelling(Recorded):
         raise asyncio.CancelledError
 
 
+async def _cancel_current_task() -> None:
+    task = asyncio.current_task()
+    assert task is not None
+    task.cancel()
+    await asyncio.sleep(0)
+
+
+class CancelsOwnConnect(Sibling):
+    async def connect(self) -> None:
+        await _cancel_current_task()
+
+
+class DependsOnCancellingClient(Recorded):
+    def __init__(self, dependency: CancelsOwnConnect) -> None:
+        self.dependency = dependency
+
+    async def connect(self) -> None:
+        pytest.fail("a dependent ran after its dependency cancelled startup")
+
+
+class CancelsOwnDisconnect(Sibling):
+    async def disconnect(self) -> None:
+        await _cancel_current_task()
+
+
 class Interrupted(Recorded):
     """
     Records that its disconnect() saw the cancellation and got to finish it.
@@ -119,15 +145,69 @@ async def test_failure_disconnects_connected_siblings() -> None:
     assert recorder.disconnected == ["Sibling", "Postgres"]
 
 
-async def test_failure_skips_cancelled_siblings() -> None:
+async def test_failure_skips_cancelled_siblings(caplog: pytest.LogCaptureFixture) -> None:
     dep = Dependencies()
     dep.resolve(Hanging)
     dep.resolve(Broken)
 
-    with pytest.raises(ConnectError):
+    with pytest.raises(ConnectError, match="Broken"):
         await dep.connect()
 
     assert recorder.disconnected == ["Postgres"]
+    assert "Hanging.connect() raised CancelledError" not in caplog.text
+
+
+@pytest.mark.parametrize("previously_cancelled", [False, True])
+async def test_self_cancelled_connect_rolls_back(previously_cancelled: bool) -> None:
+    dep = Dependencies()
+    dep.resolve(DependsOnCancellingClient)
+
+    async def connect() -> None:
+        if previously_cancelled:
+            with pytest.raises(asyncio.CancelledError):
+                await _cancel_current_task()
+
+        async with asyncio.timeout(0.5):
+            with pytest.raises(ConnectError, match="CancelsOwnConnect") as raised:
+                await dep.connect()
+        assert isinstance(raised.value.__cause__, asyncio.CancelledError)
+
+    await asyncio.create_task(connect())
+
+    assert recorder.disconnected == ["Postgres"]
+    assert not dep.connected
+    assert not dep.clients
+
+
+async def test_pending_self_cancellation_prevents_starting_consumers(monkeypatch: pytest.MonkeyPatch) -> None:
+    dep = Dependencies()
+    consumer = dep.resolve(DependsOnCancellingClient)
+
+    async def cancel_and_return() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+
+    monkeypatch.setattr(consumer.dependency, "connect", cancel_and_return)
+    async with asyncio.timeout(0.5):
+        with pytest.raises(ConnectError, match="CancelsOwnConnect"):
+            await dep.connect()
+
+    assert recorder.disconnected == ["CancelsOwnConnect", "Postgres"]
+    assert not dep.connected
+
+
+async def test_self_cancelled_disconnect_releases_dependencies() -> None:
+    dep = Dependencies()
+    dep.resolve(CancelsOwnDisconnect)
+    await dep.connect()
+
+    async with asyncio.timeout(0.5):
+        await dep.disconnect()
+
+    assert recorder.disconnected == ["Postgres"]
+    assert not dep.connected
+    assert not dep.clients
 
 
 async def test_failure_resets_container() -> None:
@@ -138,11 +218,12 @@ async def test_failure_resets_container() -> None:
         await dep.connect()
 
     assert dep.connected is False
-    assert not dep.connect_clients
     assert not dep.clients
 
 
-@pytest.mark.parametrize("error_type", [ConnectError, SystemExit, KeyboardInterrupt])
+@pytest.mark.parametrize(
+    "error_type", [ConnectError, ConnectTimeoutError, InitializeDependencyError, SystemExit, KeyboardInterrupt]
+)
 @pytest.mark.parametrize("with_competing_failure", [False, True])
 def test_base_exception_rolls_back_connect(
     error_type: type[BaseException],
@@ -175,12 +256,7 @@ def test_base_exception_rolls_back_connect(
         raise AssertionError("A client's exception escaped the calling coroutine") from escaped
 
     assert recorder.disconnected == ["Postgres"]
-    assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
-    outcomes = {timing.name: timing.connect_outcome for timing in dep.timings}
-    expected = {"Postgres": "ok", "Broken": "failed", "Hanging": "cancelled", "Top": None}
-    if with_competing_failure:
-        expected["CompetingFailure"] = "failed"
-    assert outcomes == expected
+    assert (dep.connected, dep.clients) == (False, {})
     assert f"Broken.connect() raised {error_type.__name__}: stopped" in caplog.text
 
 
@@ -198,9 +274,7 @@ async def test_base_exception_group_rolls_back_connect(monkeypatch: pytest.Monke
 
     assert raised.value.exceptions == (error,)
     assert recorder.disconnected == ["Postgres"]
-    assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
-    timing = single(other for other in dep.timings if other.name == "Broken")
-    assert timing.connect_outcome == "failed"
+    assert (dep.connected, dep.clients) == (False, {})
 
 
 async def _check_cancellation(expected: bool) -> None:
@@ -235,7 +309,9 @@ def reissuing_task_group(monkeypatch: pytest.MonkeyPatch) -> None:
         return
     connect = Connect._connect
 
-    async def connect_with_reissue(controller: Connect, clients: list[NotSingletonClient], prior_cancels: int) -> float:
+    async def connect_with_reissue(
+        controller: Connect, clients: dict[ClientClass, Client], prior_cancels: int
+    ) -> float:
         # Exercise the 3.13+ TaskGroup contract under the per-version coverage gate too.
         try:
             return await connect(controller, clients, prior_cancels)
@@ -277,7 +353,7 @@ async def test_startup_cancellation_does_not_interrupt_rollback(
     monkeypatch.setattr(broken, "connect", fail)
     task = asyncio.create_task(connect())
     await task
-    assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
+    assert (dep.connected, dep.clients) == (False, {})
 
 
 @pytest.mark.usefixtures("reissuing_task_group", "suspending_disconnect")
@@ -312,8 +388,8 @@ async def test_pending_cancellation_prevents_startup() -> None:
 
     await asyncio.create_task(connect())
 
-    assert all(timing.connect is None for timing in dep.timings)
-    assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
+    assert recorder.disconnected == []
+    assert (dep.connected, dep.clients) == (False, {})
 
 
 @pytest.mark.usefixtures("suspending_disconnect")
@@ -351,7 +427,7 @@ async def test_new_cancellation_at_rollback_checkpoint(monkeypatch: pytest.Monke
     assert isinstance(outcome, asyncio.CancelledError) and outcome.args == ("stop rollback",)
     assert task.cancelling() == single(cancels_before_checkpoint) + 1
     assert not recorder.disconnected
-    assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
+    assert (dep.connected, dep.clients) == (False, {})
 
 
 async def test_cancellation_disconnects_connected_clients() -> None:
@@ -368,7 +444,7 @@ async def test_cancellation_disconnects_connected_clients() -> None:
 
     assert sorted(recorder.disconnected) == ["Postgres", "Redis"]
     assert dep.connected is False
-    assert not dep.connect_clients
+    assert not dep.clients
 
 
 async def test_cancelled_disconnect_waits_for_the_clients_disconnecting_and_flushes() -> None:
@@ -388,12 +464,12 @@ async def test_cancelled_disconnect_waits_for_the_clients_disconnecting_and_flus
     # was not reached
     assert recorder.disconnected == ["Sibling", "Interrupted: cancelled"]
     assert dep.connected is False
-    assert (dep.connect_clients, dep.clients) == ([], {})
+    assert not dep.clients
 
     # The next connect() starts from a fresh graph, not from the half-disconnected clients
     dep.resolve(Redis)
     async with dep:
-        assert [type(client) for client in dep.connect_clients] == [Redis]
+        assert list(dep.clients) == [Redis]
     assert recorder.disconnected == ["Sibling", "Interrupted: cancelled", "Redis"]
 
 
@@ -419,7 +495,6 @@ async def test_cancelled_rollback_flushes(cancel_during_startup: bool, monkeypat
 
     assert recorder.disconnected == ["Interrupted: cancelled"]
     assert dep.connected is False
-    assert not dep.connect_clients
     assert not dep.clients
 
 
@@ -434,7 +509,4 @@ async def test_client_cancelling_itself_does_not_stop_disconnect() -> None:
 
     assert recorder.disconnected == ["Sibling", "Postgres"]
     assert dep.connected is False
-    assert not dep.connect_clients
     assert not dep.clients
-    timing = single(other for other in dep.timings if other.name == "SelfCancelling")
-    assert timing.disconnect_outcome == "cancelled"

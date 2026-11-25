@@ -1,0 +1,27 @@
+name: Dev build
+
+on:
+  push:
+    branches: ['3.0.0']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
+      - id: version
+        name: Set the development version
+        run: |
+          version="$(uv version --short).dev${GITHUB_RUN_NUMBER}"
+          uv version "$version" --frozen
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - run: uv build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nuke-di-${{ steps.version.outputs.version }}-attempt-${{ github.run_attempt }}
+          path: dist/
+          if-no-files-found: error

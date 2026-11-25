@@ -5,11 +5,11 @@ from typing import Any, TypeVar
 from nuke_di.naming import sname
 
 
-class NotSingletonClient:
+class Client:
     """
     Base class for dependencies managed by `Dependencies`.
 
-    A new instance is created for every consumer that declares it.
+    The container caches one instance per client class and shares it with every consumer.
     """
 
     @classmethod
@@ -46,23 +46,12 @@ class NotSingletonClient:
         """
 
 
-class Client(NotSingletonClient):
-    """
-    Singleton client.
+def isclient(candidate: Any) -> bool:
+    return inspect.isclass(candidate) and issubclass(candidate, Client)
 
-    It is cached on resolution, so every consumer receives the same instance.
-    """
-
-
-def isa(*types: type) -> Callable[[Any], bool]:
-    return lambda candidate: inspect.isclass(candidate) and issubclass(candidate, types)
-
-
-isclient = isa(Client)
-isnotsingleton = isa(NotSingletonClient)
 
 # A client class given to the container, and the client it gets back
-ClientT = TypeVar("ClientT", bound=NotSingletonClient)
+ClientT = TypeVar("ClientT", bound=Client)
 
 
 def _not_a_pydantic_type(client_class: type) -> str:

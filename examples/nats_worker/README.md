@@ -9,7 +9,7 @@ already delivered.
 |------------------|-----------------------------------------------------------------------------------|
 | `clients.py`     | `Nats` around a `nats-py` connection, `Orders` where handled orders go, the `Order` model |
 | `worker.py`      | `process_order()` for one message and the `consume` worker that subscribes in a queue group |
-| `publish.py`     | The `publish` job: `--count` orders to `nats_worker.orders`                       |
+| `publish.py`     | The `publish` entrypoint sends three orders to `nats_worker.orders`                       |
 | `test_worker.py` | `process_order()` and `consume()` with fakes, and the startup failing at once without NATS; no server needed |
 
 The worker subscribes in the queue group `nats_worker`: NATS delivers each message to only one member of
@@ -36,7 +36,7 @@ In another, publish three orders:
 
 ```console
 $ cd examples
-$ uv run python -m nats_worker.publish --count 3
+$ uv run python -m nats_worker.publish
 nats: connected
 publish: order 1
 publish: order 2
@@ -60,8 +60,8 @@ worker: order 3: 3 x mug
 worker: order 3 saved
 worker: stopped
 nats: disconnected
-$ echo $?
-130
+...
+KeyboardInterrupt
 ```
 
 Without a NATS server the run stops at startup with exit code 1, at once:
@@ -86,9 +86,9 @@ $ uv run pytest -q nats_worker
 
 ## What to look at
 
-- On Shutdown the worker calls `subscription.drain()`: NATS stops sending to this replica, and the
-  messages it already received are handled before `consume()` returns. Core NATS has no redelivery, so
-  dropping them would lose them.
+- Ctrl+C cancels the main coroutine through `asyncio.run()`. The worker drains its subscription in
+  `finally`, before the container closes the NATS connection. This lets the worker handle messages
+  already delivered. Core NATS does not redeliver them.
 - `Nats.disconnect()` calls `drain()` on the connection: the publisher's last messages are flushed before
   the process exits, with no explicit `flush()` in the job.
 - `nats-py` retries a failed first connection for about two minutes by default. The `error_cb` of `Nats`

@@ -7,7 +7,7 @@ with one line.
 
 | File               | What it holds                                                               |
 |--------------------|-----------------------------------------------------------------------------|
-| `clients.py`       | `Settings`, a `@client_dataclass(frozen=True)`, and `Database` / `Cache` that depend on it |
+| `clients.py`       | `Settings`, a `@dataclass(frozen=True)`, and `Database` / `Cache` that depend on it |
 | `show.py`          | A job that prints the settings it got and checks that everyone shares them  |
 | `test_settings.py` | `Settings` replaced with `di.mock()` and `di.override()`, the environment read with `monkeypatch` |
 
@@ -68,4 +68,4 @@ $ uv run pytest -q settings
   which is never connected, loses nothing.
 - `__post_init__` validates: a `ValueError` there becomes an `InitializeDependencyError` and exit
   code `1` before anything connects. `frozen=True` keeps the configuration read-only at runtime.
-- `class Settings(Client)` next to `@client_dataclass` tells mypy and pyright that it is a client.
+- `class Settings(Client)` next to `@dataclass` tells mypy and pyright that it is a client.

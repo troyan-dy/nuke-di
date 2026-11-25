@@ -1,9 +1,11 @@
-from nuke_di import Client, client_dataclass
+from dataclasses import dataclass
+
+from nuke_di import Client
 
 from dataclass_clients.clients import Mailer, PaymentGateway, Postgres, Redis
 
 
-@client_dataclass(frozen=True)
+@dataclass(frozen=True)
 class Payments(Client):
     pg: Postgres
     gateway: PaymentGateway
@@ -14,7 +16,7 @@ class Payments(Client):
         return charge_id
 
 
-@client_dataclass(frozen=True)
+@dataclass(frozen=True)
 class Checkout(Client):
     """The fields are the dependencies: no __init__ that only copies its arguments to self."""
 

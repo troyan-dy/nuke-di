@@ -8,7 +8,7 @@ on:
 jobs:
   version:
     # A pull request into master is a release once merged, so it must carry a new version
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.base_ref == 'master'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

@@ -41,7 +41,7 @@ def connect_sample(
     deps = Dependencies()
     for root in roots:
         deps.resolve(root)
-    clients = list(deps.connect_clients)
+    clients = list(deps.clients.values())
     library.append(asyncio.run(timed(connect_and_disconnect, deps)))
     direct.append(asyncio.run(reference(clients)))
     return library[-1] - direct[-1]

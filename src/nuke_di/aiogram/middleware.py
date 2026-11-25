@@ -10,12 +10,12 @@ from aiogram import Dispatcher
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.types import TelegramObject
 
+from nuke_di._integration import Binding
 from nuke_di.aiogram.framework import _AIOGRAM, _RESERVED, Arguments
 from nuke_di.aiogram.signatures import _client_arguments
 from nuke_di.core import Dependencies
-from nuke_di.integration import Binding
 from nuke_di.naming import sname
-from nuke_di.types import NotSingletonClient
+from nuke_di.types import Client
 
 
 class _Clients(BaseMiddleware):
@@ -44,14 +44,15 @@ class _Clients(BaseMiddleware):
             return await handler(event, data)
         return await handler(event, self._fill(data, arguments, callback))
 
-    def late(self, binding: Binding) -> NotSingletonClient:
+    def late(self, binding: Binding) -> Client:
         """
         The client of a handler the startup did not see: connected if another client depends on it.
         """
-        if self.started:
-            instance = self.container.clients.get(binding.client_class)
-            if instance is not None:
-                return instance
+        if self.started and self.container.connected:
+            try:
+                return self.container.resolve(binding.client_class)
+            except RuntimeError:
+                return binding.require()
         return binding.require()
 
     def shutdown_arguments(self, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -70,7 +71,7 @@ class _Clients(BaseMiddleware):
             )
         return {**kwargs, **self.lifecycle()}
 
-    def lifecycle(self) -> dict[str, NotSingletonClient]:
+    def lifecycle(self) -> dict[str, Client]:
         """
         The client arguments of the startup and shutdown handlers.
         """
@@ -116,7 +117,7 @@ class _Found:
         # The names aiogram passes itself
         self.reserved = reserved
         # One binding per client class
-        self.bindings: dict[type[NotSingletonClient], Binding] = {}
+        self.bindings: dict[type[Client], Binding] = {}
         # The client arguments of every handler, by the id of its callback, which the entry keeps: the cost of an
         # update is a lookup here
         self.arguments: dict[int, tuple[Any, Arguments]] = {}
