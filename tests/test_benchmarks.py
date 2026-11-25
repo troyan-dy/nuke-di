@@ -4,6 +4,7 @@ The benchmark suite of benchmarks/ keeps running: CI runs it the same way, as a 
 
 import asyncio
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -74,7 +75,14 @@ class Ran:
 def run(*args: str, script: Path = RUN) -> subprocess.CompletedProcess[str]:
     # The interpreter of the tests, with fixed arguments
     command = [sys.executable, str(script), *args]
-    return subprocess.run(command, capture_output=True, text=True, cwd=ROOT, check=False)  # noqa: S603
+    return subprocess.run(  # noqa: S603
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        cwd=ROOT,
+        check=False,
+        env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+    )
 
 
 def ran(out: Path, *args: str, script: Path = RUN) -> Ran:
@@ -391,10 +399,10 @@ def test_draws_the_product_page(tmp_path: Path) -> None:
     process = run(str(figures), str(out), script=BENCHMARKS / "product_page.py")
 
     assert process.returncode == 0, process.stderr
-    svg = out.read_text()
+    svg = out.read_text(encoding="utf-8")
     assert svg.startswith("<svg ") and "ProductPageApi" in svg and "prefers-color-scheme: dark" in svg
     # The picture of the README is the one the committed figures give
-    assert svg == (ROOT / "docs" / "product-page.svg").read_text()
+    assert svg == (ROOT / "docs" / "product-page.svg").read_text(encoding="utf-8")
 
 
 def test_rejects_an_unknown_scenario() -> None:

@@ -6,6 +6,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-11-26
+
+### Fixed
+
+- Use UTF-8 for captured benchmark test output and generated product-page SVGs on Windows.
+
 ## [3.0.0] - 2026-11-26
 
 ### Changed
@@ -999,7 +1005,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v3.0.1...HEAD
+[3.0.1]: https://github.com/troyan-dy/nuke-di/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/troyan-dy/nuke-di/compare/v2.0.4...v3.0.0
 [2.0.4]: https://github.com/troyan-dy/nuke-di/compare/v2.0.3...v2.0.4
 [2.0.3]: https://github.com/troyan-dy/nuke-di/compare/v2.0.2...v2.0.3

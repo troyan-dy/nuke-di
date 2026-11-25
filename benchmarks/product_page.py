@@ -71,7 +71,7 @@ def draw(report: dict[str, Any]) -> str:
 def main(argv: list[str]) -> int:
     source = Path(argv[0]) if argv else JSON
     target = Path(argv[1]) if len(argv) > 1 else SVG
-    target.write_text(draw(json.loads(source.read_text())))
+    target.write_text(draw(json.loads(source.read_text())), encoding="utf-8")
     return 0
 
 
