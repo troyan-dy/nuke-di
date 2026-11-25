@@ -385,7 +385,7 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
 
 ## Documentation
 
-- [Clients](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md): `Client` and `NotSingletonClient`, the lifecycle, dataclass clients,
+- [Clients](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md): `Client`, the lifecycle, dataclass clients,
   connect order, startup timings, the dependency graph, connect and resolution errors
 - [The container](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/container.md): `Dependencies` and the global `DI`, `resolve()`, `inject()`,
   `mock()`, `override()`
@@ -416,61 +416,48 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
 
 # Clients
 
-## Client and NotSingletonClient
+## Client
 
-Every dependency is a subclass of one of two base classes:
-
-| Base class           | Instances                                          |
-|----------------------|----------------------------------------------------|
-| `Client`             | Singleton: one instance per container              |
-| `NotSingletonClient` | A new instance for every consumer that declares it |
+Every dependency subclasses `Client`. A container builds one instance per client class and shares it
+with every consumer.
 
 ```python
-from nuke_di import Client, Dependencies, NotSingletonClient
+from nuke_di import Client, Dependencies
 
 
 class Settings(Client):
     pass
 
 
-class HttpSession(NotSingletonClient):
-    pass
-
-
 class Orders(Client):
-    def __init__(self, settings: Settings, http: HttpSession) -> None:
+    def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.http = http
 
 
 class Payments(Client):
-    def __init__(self, settings: Settings, http: HttpSession) -> None:
+    def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.http = http
 
 
 deps = Dependencies()
 orders = deps.resolve(Orders)
 payments = deps.resolve(Payments)
 
-print(orders.settings is payments.settings)  # one Settings for the whole container
-print(orders.http is payments.http)  # every consumer gets its own HttpSession
-print(deps.resolve(Orders) is orders)  # resolve() is idempotent for a Client
+print(orders.settings is payments.settings)
+print(deps.resolve(Orders) is orders)
 ```
 
 ```text
 True
-False
 True
 ```
 
 A client declares its own dependencies as annotated `__init__` arguments. Only arguments
 annotated with a client type are injected, and resolution is recursive.
 
-A client lives as long as its container. There are no per-request or per-message clients, and none
-are planned ([ADR-0006](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0006-clients-live-as-long-as-the-container.md)): a transaction or anything else that lives for one request is
-opened in the handler through a method of a client. `NotSingletonClient` is still supported, but it
-is slated for removal in a future major version, so do not build new code on it.
+A client lives as long as its container. For state that lives for one request or message, such as a
+transaction, use a client method that opens it in the handler
+([ADR-0006](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0006-clients-live-as-long-as-the-container.md)).
 
 ## connect() and disconnect()
 
@@ -795,12 +782,12 @@ its dependencies. It is a snapshot: `flush()` empties it, apart from the Replace
 |----------------|-------|
 | `name`         | The class name of the client |
 | `client_class` | The class the consumers asked for |
-| `singleton`    | `True` for a `Client`, `False` for a `NotSingletonClient` |
+| `singleton`    | `True` for every client |
 | `replacement`  | The object registered with `mock()` or `override()` in place of `client_class`; `None` for a real client |
 | `dependencies` | The clients of the `__init__` arguments, by argument name |
 
-A `NotSingletonClient` gets one node per instance, all with the same name; `to_mermaid()` numbers
-them from the second one (`Session`, `Session_2`). A Replacement is drawn with a
+When distinct client classes have the same name, `to_mermaid()` gives their nodes unique IDs
+(`Session`, `Session_2`). A Replacement is drawn with a
 dashed border and the name of the object in its place: `Postgres: AsyncMock`. Nodes compare by
 identity, so the `shared: True` above says that `Checkout` and `Payments` got the same `Postgres`.
 
@@ -916,7 +903,7 @@ except InvalidSignatureError as exc:
 ```text
 InvalidSignatureError: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)
 CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
-InvalidSignatureError: UserRepository is not a client: subclass Client or NotSingletonClient
+InvalidSignatureError: UserRepository is not a client: subclass Client
 ```
 
 An argument of `__init__` is filled with a client when its type hint is a client. Any other
@@ -929,7 +916,7 @@ argument needs a default, which is left alone. These fail with `InvalidSignature
 | `Client \| None`                      | `is Postgres \| None, a client cannot be optional` |
 | a client, positional-only (`/`)       | `is positional-only, a client is passed by keyword` |
 
-A class that is not a client at all, asked for with `resolve()`, fails with `UserRepository is not a client: subclass Client or NotSingletonClient` before anything is built.
+A class that is not a client at all, asked for with `resolve()`, fails with `UserRepository is not a client: subclass Client` before anything is built.
 
 Clients that depend on each other in a cycle fail with `CircularDependencyError`, a subclass of
 `InvalidSignatureError`, and a type hint that cannot be evaluated, e.g. a class defined inside a
@@ -1903,8 +1890,7 @@ The rules:
   apps on two containers serve the same functions at once, e.g. in tests. An app mounted into a set-up app,
   or one that serves its routes, e.g. through `include_router(api.router)`, which runs `api`'s lifespan,
   gets the clients that app started.
-- **Instances.** As with `inject()`, a `Client` is one instance per container, and a
-  `NotSingletonClient` is one instance per argument that declares it, not one per request.
+- **Instances.** As with `inject()`, arguments of the same client class share the container's instance.
 - **Lifespan.** The app's own `lifespan=` runs inside: its startup code sees connected clients, and
   its shutdown code runs before they disconnect. On shutdown `Shutdown` is set and
   `BackgroundTasks` are stopped, if the app uses them, before the clients disconnect, as in a
@@ -2503,8 +2489,7 @@ The rules:
   in one handler and `users: Billing` in another raise `TypeError` when the app is created. A
   dependency of the same name declared by the app, a router, a controller or a handler wins over
   the client.
-- **Instances.** A `Client` is one instance per container; a `NotSingletonClient` is one instance per
-  argument name.
+- **Instances.** Arguments of the same client class share the container's instance.
 - **Lifespan.** The clients connect before the app's own `lifespan=` and `on_startup=` run, and
   disconnect after its `on_shutdown=` hooks, which Litestar calls last. `Shutdown` and
   `BackgroundTasks` behave as in [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md).
@@ -2562,7 +2547,6 @@ the app ([ADR-0004](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/00
 | Set up | `setup(app)` before the routes; routers through `ClientRouter` | `ClientPlugin()` in `plugins=`; any router or controller |
 | Handlers seen | Every route declared after `setup(app)`, on the app or on an included `ClientRouter` or `APIRouter(route_class=ClientRoute)` | The handlers the app is created with; one added later with `app.register()` is not |
 | Argument names | Free: `users: UserService` here and `users: Billing` there | One name, one client in the whole app; two clients under one name raise `TypeError` when the app is created |
-| A `NotSingletonClient` (slated for removal, [ADR-0006](https://github.com/troyan-dy/nuke-di/blob/master/docs/adr/0006-clients-live-as-long-as-the-container.md)) | One instance per argument | One instance per argument name, shared by every handler that uses the name |
 | What changes in the function | Its `__signature__`; `get_type_hints()` still shows `UserService` | Its `__annotations__`; `get_type_hints(include_extras=True)` shows `Annotated[UserService, Dependency(), SkipValidationMarker()]` |
 | Websockets | `@app.websocket` endpoints | `@websocket` handlers; a websocket listener raises `TypeError` |
 | The app's own lifespan | Runs inside: the clients connect before it and disconnect after it | The clients connect before `lifespan=` and `on_startup=`, disconnect after `on_shutdown=` |
@@ -2763,8 +2747,7 @@ The rules:
   the brokers start; they disconnect after the brokers stop and after the `after_shutdown=` hooks.
   `Shutdown` and `BackgroundTasks` behave as in [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md). `setup()` works on an
   `AsgiFastStream` too.
-- **Instances.** As with `inject()`, a `Client` is one instance per container, and a
-  `NotSingletonClient` is one instance per argument that declares it, not one per message.
+- **Instances.** As with `inject()`, arguments of the same client class share the container's instance.
 - **The function stays a function.** Its signature shows `Annotated[UserService, Depends(...)]` to
   FastStream, as in [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md).
 - **One app at a time.** A subscriber function and its dependencies are rewritten once, whatever the
@@ -3873,8 +3856,7 @@ The rules:
   orchestrator never sees a crash and the dead dependency is tried again every second. Run the worker with
   `--max-fails 1`: it then exits with code 255, and the orchestrator restarts it with its own backoff, as
   `connect()` is fail-fast in nuke-di.
-- **Instances.** As with `inject()`, a `Client` is one instance per container, and a `NotSingletonClient` is
-  one instance per argument that declares it, not one per task.
+- **Instances.** As with `inject()`, arguments of the same client class share the container's instance.
 - **The function stays a function.** Its signature shows `Annotated[UserService, TaskiqDepends(...)]` to
   taskiq, as in [FastAPI](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/fastapi.md); `await send_report(1, users)` calls it with clients passed by hand.
   A function that takes clients serves either taskiq or FastAPI: one bound to FastAPI is refused with a
@@ -4359,7 +4341,7 @@ INFO:     Finished server process [48646]
 | A client's `connect()` fails | `RuntimeError: nuke-di clients failed to start: Database.connect() raised OSError: connection refused`; the server reports a failed startup and exits, and the container is left flushed |
 | The container is connected already, e.g. by another app | `RuntimeError: nuke-di clients failed to start: the container is already connected` |
 | `lifespan(Database)`, the container left out | `TypeError: lifespan() takes the container first, then the clients, e.g. lifespan(DI, Database); got <class 'app.clients.Database'>` |
-| `lifespan(DI, "Database")`, not a client class | `TypeError: 'Database' is not a client: subclass Client or NotSingletonClient` |
+| `lifespan(DI, "Database")`, not a client class | `TypeError: 'Database' is not a client: subclass Client` |
 
 Under uvicorn, with a `Database` whose `connect()` raises `OSError("connection refused")`:
 
@@ -5796,7 +5778,7 @@ a Starlette or Quart app lists them in `clients = nuke_di.asgi.lifespan(DI, ...)
 Do not write what nuke-di rejects:
 - provider or factory functions: wrap a third-party object in a Client that creates it in connect();
 - `bind(Protocol, Impl)`, qualifiers, multibinding: depend on the concrete client, swap it in tests;
-- per-request or per-message clients, new code on `NotSingletonClient`: open per-request state through a method;
+- per-request or per-message clients: open per-request state through a method;
 - retries or waiting loops in `connect()`: let it raise, the orchestrator restarts the process.
 
 Tests replace clients with `DI.mock()` / `DI.override()` before anything is resolved. Check the wiring with
@@ -5955,9 +5937,9 @@ uv run flake8 src/nuke_di/core.py    # one file
 
 Every merge into `master` is a release. The `Release` workflow publishes the version in
 `pyproject.toml` to PyPI, tags it `vX.Y.Z` and creates a GitHub release from its section of
-`CHANGELOG.md`. A pull request therefore carries its own version: raise it with `uv version --bump
+`CHANGELOG.md`. A pull request into `master` therefore carries its own version: raise it with `uv version --bump
 patch|minor|major` and turn `## [Unreleased]` into `## [X.Y.Z] - YYYY-MM-DD` with a compare link at
-the bottom. CI checks this on every pull request, and `make check-version` checks it locally:
+the bottom. CI checks this on pull requests into `master`, and `make check-version` checks it locally:
 
 ```console
 $ make check-version
@@ -5978,3 +5960,14 @@ uv run --no-project python scripts/version.py check origin/master
 
 A change that reaches `master` without a new version, e.g. pushed directly, fails the `Release`
 workflow before anything is built or published.
+
+## 3.0 development builds
+
+Each push to `3.0.0` runs **Dev build** in GitHub Actions. Download the wheel and source
+distribution from the run's **Artifacts** section. The run number becomes the suffix in
+`3.0.0.devN`. A rerun keeps that version and gets its own artifact name. To try the wheel
+in a separate virtual environment, pass its downloaded path to `uv pip install`.
+
+Development builds are distributed as GitHub Actions artifacts. The stable `3.0.0` release
+uses the regular release workflow after the branch merges into `master`. Before merging,
+update the 3.0.0 changelog date and compare link for the stable release.

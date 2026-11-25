@@ -18,7 +18,7 @@ from nuke_di.errors import ConnectError
 from nuke_di.logs import CONTAINER_LOGGER, client_fields, fields
 from nuke_di.naming import count
 from nuke_di.timings import ClientTiming
-from nuke_di.types import NotSingletonClient
+from nuke_di.types import Client
 
 if TYPE_CHECKING:
     from nuke_di.core import Dependencies
@@ -38,16 +38,16 @@ class Disconnect:
     The run of one disconnect: the clients disconnect in the reverse of the connect order, under one deadline.
     """
 
-    def __init__(self, container: "Dependencies", to_disconnect: list[NotSingletonClient]) -> None:
+    def __init__(self, container: "Dependencies", to_disconnect: list[Client]) -> None:
         self._container = container
         self._to_disconnect = to_disconnect
         settings = container.settings
         self._limiter = make_limiter(settings)
         self._timeout = settings.disconnect_timeout
         # Clients whose disconnect() ended, for the progress in the records
-        self._disconnected: list[NotSingletonClient] = []
+        self._disconnected: list[Client] = []
         # Clients whose turn came after the deadline, in disconnect order
-        self._skipped: list[NotSingletonClient] = []
+        self._skipped: list[Client] = []
         self._total = 0
         self._deadline: float = 0
         self._timings: dict[int, ClientTiming] = {}
@@ -73,7 +73,7 @@ class Disconnect:
             raise
         self._end()
 
-    async def client(self, client: NotSingletonClient) -> None:
+    async def client(self, client: Client) -> None:
         timing = self._timings[id(client)]
         debug = logger.isEnabledFor(logging.DEBUG)
         timeout = self._timeout
@@ -161,7 +161,7 @@ class Disconnect:
 
 
 def consumers_of(
-    clients: list[NotSingletonClient],
+    clients: list[Client],
     dependencies: dict[int, list[int]],
 ) -> dict[int, list[int]]:
     """

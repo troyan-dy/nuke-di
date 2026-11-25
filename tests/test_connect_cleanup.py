@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from nuke_di import Client, ConnectError, Dependencies, NotSingletonClient
+from nuke_di import Client, ConnectError, Dependencies
 from nuke_di._container.connect import Connect
 from tests.sequences import single
 
@@ -235,7 +235,7 @@ def reissuing_task_group(monkeypatch: pytest.MonkeyPatch) -> None:
         return
     connect = Connect._connect
 
-    async def connect_with_reissue(controller: Connect, clients: list[NotSingletonClient], prior_cancels: int) -> float:
+    async def connect_with_reissue(controller: Connect, clients: list[Client], prior_cancels: int) -> float:
         # Exercise the 3.13+ TaskGroup contract under the per-version coverage gate too.
         try:
             return await connect(controller, clients, prior_cancels)

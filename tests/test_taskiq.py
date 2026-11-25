@@ -23,7 +23,7 @@ from taskiq import (
 from taskiq.brokers.inmemory_broker import InmemoryResultBackend
 from taskiq.receiver import Receiver
 
-from nuke_di import DI, BackgroundTasks, Client, Dependencies, NotSingletonClient, Shutdown
+from nuke_di import DI, BackgroundTasks, Client, Dependencies, Shutdown
 from nuke_di.fastapi import setup as fastapi_setup
 from nuke_di.integration.testing import check
 from nuke_di.taskiq import _TASKIQ, setup
@@ -388,15 +388,15 @@ def test_function_bound_to_fastapi_is_not_registered() -> None:
     assert broker.find_task("fastapi-shared") is None
 
 
-class Session(NotSingletonClient):
-    """A client built for every argument that takes it."""
+class Session(Client):
+    """A client shared by arguments of the same type."""
 
 
 async def two_sessions(first: Session, second: Session) -> bool:
-    return first is not second
+    return first is second
 
 
-async def test_not_singleton_client_per_argument() -> None:
+async def test_arguments_of_the_same_type_share_a_client() -> None:
     broker = make_broker(Dependencies())
     task = broker.task(two_sessions)
 

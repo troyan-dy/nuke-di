@@ -1,6 +1,6 @@
 """
 The detectors of shapes() of benchmarks/agents/evaluate.py, one per design nuke-di rejects: a provider function
-(ADR-0005), bind() or a registration on a container (ADR-0005 / ADR-0008), NotSingletonClient (ADR-0006), an I/O
+(ADR-0005), bind() or a registration on a container (ADR-0005 / ADR-0008), an I/O
 object made in `__init__`, and the retries of retries.py (ADR-0009).
 """
 
@@ -88,18 +88,14 @@ def _provider_functions(tree: ast.Module, provided: Set[str]) -> Iterator[tuple[
 
 def _registrations(node: ast.AST) -> Iterator[tuple[int, str]]:
     """
-    bind() (ADR-0008), NotSingletonClient (ADR-0006), and a registration on a container (ADR-0005 / ADR-0008).
+    bind() (ADR-0008) and a registration on a container (ADR-0005 / ADR-0008).
     """
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         if node.func.id == "bind":
             yield node.lineno, "bind() (ADR-0008)"
-    if isinstance(node, ast.Name) and node.id == "NotSingletonClient":
-        yield node.lineno, "NotSingletonClient (ADR-0006)"
     if not isinstance(node, ast.Attribute):
         return
     attribute = node.attr
-    if attribute == "NotSingletonClient":
-        yield node.lineno, "NotSingletonClient (ADR-0006)"
     owner = node.value
     container = owner.id if isinstance(owner, ast.Name) else None
     if attribute in _REGISTRATIONS and container in CONTAINERS:

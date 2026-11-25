@@ -33,7 +33,6 @@ docker run -d --rm --name nats -p 4222:4222 nats:2.10
 |---------------------------------------------|-----------------------------------------------------------------------------|
 | [hello](hello/)                             | The smallest program: two clients, `inject()` and `async with DI`           |
 | [settings](settings/)                       | Configuration from environment variables as a client, replaced in tests     |
-| [not_singleton](not_singleton/)             | `Client` against `NotSingletonClient`: which instances are shared           |
 | [dataclass_clients](dataclass_clients/)     | `@client_dataclass` instead of a hand-written `__init__`                    |
 | [graph](graph/)                             | Who needs whom in a real tree, its Mermaid diagram and its startup         |
 | [startup_failures](startup_failures/)       | A dependency that is down or hangs, and a tree that cannot be built         |

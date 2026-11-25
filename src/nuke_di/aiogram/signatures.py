@@ -9,10 +9,10 @@ from typing import Any, ForwardRef, TypeAlias, get_type_hints
 
 from nuke_di.aiogram.framework import _SIGNATURE
 from nuke_di.integration import client_of
-from nuke_di.types import NotSingletonClient
+from nuke_di.types import Client
 
 # A client argument: its name and its client
-_ClientArgument: TypeAlias = tuple[str, type[NotSingletonClient]]
+_ClientArgument: TypeAlias = tuple[str, type[Client]]
 
 
 def _client_arguments(call: Any) -> list[_ClientArgument]:

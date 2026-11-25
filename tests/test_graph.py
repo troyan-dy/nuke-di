@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nuke_di import Client, Dependencies, Graph, Node, NotSingletonClient
+from nuke_di import Client, Dependencies, Graph, Node
 from nuke_di import __all__ as public_names
 
 
@@ -26,8 +26,8 @@ class Checkout(Client):
         self.payments = payments
 
 
-class Session(NotSingletonClient):
-    """A client every consumer gets its own instance of."""
+class Session(Client):
+    """A client shared by orders and reports."""
 
 
 class Orders(Client):
@@ -75,20 +75,6 @@ def test_dependencies_are_keyed_by_init_argument_and_shared_between_consumers() 
     assert nodes["Checkout"].dependencies["pg"] is nodes["Postgres"]
     assert nodes["Payments"].dependencies["pg"] is nodes["Postgres"]
     assert nodes["Postgres"].dependencies == {}
-
-
-def test_not_singleton_client_gets_one_node_per_instance() -> None:
-    deps = Dependencies()
-    deps.resolve(Orders)
-    deps.resolve(Reports)
-    graph = deps.graph()
-
-    sessions = [node for node in graph.nodes if node.client_class is Session]
-    assert len(sessions) == 2
-    assert sessions[0] is not sessions[1]
-    assert all(node.singleton is False for node in sessions)
-    nodes = by_name(graph)
-    assert nodes["Orders"].dependencies["session"] is not nodes["Reports"].dependencies["session"]
 
 
 def test_replacement_node_shows_the_expected_class_and_the_object_in_its_place() -> None:
@@ -159,22 +145,6 @@ def test_mermaid_names_the_mock_class_of_an_autospec_replacement() -> None:
     assert '  Postgres["Postgres: NonCallableMagicMock"]\n' in deps.graph().to_mermaid()
 
 
-def test_mermaid_numbers_the_instances_of_a_not_singleton_client() -> None:
-    deps = Dependencies()
-    deps.resolve(Orders)
-    deps.resolve(Reports)
-
-    assert deps.graph().to_mermaid() == (
-        "graph BT\n"
-        "  Session\n"
-        "  Orders\n"
-        "  Session_2[Session]\n"
-        "  Reports\n"
-        "  Session --> Orders\n"
-        "  Session_2 --> Reports\n"
-    )
-
-
 def test_mermaid_of_an_empty_graph_is_the_header_alone() -> None:
     assert Dependencies().graph().to_mermaid() == "graph BT\n"
 
@@ -225,14 +195,14 @@ def test_a_replacement_without_consumers_is_a_node() -> None:
     assert [node.name for node in deps.graph().nodes] == ["Redis", "Postgres", "Payments"]
 
 
-def test_a_mocked_not_singleton_client_is_one_shared_node() -> None:
+def test_consumers_share_one_replacement_node() -> None:
     deps = Dependencies()
     deps.mock(Session)
     deps.resolve(Orders)
     deps.resolve(Reports)
     nodes = by_name(deps.graph())
 
-    assert nodes["Session"].singleton is False
+    assert nodes["Session"].singleton is True
     assert nodes["Orders"].dependencies["session"] is nodes["Reports"].dependencies["session"]
 
 
@@ -256,9 +226,12 @@ def test_a_client_appended_to_connect_clients_by_hand_has_no_dependencies() -> N
     assert dict(nodes["Postgres"].dependencies) == {}
 
 
-def test_mermaid_ids_stay_unique_next_to_a_class_named_like_a_numbered_instance() -> None:
+def test_mermaid_ids_stay_unique_for_classes_with_the_same_name() -> None:
+    class Session(Client):
+        """A different type from the module-level Session."""
+
     class Session_2(Client):  # noqa: N801, WPS114 - the point is the clash with the numbering
-        """A class named like the second instance of Session."""
+        """A class named like the numbered Mermaid node of Session."""
 
     class Audit(Client):
         def __init__(self, session: Session, other: Session_2) -> None:

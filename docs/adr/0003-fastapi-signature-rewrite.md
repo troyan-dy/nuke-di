@@ -14,7 +14,7 @@ A FastAPI path operation (and any dependency function it uses) declares a client
 ## Consequences
 
 - `__signature__` of a user function changes. Calling the function directly is unaffected; only introspection sees the `Depends`. A function is rewritten once, whatever the container; each app resolves its clients in its own container (see the revisit below).
-- Every router must be a `ClientRouter` (or use `route_class=ClientRoute`); `setup(app)` covers the app itself. Forgetting it is caught by `NotSingletonClient.__get_pydantic_core_schema__`, which turns pydantic's schema error into a message that names the fix.
+- Every router must be a `ClientRouter` (or use `route_class=ClientRoute`); `setup(app)` covers the app itself. Forgetting it is caught by `Client.__get_pydantic_core_schema__`, which turns pydantic's schema error into a message that names the fix.
 - FastAPI 0.14x applies router-, include- and app-level dependencies to included routes lazily, outside the route class. `ClientRouter` rewrites its own and its `include_router()` dependencies; `setup()` rewrites the app's and wraps `include_router()` of that app instance.
 - A class used as a dependency gets its rewritten `__signature__` through a descriptor that returns it for that class only, since subclasses would inherit a plain attribute.
 - Websocket endpoints: FastAPI builds `APIWebSocketRoute` without the route class, so `ClientRouter` and the app that `setup()` was given override `add_api_websocket_route()`, which every websocket declaration goes through, and rewrite the endpoint before FastAPI reads it. A websocket on a plain `APIRouter(route_class=ClientRoute)` is not covered.

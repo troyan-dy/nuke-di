@@ -1,11 +1,11 @@
 import pytest
 
-from nuke_di import Client, Dependencies, NotSingletonClient
+from nuke_di import Client, Dependencies
 from nuke_di.errors import ConnectError
 
 
-class InnerDeps(NotSingletonClient):
-    """A dependency every consumer gets its own instance of."""
+class InnerDeps(Client):
+    """A dependency shared by its consumers."""
 
 
 class PublicClient(Client):
@@ -17,7 +17,7 @@ class PublicClient(Client):
 
 
 class NewPublicClient(PublicClient):
-    """A second client class with the same dependency, for an instance of InnerDeps of its own."""
+    """A second client class with the same dependency."""
 
 
 async def test_cached_client() -> None:
@@ -29,13 +29,13 @@ async def test_cached_client() -> None:
     assert first_client is second_client
 
 
-async def test_not_singleton_client() -> None:
+async def test_dependency_is_shared_by_different_consumers() -> None:
     dep = Dependencies()
 
     first_client = dep.resolve(PublicClient)
     second_client = dep.resolve(NewPublicClient)
 
-    assert first_client.inner is not second_client.inner
+    assert first_client.inner is second_client.inner
 
 
 async def test_flush() -> None:

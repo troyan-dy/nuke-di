@@ -9,7 +9,7 @@ from typing import Any, Final, Union, get_args, get_origin
 from nuke_di._container.messages import state_error
 from nuke_di.errors import ConnectError, InvalidSignatureError
 from nuke_di.naming import qualname
-from nuke_di.types import NotSingletonClient, isnotsingleton
+from nuke_di.types import Client, isclient
 
 # The origins of `X | Y` and of `Union[X, Y]`
 _UNIONS: Final = frozenset((Union, UnionType))
@@ -43,16 +43,16 @@ def _parameterized_name(hint: Any) -> str:
     return repr(hint).replace("typing.", "")
 
 
-def optional_client(hint: Any) -> type[NotSingletonClient] | None:
+def optional_client(hint: Any) -> type[Client] | None:
     if get_origin(hint) not in _UNIONS:
         return None
     members = get_args(hint)
-    clients = [member for member in members if isnotsingleton(member)]
+    clients = [member for member in members if isclient(member)]
     return clients[0] if NoneType in members and clients else None
 
 
 def not_a_client(client_class: Any) -> InvalidSignatureError:
-    return InvalidSignatureError(f"{type_name(client_class)} is not a client: subclass Client or NotSingletonClient")
+    return InvalidSignatureError(f"{type_name(client_class)} is not a client: subclass Client")
 
 
 def resolve_refused(client_class: Any) -> ConnectError:

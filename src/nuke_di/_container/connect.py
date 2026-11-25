@@ -20,7 +20,7 @@ from nuke_di._container.order import (
 from nuke_di.errors import ConnectError, ConnectTimeoutError
 from nuke_di.logs import CONTAINER_LOGGER, client_fields, fields
 from nuke_di.timings import ClientTiming
-from nuke_di.types import NotSingletonClient
+from nuke_di.types import Client
 
 if TYPE_CHECKING:
     from nuke_di.core import Dependencies
@@ -58,7 +58,7 @@ class Connect:
         self._limiter = make_limiter(settings)
         self._timeout = settings.connect_timeout
         # Clients whose connect() finished, so a failure knows what to roll back
-        self._connected: list[NotSingletonClient] = []
+        self._connected: list[Client] = []
         self._total = 0
         self._timings: dict[int, ClientTiming] = {}
 
@@ -91,7 +91,7 @@ class Connect:
         # Keep the client's exception chain without the task group's wrapper.
         raise error
 
-    async def client(self, client: NotSingletonClient) -> None:
+    async def client(self, client: Client) -> None:
         timing = self._timings[id(client)]
         # The record's fields are built per client: skipped when nobody listens
         debug = logger.isEnabledFor(logging.DEBUG)
@@ -127,7 +127,7 @@ class Connect:
                 extra=client_fields(timing, timing.connect),
             )
 
-    async def _connect(self, clients: list[NotSingletonClient], prior_cancels: int) -> float:
+    async def _connect(self, clients: list[Client], prior_cancels: int) -> float:
         # Deliver a pending cancellation before starting clients. An already handled request only leaves a count.
         if prior_cancels:
             await asyncio.sleep(0)
@@ -198,7 +198,7 @@ class Connect:
         return ClientConnectError(error)
 
 
-def _start_timings(container: "Dependencies", clients: list[NotSingletonClient]) -> dict[int, ClientTiming]:
+def _start_timings(container: "Dependencies", clients: list[Client]) -> dict[int, ClientTiming]:
     # Computed once: the timings, the logs and the errors of this connect() all name a client the same way
     named = names(container)
     timings = {}

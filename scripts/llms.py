@@ -38,7 +38,8 @@ GUIDE: Final = (
 
 INTRO: Final = """\
 Before writing code with nuke-di, know what it deliberately lacks. A dependency is a `Client` subclass with a
-type-hinted `__init__` and async `connect()` / `disconnect()`; the type hint is the only registration. There are no
+type-hinted `__init__` and async `connect()` / `disconnect()`. The type hint is the only registration, and all
+consumers of a client class in a container share one instance. There are no
 provider or factory functions (ADR-0005), no binding of a Protocol to an implementation, qualifiers or multibinding
 (ADR-0008), no per-request or per-message scopes (ADR-0006) and no retries in `connect()` (ADR-0009): the
 recipes in the guide reach the same results with plain clients, `mock()` and `override()`."""

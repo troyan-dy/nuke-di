@@ -1,9 +1,9 @@
 import pytest
 
-from nuke_di import Client, Dependencies, InvalidSignatureError, NotSingletonClient
+from nuke_di import Client, Dependencies, InvalidSignatureError
 
 
-class InnerDeps(NotSingletonClient):
+class InnerDeps(Client):
     def number(self) -> int:
         return 1
 
@@ -17,7 +17,7 @@ class PublicClient(Client):
 
 
 async def any_func(number: int, adder: PublicClient, inner: InnerDeps) -> int:
-    assert adder.inner is not inner
+    assert adder.inner is inner
 
     return await adder.add(number, inner.number())
 

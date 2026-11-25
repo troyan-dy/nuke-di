@@ -135,7 +135,6 @@ PROGRAMS = (
     Program("http_job.versions", exit_code=2, output=("the following arguments are required: -p/--package",)),
     Program("settings.show", output=("show: one Settings for everyone: True",)),
     Program("settings.show", env={"POOL_SIZE": "0"}, exit_code=1, output=("POOL_SIZE must be at least 1, got 0",)),
-    Program("not_singleton.main", output=("same HttpSession: False",)),
     Program("dataclass_clients.main", output=("placed order 1",)),
     Program("graph.show", output=("  Notifications --> Checkout",)),
     Program("graph.start", output=("Connecting client Checkout (7/8 connected)", "placed order 1")),

@@ -16,7 +16,7 @@ $ uv run python benchmarks/run.py [--size N]... [--repeat K] [--only SCENARIO]..
 |-------------------|--------------------|---------|
 | `--size N`        | `10`, `100`, `1000` | The number of clients in a tree; repeatable |
 | `--repeat K`      | `20`               | Samples per figure, after one untimed warm-up |
-| `--only SCENARIO` | all                | `resolve`, `connect`, `inject`, `not_singleton`, `overrides`, `fastapi`, `import`, `memory`; repeatable |
+| `--only SCENARIO` | all                | `resolve`, `connect`, `inject`, `overrides`, `fastapi`, `import`, `memory`; repeatable |
 | `--json PATH`     |                    | Also write the figures, with every sample, the Python version, platform and commit, as JSON |
 
 It prints a Markdown table with the median and the p95 of the repeats and a figure per client:
@@ -88,7 +88,6 @@ underestimate.
 | `..., above the critical path` | the same | The difference of the two, sample by sample: what the container's schedule adds to the sleeps |
 | `inject(), clients resolved` | 2 clients | `inject()` of a function with two client arguments, the clients resolved already |
 | `call of the injected function` / `... plain function` | 2 clients | One call of the `partial` that `inject()` returns, against one call of the function with the clients passed by hand |
-| `resolve(), cold`, `N consumers of a Client` / `... NotSingletonClient` | one root, `N` consumers of one `Session` | A fresh `Session` per consumer against one shared instance |
 | `flush() + mock() + resolve()` | `mixed`, a leaf replaced | The cycle of a test with the pytest plugin: `flush()`, `mock()` (an autospec mock), `resolve()` of the root |
 | `override() block + resolve()` | `mixed`, a leaf replaced | `with override(Leaf, fake): resolve(root)`, the block flushes on exit |
 | `one request` | FastAPI, via the `httpx` ASGI transport | One `GET` to a handler that takes a client through `nuke_di.fastapi`, to one with a plain async `Depends()`, and to one without dependencies |
@@ -169,7 +168,7 @@ Python 3.11.7, 3.12.5, 3.13.14 and 3.14.6, each in a fresh `uv` environment from
   [#32](https://github.com/troyan-dy/nuke-di/issues/32).
 - **`inject()` takes 8–10 µs** to bind a function with two clients. The `partial` it returns adds
   47–87 ns to a call that takes 37–42 ns without it.
-- **A `NotSingletonClient` costs 0.2–1.3 µs more per consumer** than the shared instance of a `Client` at 100
+- **In 2.x, a per-consumer client cost 0.2–1.3 µs more per consumer** than the shared instance of a `Client` at 100
   and 1000 consumers: a fresh instance is built from the cached arguments of its class.
 - **The test cycle is `resolve()` plus the mock.** The autospec of `mock()` costs 0.65–0.9 ms; `override()`
   with an instance costs the same as a `resolve()` in a second container, 0.10–0.11 ms for 100 clients.
@@ -571,9 +570,9 @@ nuke-di 1.12.0 · CPython 3.11.7 · macOS-26.6.2-arm64-arm-64bit · commit 59883
 | resolve(), cold                                              | N consumers of a Client                      |   10 | 60.8 µs | 99.2 µs |    6.08 µs |
 | resolve(), cold                                              | N consumers of a Client                      |  100 |  511 µs |  656 µs |    5.11 µs |
 | resolve(), cold                                              | N consumers of a Client                      | 1000 | 5.17 ms | 5.82 ms |    5.17 µs |
-| resolve(), cold                                              | N consumers of a NotSingletonClient          |   10 | 66.6 µs | 94.1 µs |    6.66 µs |
-| resolve(), cold                                              | N consumers of a NotSingletonClient          |  100 |  587 µs |  806 µs |    5.87 µs |
-| resolve(), cold                                              | N consumers of a NotSingletonClient          | 1000 | 5.90 ms | 6.97 ms |    5.90 µs |
+| resolve(), cold                                              | N consumers with per-consumer instances      |   10 | 66.6 µs | 94.1 µs |    6.66 µs |
+| resolve(), cold                                              | N consumers with per-consumer instances      |  100 |  587 µs |  806 µs |    5.87 µs |
+| resolve(), cold                                              | N consumers with per-consumer instances      | 1000 | 5.90 ms | 6.97 ms |    5.90 µs |
 | flush() + mock() + resolve()                                 | mixed, a leaf replaced                       |   10 |  654 µs |  710 µs |            |
 | override() block + resolve()                                 | mixed, a leaf replaced                       |   10 | 13.6 µs | 15.7 µs |    1.36 µs |
 | flush() + mock() + resolve()                                 | mixed, a leaf replaced                       |  100 |  749 µs |  980 µs |            |
@@ -666,9 +665,9 @@ nuke-di 1.12.0 · CPython 3.12.5 · macOS-26.6.2-arm64-arm-64bit · commit 59883
 | resolve(), cold                                              | N consumers of a Client                      |   10 | 60.6 µs | 72.1 µs |    6.06 µs |
 | resolve(), cold                                              | N consumers of a Client                      |  100 |  478 µs |  538 µs |    4.78 µs |
 | resolve(), cold                                              | N consumers of a Client                      | 1000 | 5.26 ms | 6.04 ms |    5.26 µs |
-| resolve(), cold                                              | N consumers of a NotSingletonClient          |   10 | 63.3 µs | 76.2 µs |    6.33 µs |
-| resolve(), cold                                              | N consumers of a NotSingletonClient          |  100 |  554 µs |  857 µs |    5.54 µs |
-| resolve(), cold                                              | N consumers of a NotSingletonClient          | 1000 | 5.46 ms | 6.32 ms |    5.46 µs |
+| resolve(), cold                                              | N consumers with per-consumer instances      |   10 | 63.3 µs | 76.2 µs |    6.33 µs |
+| resolve(), cold                                              | N consumers with per-consumer instances      |  100 |  554 µs |  857 µs |    5.54 µs |
+| resolve(), cold                                              | N consumers with per-consumer instances      | 1000 | 5.46 ms | 6.32 ms |    5.46 µs |
 | flush() + mock() + resolve()                                 | mixed, a leaf replaced                       |   10 |  813 µs | 1.02 ms |            |
 | override() block + resolve()                                 | mixed, a leaf replaced                       |   10 | 14.9 µs | 19.1 µs |    1.49 µs |
 | flush() + mock() + resolve()                                 | mixed, a leaf replaced                       |  100 |  802 µs | 1.10 ms |            |
@@ -761,9 +760,9 @@ nuke-di 1.12.0 · CPython 3.13.14 · macOS-26.6.2-arm64-arm-64bit-Mach-O · comm
 | resolve(), cold                                              | N consumers of a Client                      |   10 | 64.2 µs | 75.1 µs |    6.42 µs |
 | resolve(), cold                                              | N consumers of a Client                      |  100 |  538 µs |  606 µs |    5.38 µs |
 | resolve(), cold                                              | N consumers of a Client                      | 1000 | 5.63 ms | 6.40 ms |    5.63 µs |
-| resolve(), cold                                              | N consumers of a NotSingletonClient          |   10 | 69.7 µs | 90.5 µs |    6.97 µs |
-| resolve(), cold                                              | N consumers of a NotSingletonClient          |  100 |  670 µs |  799 µs |    6.70 µs |
-| resolve(), cold                                              | N consumers of a NotSingletonClient          | 1000 | 6.57 ms | 8.69 ms |    6.57 µs |
+| resolve(), cold                                              | N consumers with per-consumer instances      |   10 | 69.7 µs | 90.5 µs |    6.97 µs |
+| resolve(), cold                                              | N consumers with per-consumer instances      |  100 |  670 µs |  799 µs |    6.70 µs |
+| resolve(), cold                                              | N consumers with per-consumer instances      | 1000 | 6.57 ms | 8.69 ms |    6.57 µs |
 | flush() + mock() + resolve()                                 | mixed, a leaf replaced                       |   10 |  885 µs | 1.23 ms |            |
 | override() block + resolve()                                 | mixed, a leaf replaced                       |   10 | 14.0 µs | 20.6 µs |    1.40 µs |
 | flush() + mock() + resolve()                                 | mixed, a leaf replaced                       |  100 | 1.01 ms | 1.17 ms |            |
@@ -856,9 +855,9 @@ nuke-di 1.12.0 · CPython 3.14.6 · macOS-26.6.2-arm64-arm-64bit-Mach-O · commi
 | resolve(), cold                                              | N consumers of a Client                      |   10 | 66.3 µs | 81.3 µs |    6.63 µs |
 | resolve(), cold                                              | N consumers of a Client                      |  100 |  543 µs |  665 µs |    5.43 µs |
 | resolve(), cold                                              | N consumers of a Client                      | 1000 | 5.66 ms | 6.48 ms |    5.66 µs |
-| resolve(), cold                                              | N consumers of a NotSingletonClient          |   10 | 71.9 µs | 82.4 µs |    7.19 µs |
-| resolve(), cold                                              | N consumers of a NotSingletonClient          |  100 |  627 µs |  790 µs |    6.27 µs |
-| resolve(), cold                                              | N consumers of a NotSingletonClient          | 1000 | 6.79 ms | 7.73 ms |    6.79 µs |
+| resolve(), cold                                              | N consumers with per-consumer instances      |   10 | 71.9 µs | 82.4 µs |    7.19 µs |
+| resolve(), cold                                              | N consumers with per-consumer instances      |  100 |  627 µs |  790 µs |    6.27 µs |
+| resolve(), cold                                              | N consumers with per-consumer instances      | 1000 | 6.79 ms | 7.73 ms |    6.79 µs |
 | flush() + mock() + resolve()                                 | mixed, a leaf replaced                       |   10 |  839 µs |  936 µs |            |
 | override() block + resolve()                                 | mixed, a leaf replaced                       |   10 | 14.4 µs | 21.4 µs |    1.44 µs |
 | flush() + mock() + resolve()                                 | mixed, a leaf replaced                       |  100 | 1.00 ms | 1.21 ms |            |

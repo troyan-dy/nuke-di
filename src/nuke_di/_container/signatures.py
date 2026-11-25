@@ -11,7 +11,7 @@ from nuke_di._container.arguments import VARIADIC, argument_problem, init_argume
 from nuke_di._container.messages import hints_error, names, signature_error
 from nuke_di.errors import InvalidSignatureError
 from nuke_di.naming import sname
-from nuke_di.types import NotSingletonClient, isnotsingleton
+from nuke_di.types import Client, isclient
 
 if TYPE_CHECKING:
     from nuke_di.core import Dependencies
@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 
 def client_arguments(
     container: "Dependencies",
-    client_class: type[NotSingletonClient],
-) -> dict[str, type[NotSingletonClient]]:
+    client_class: type[Client],
+) -> dict[str, type[Client]]:
     """
     The arguments of `client_class.__init__` to fill with clients; fail on any other required argument.
 
@@ -34,7 +34,7 @@ def client_arguments(
 
     # A subclass that inherits `__init__` finds its base class's entry and shares it; one that redefines
     # `__init__` fails the check below and stores its own
-    entry: tuple[Callable[..., Any], dict[str, type[NotSingletonClient]]] | None = getattr(
+    entry: tuple[Callable[..., Any], dict[str, type[Client]]] | None = getattr(
         client_class, "__nuke_di_arguments__", None
     )
     if entry is not None and entry[0] is init:
@@ -75,15 +75,15 @@ def client_hints(container: "Dependencies", func: Callable[..., Any]) -> dict[st
 
 def _read_arguments(
     container: "Dependencies",
-    client_class: type[NotSingletonClient],
+    client_class: type[Client],
     init: Callable[..., Any],
     hints: dict[str, Any],
-) -> dict[str, type[NotSingletonClient]]:
-    clients: dict[str, type[NotSingletonClient]] = {}
+) -> dict[str, type[Client]]:
+    clients: dict[str, type[Client]] = {}
     for argument in init_arguments(init):
         hint: Any = hints.get(argument.name)
         # The common case first, without a call: a client passed by keyword
-        if isnotsingleton(hint) and not argument.positional_only:
+        if isclient(hint) and not argument.positional_only:
             clients[argument.name] = hint
             continue
         problem = argument_problem(argument, hint)
@@ -94,7 +94,7 @@ def _read_arguments(
 
 def _init_hints_error(
     container: "Dependencies",
-    client_class: type[NotSingletonClient],
+    client_class: type[Client],
     exc: NameError,
 ) -> InvalidSignatureError:
     owner = names(container, client_class)[client_class]

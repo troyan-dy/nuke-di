@@ -10,11 +10,10 @@ from nuke_di import (
     Dependencies,
     InitializeDependencyError,
     InvalidSignatureError,
-    NotSingletonClient,
 )
 
 
-class InnerDeps(NotSingletonClient):
+class InnerDeps(Client):
     connect: Any = AsyncMock()
     disconnect: Any = AsyncMock()
 
@@ -69,11 +68,11 @@ async def test_connecting() -> None:
             "cli.disconnect": [],
             "new_cli.connect": [call()],
             "new_cli.disconnect": [],
-            "cli.inner.connect": [call(), call()],
+            "cli.inner.connect": [call()],
             "cli.inner.disconnect": [],
         }
 
-        assert cli.inner is not new_cli.inner
+        assert cli.inner is new_cli.inner
 
     # disconnecting
     assert awaits(cli, new_cli) == {
@@ -81,8 +80,8 @@ async def test_connecting() -> None:
         "cli.disconnect": [call()],
         "new_cli.connect": [call()],
         "new_cli.disconnect": [call()],
-        "cli.inner.connect": [call(), call()],
-        "cli.inner.disconnect": [call(), call()],
+        "cli.inner.connect": [call()],
+        "cli.inner.disconnect": [call()],
     }
 
 
@@ -144,7 +143,7 @@ def test_chain_deeper_than_the_recursion_limit() -> None:
     assert [node.client_class for node in dep.graph().nodes] == links
 
 
-ResolvePath: TypeAlias = list[type[NotSingletonClient]]
+ResolvePath: TypeAlias = list[type[Client]]
 
 
 def arrows(path: list[type[Client]]) -> str:

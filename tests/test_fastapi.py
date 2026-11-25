@@ -19,7 +19,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
-from nuke_di import DI, BackgroundTasks, Client, ConnectError, Dependencies, NotSingletonClient, Shutdown
+from nuke_di import DI, BackgroundTasks, Client, ConnectError, Dependencies, Shutdown
 from nuke_di.fastapi import ClientRoute, ClientRouter, setup
 from nuke_di.fastapi.bindings import _FASTAPI
 from nuke_di.integration.testing import check
@@ -70,11 +70,11 @@ class FakeDatabase(Database):
         return "alice"
 
 
-class Session(NotSingletonClient):
-    """A client built for every argument that takes it."""
+class Session(Client):
+    """A client shared by arguments of the same type."""
 
 
-class Pooled(NotSingletonClient):
+class Pooled(Client):
     async def connect(self) -> None:
         events.append("pooled: connected")
 
@@ -164,10 +164,10 @@ async def test_endpoint_stays_callable_directly() -> None:
 
 
 async def two_sessions(first: Session, second: Session, users: UserService) -> bool:
-    return first is not second
+    return first is second
 
 
-def test_not_singleton_client_per_argument() -> None:
+def test_arguments_of_the_same_type_share_a_client() -> None:
     app = make_app(Dependencies())
     app.get("/")(two_sessions)
 

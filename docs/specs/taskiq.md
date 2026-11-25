@@ -29,7 +29,7 @@ async def send_report(user_id: int, users: UserService) -> None:
 
 ## Non-goals
 
-- **Per-task clients**: a `Client` is one per container and a `NotSingletonClient` one per argument (ADR-0006). taskiq's own generator dependencies stay available for what lives as long as one task.
+- **Per-task clients**: a `Client` is one per container (ADR-0006). taskiq's own generator dependencies stay available for what lives as long as one task.
 - **Clients of a dependency class**: taskiq builds a class dependency from its own `__init__`, which `bind()` does not rewrite; one whose `__init__` takes clients is refused with a `TypeError` when its task is registered. Such a class is a client, taken by type hint, or takes clients through a dependency function.
 - **The scheduler process** (`taskiq scheduler`): it fires no worker events and runs no tasks.
 - **A container shared with another integration in one process**: one container connects once. An `InMemoryBroker` started inside a FastAPI app on the same container fails to start with "the container is already connected".

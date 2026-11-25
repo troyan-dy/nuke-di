@@ -12,7 +12,7 @@ from mypy.options import Options
 from mypy.plugin import Plugin
 from mypy.types import Instance, Type, TypeAliasType, get_proper_type
 
-CLIENT = "nuke_di.types.NotSingletonClient"
+CLIENT = "nuke_di.types.Client"
 CONTAINER = "nuke_di.core.Dependencies"
 ENTRYPOINTS = frozenset(("nuke_di.entrypoint.job", "nuke_di.entrypoint.worker"))
 # What `job(hooks=...)` and `worker(hooks=...)` return: the decorator call is a call of its `__call__`

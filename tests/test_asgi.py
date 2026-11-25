@@ -223,7 +223,7 @@ def test_only_clients_are_listed(make: Callable[..., Lifespan], hint: Any) -> No
     with pytest.raises(TypeError) as exc:
         make(Dependencies(), Database, hint)
 
-    assert str(exc.value) == f"{hint!r} is not a client: subclass Client or NotSingletonClient"
+    assert str(exc.value) == f"{hint!r} is not a client: subclass Client"
 
 
 def test_imports_no_framework() -> None:

@@ -76,8 +76,7 @@ The rules:
   in one handler and `users: Billing` in another raise `TypeError` when the app is created. A
   dependency of the same name declared by the app, a router, a controller or a handler wins over
   the client.
-- **Instances.** A `Client` is one instance per container; a `NotSingletonClient` is one instance per
-  argument name.
+- **Instances.** Arguments of the same client class share the container's instance.
 - **Lifespan.** The clients connect before the app's own `lifespan=` and `on_startup=` run, and
   disconnect after its `on_shutdown=` hooks, which Litestar calls last. `Shutdown` and
   `BackgroundTasks` behave as in [FastAPI](fastapi.md).
@@ -135,7 +134,6 @@ the app ([ADR-0004](../adr/0004-litestar-clients-by-name.md)).
 | Set up | `setup(app)` before the routes; routers through `ClientRouter` | `ClientPlugin()` in `plugins=`; any router or controller |
 | Handlers seen | Every route declared after `setup(app)`, on the app or on an included `ClientRouter` or `APIRouter(route_class=ClientRoute)` | The handlers the app is created with; one added later with `app.register()` is not |
 | Argument names | Free: `users: UserService` here and `users: Billing` there | One name, one client in the whole app; two clients under one name raise `TypeError` when the app is created |
-| A `NotSingletonClient` (slated for removal, [ADR-0006](../adr/0006-clients-live-as-long-as-the-container.md)) | One instance per argument | One instance per argument name, shared by every handler that uses the name |
 | What changes in the function | Its `__signature__`; `get_type_hints()` still shows `UserService` | Its `__annotations__`; `get_type_hints(include_extras=True)` shows `Annotated[UserService, Dependency(), SkipValidationMarker()]` |
 | Websockets | `@app.websocket` endpoints | `@websocket` handlers; a websocket listener raises `TypeError` |
 | The app's own lifespan | Runs inside: the clients connect before it and disconnect after it | The clients connect before `lifespan=` and `on_startup=`, disconnect after `on_shutdown=` |

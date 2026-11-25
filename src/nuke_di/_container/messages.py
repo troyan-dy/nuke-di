@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from nuke_di.errors import ConnectError, InitializeDependencyError, InvalidSignatureError
 from nuke_di.logs import CONTAINER_LOGGER, fields
 from nuke_di.naming import display_names, sname
-from nuke_di.types import NotSingletonClient
+from nuke_di.types import Client
 
 if TYPE_CHECKING:
     from nuke_di.core import Dependencies
@@ -27,14 +27,14 @@ def names(container: "Dependencies", *more: type) -> dict[type, str]:
     return display_names({*container.clients, *resolved, *container._resolving, *more})
 
 
-def path(container: "Dependencies", *more: type[NotSingletonClient]) -> str:
+def path(container: "Dependencies", *more: type[Client]) -> str:
     classes = [*container._resolving, *more]
     named = names(container, *classes)
     root = [] if container._injecting is None else [sname(container._injecting)]
     return " -> ".join([*root, *(named[client_class] for client_class in classes)])
 
 
-def path_suffix(container: "Dependencies", *more: type[NotSingletonClient]) -> str:
+def path_suffix(container: "Dependencies", *more: type[Client]) -> str:
     # A root alone is no path: `more` is the client that left `_resolving` before it was built
     if container._injecting is None and not container._resolving:
         return ""
@@ -52,7 +52,7 @@ def hints_error(container: "Dependencies", name: str, exc: NameError) -> Invalid
 
 def signature_error(
     container: "Dependencies",
-    client_class: type[NotSingletonClient],
+    client_class: type[Client],
     name: str,
     reason: str,
 ) -> InvalidSignatureError:
@@ -73,7 +73,7 @@ def state_error(call: str) -> ConnectError:
 
 def init_error(
     container: "Dependencies",
-    client_class: type[NotSingletonClient],
+    client_class: type[Client],
     exc: Exception,
 ) -> InitializeDependencyError:
     """

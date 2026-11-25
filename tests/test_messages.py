@@ -16,7 +16,6 @@ from nuke_di import (
     DependenciesSettings,
     InitializeDependencyError,
     InvalidSignatureError,
-    NotSingletonClient,
 )
 
 
@@ -178,9 +177,7 @@ def test_init_error_of_a_root_has_no_path() -> None:
     ],
 )
 def test_resolve_refuses_what_is_not_a_client(not_a_client: Any, name: str) -> None:
-    with pytest.raises(
-        InvalidSignatureError, match=rf"^{name} is not a client: subclass Client or NotSingletonClient$"
-    ):
+    with pytest.raises(InvalidSignatureError, match=rf"^{name} is not a client: subclass Client$"):
         Dependencies().resolve(not_a_client)
 
 
@@ -217,9 +214,7 @@ async def test_a_non_client_on_a_connected_container_gets_the_state_error() -> N
 def test_mock_and_override_refuse_what_is_not_a_client() -> None:
     deps = Dependencies()
 
-    with pytest.raises(
-        InvalidSignatureError, match=r"^Settings is not a client: subclass Client or NotSingletonClient$"
-    ):
+    with pytest.raises(InvalidSignatureError, match=r"^Settings is not a client: subclass Client$"):
         deps.mock(Settings)  # type: ignore[type-var]
     with pytest.raises(InvalidSignatureError, match=r"^int is not a client"), deps.override(int):  # type: ignore[type-var]
         ...
@@ -291,7 +286,7 @@ async def test_a_nested_class_keeps_its_outer_class() -> None:
 
 
 async def test_a_class_local_to_a_function_drops_the_function() -> None:
-    class Local(NotSingletonClient):
+    class Local(Client):
         """A client local to the test function."""
 
     deps = Dependencies()

@@ -2,61 +2,48 @@
 
 ← [Documentation](../../README.md#documentation)
 
-## Client and NotSingletonClient
+## Client
 
-Every dependency is a subclass of one of two base classes:
-
-| Base class           | Instances                                          |
-|----------------------|----------------------------------------------------|
-| `Client`             | Singleton: one instance per container              |
-| `NotSingletonClient` | A new instance for every consumer that declares it |
+Every dependency subclasses `Client`. A container builds one instance per client class and shares it
+with every consumer.
 
 ```python
-from nuke_di import Client, Dependencies, NotSingletonClient
+from nuke_di import Client, Dependencies
 
 
 class Settings(Client):
     pass
 
 
-class HttpSession(NotSingletonClient):
-    pass
-
-
 class Orders(Client):
-    def __init__(self, settings: Settings, http: HttpSession) -> None:
+    def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.http = http
 
 
 class Payments(Client):
-    def __init__(self, settings: Settings, http: HttpSession) -> None:
+    def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.http = http
 
 
 deps = Dependencies()
 orders = deps.resolve(Orders)
 payments = deps.resolve(Payments)
 
-print(orders.settings is payments.settings)  # one Settings for the whole container
-print(orders.http is payments.http)  # every consumer gets its own HttpSession
-print(deps.resolve(Orders) is orders)  # resolve() is idempotent for a Client
+print(orders.settings is payments.settings)
+print(deps.resolve(Orders) is orders)
 ```
 
 ```text
 True
-False
 True
 ```
 
 A client declares its own dependencies as annotated `__init__` arguments. Only arguments
 annotated with a client type are injected, and resolution is recursive.
 
-A client lives as long as its container. There are no per-request or per-message clients, and none
-are planned ([ADR-0006](../adr/0006-clients-live-as-long-as-the-container.md)): a transaction or anything else that lives for one request is
-opened in the handler through a method of a client. `NotSingletonClient` is still supported, but it
-is slated for removal in a future major version, so do not build new code on it.
+A client lives as long as its container. For state that lives for one request or message, such as a
+transaction, use a client method that opens it in the handler
+([ADR-0006](../adr/0006-clients-live-as-long-as-the-container.md)).
 
 ## connect() and disconnect()
 
@@ -381,12 +368,12 @@ its dependencies. It is a snapshot: `flush()` empties it, apart from the Replace
 |----------------|-------|
 | `name`         | The class name of the client |
 | `client_class` | The class the consumers asked for |
-| `singleton`    | `True` for a `Client`, `False` for a `NotSingletonClient` |
+| `singleton`    | `True` for every client |
 | `replacement`  | The object registered with `mock()` or `override()` in place of `client_class`; `None` for a real client |
 | `dependencies` | The clients of the `__init__` arguments, by argument name |
 
-A `NotSingletonClient` gets one node per instance, all with the same name; `to_mermaid()` numbers
-them from the second one (`Session`, `Session_2`). A Replacement is drawn with a
+When distinct client classes have the same name, `to_mermaid()` gives their nodes unique IDs
+(`Session`, `Session_2`). A Replacement is drawn with a
 dashed border and the name of the object in its place: `Postgres: AsyncMock`. Nodes compare by
 identity, so the `shared: True` above says that `Checkout` and `Payments` got the same `Postgres`.
 
@@ -502,7 +489,7 @@ except InvalidSignatureError as exc:
 ```text
 InvalidSignatureError: Argument "users" of "Profiles.__init__" is UserRepository, which is not a client (resolving Checkout -> Profiles)
 CircularDependencyError: Circular dependency: Orders -> Payments -> Orders
-InvalidSignatureError: UserRepository is not a client: subclass Client or NotSingletonClient
+InvalidSignatureError: UserRepository is not a client: subclass Client
 ```
 
 An argument of `__init__` is filled with a client when its type hint is a client. Any other
@@ -515,7 +502,7 @@ argument needs a default, which is left alone. These fail with `InvalidSignature
 | `Client \| None`                      | `is Postgres \| None, a client cannot be optional` |
 | a client, positional-only (`/`)       | `is positional-only, a client is passed by keyword` |
 
-A class that is not a client at all, asked for with `resolve()`, fails with `UserRepository is not a client: subclass Client or NotSingletonClient` before anything is built.
+A class that is not a client at all, asked for with `resolve()`, fails with `UserRepository is not a client: subclass Client` before anything is built.
 
 Clients that depend on each other in a cycle fail with `CircularDependencyError`, a subclass of
 `InvalidSignatureError`, and a type hint that cannot be evaluated, e.g. a class defined inside a

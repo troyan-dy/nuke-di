@@ -6,10 +6,10 @@ from types import MappingProxyType
 from typing import TypeAlias
 
 from nuke_di.naming import sname
-from nuke_di.types import NotSingletonClient, isclient
+from nuke_di.types import Client
 
 # The class asked for and the client passed, per `__init__` argument of a client
-_Arguments: TypeAlias = Mapping[str, tuple[type[NotSingletonClient], NotSingletonClient]]
+_Arguments: TypeAlias = Mapping[str, tuple[type[Client], Client]]
 # Of a client that takes no client
 _NO_ARGUMENTS: _Arguments = MappingProxyType({})
 
@@ -19,12 +19,12 @@ class Node:
     """
     One client of a Graph: a resolved instance, or a Replacement standing in for a class.
 
-    Nodes compare by identity: a `NotSingletonClient` has one node per instance, all with the same name.
+    Nodes compare by identity.
     """
 
     # The class the consumers asked for; for a Replacement, the class it stands in for
-    client_class: type[NotSingletonClient]
-    # `Client` rather than `NotSingletonClient`
+    client_class: type[Client]
+    # All container clients are singletons.
     singleton: bool
     # The object registered with `mock()` or `override()` in place of `client_class`; None for a real client
     replacement: object | None
@@ -68,7 +68,7 @@ class Graph:
     def _ids(self) -> dict[Node, str]:
         """
         A unique Mermaid id per node: the name, or the name with the first free number from 2 when it is taken,
-        by another instance of the same class or by a class that happens to be called like a numbered one.
+        by another class with the same name or by a class that happens to be called like a numbered one.
         """
         names = {node.name for node in self.nodes}
         taken: set[str] = set()
@@ -81,8 +81,8 @@ class Graph:
 
 
 def snapshot(
-    replacements: Mapping[type[NotSingletonClient], NotSingletonClient],
-    clients: Iterable[NotSingletonClient],
+    replacements: Mapping[type[Client], Client],
+    clients: Iterable[Client],
     dependencies: Mapping[int, _Arguments],
 ) -> Graph:
     """
@@ -101,22 +101,22 @@ def snapshot(
 
 
 def _replaced_nodes(
-    replacements: Mapping[type[NotSingletonClient], NotSingletonClient],
-) -> dict[type[NotSingletonClient], Node]:
+    replacements: Mapping[type[Client], Client],
+) -> dict[type[Client], Node]:
     """
     The node of every Replacement, by the class it stands in for.
     """
     return {
-        client_class: Node(client_class=client_class, singleton=isclient(client_class), replacement=replacement)
+        client_class: Node(client_class=client_class, singleton=True, replacement=replacement)
         for client_class, replacement in replacements.items()
     }
 
 
 def _resolved_node(
-    client: NotSingletonClient,
+    client: Client,
     arguments: _Arguments,
-    replacements: Mapping[type[NotSingletonClient], NotSingletonClient],
-    replaced: Mapping[type[NotSingletonClient], Node],
+    replacements: Mapping[type[Client], Client],
+    replaced: Mapping[type[Client], Node],
     resolved: Mapping[int, Node],
 ) -> Node:
     """
@@ -130,7 +130,7 @@ def _resolved_node(
             edges[key] = resolved[id(dependency)]
     return Node(
         client_class=type(client),
-        singleton=isclient(type(client)),
+        singleton=True,
         replacement=None,
         dependencies=MappingProxyType(edges),
     )

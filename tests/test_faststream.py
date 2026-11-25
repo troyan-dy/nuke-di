@@ -12,7 +12,7 @@ from faststream import Depends, FastStream, TestApp
 from faststream.asgi import AsgiFastStream
 from faststream.nats import NatsBroker, NatsRouter, TestNatsBroker
 
-from nuke_di import DI, BackgroundTasks, Client, Dependencies, NotSingletonClient, Shutdown
+from nuke_di import DI, BackgroundTasks, Client, Dependencies, Shutdown
 from nuke_di.fastapi import setup as fastapi_setup
 from nuke_di.faststream import _FASTSTREAM, setup
 from nuke_di.integration.testing import check
@@ -52,8 +52,8 @@ class FakeDatabase(Database):
         return "alice"
 
 
-class Session(NotSingletonClient):
-    """A client built for every argument that takes it."""
+class Session(Client):
+    """A client shared by arguments of the same type."""
 
 
 class Broken(Client):
@@ -204,7 +204,7 @@ async def sessions(first: Session, second: Session) -> None:
     events.append(f"same session: {same}")
 
 
-async def test_sync_handler_and_not_singleton_clients() -> None:
+async def test_sync_handler_and_shared_clients() -> None:
     app = make_app(Dependencies())
     broker_of(app).subscriber("sync")(sync_greet)
     broker_of(app).subscriber("sessions")(sessions)
@@ -213,7 +213,7 @@ async def test_sync_handler_and_not_singleton_clients() -> None:
         await broker.publish("bob", "sync")
         await broker.publish(None, "sessions")
 
-    assert events == ["sync bob Session", "same session: False"]
+    assert events == ["sync bob Session", "same session: True"]
 
 
 # --- lifecycle -------------------------------------------------------------------------------------------

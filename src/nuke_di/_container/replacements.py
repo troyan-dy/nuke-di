@@ -7,20 +7,20 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 
 from nuke_di._container.messages import names, state_error
 from nuke_di.errors import ConnectError
-from nuke_di.types import NotSingletonClient
+from nuke_di.types import Client
 
 if TYPE_CHECKING:
     from nuke_di.core import Dependencies
 
 # The class a Replacement stands in for, and the Replacement
-_Replacement: TypeAlias = tuple[type[NotSingletonClient], NotSingletonClient]
+_Replacement: TypeAlias = tuple[type[Client], Client]
 
 
 def check_mockable(
     container: "Dependencies",
-    client_class: type[NotSingletonClient],
-    new: NotSingletonClient | None,
-) -> NotSingletonClient | None:
+    client_class: type[Client],
+    new: Client | None,
+) -> Client | None:
     """
     Refuse a `mock()` that would not take effect; the Replacement registered for `client_class` already, if any.
     """
@@ -34,12 +34,12 @@ def check_mockable(
             raise ConnectError(f"{name} already has a replacement")
         return current
     # Consumers resolved before would keep the real client while the caller holds the Replacement
-    if is_resolved(container, client_class):
+    if client_class in container.clients:
         raise ConnectError(f"{name} is already resolved, call mock() before resolve() or inject()")
     return None
 
 
-def check_overridable(container: "Dependencies", client_class: type[NotSingletonClient]) -> str:
+def check_overridable(container: "Dependencies", client_class: type[Client]) -> str:
     """
     Refuse an `override()` block whose exit would drop clients or a Replacement it did not register; the name of
     `client_class`.
@@ -78,21 +78,14 @@ def exit_override(container: "Dependencies", entry: _Replacement, name: str) -> 
 
 def register_replacement(
     container: "Dependencies",
-    client_class: type[NotSingletonClient],
-    replacement: NotSingletonClient,
+    client_class: type[Client],
+    replacement: Client,
 ) -> None:
     container.clients[client_class] = replacement
     container._replacements[client_class] = replacement
 
 
-def is_resolved(container: "Dependencies", client_class: type[NotSingletonClient]) -> bool:
-    # A NotSingletonClient is never cached in `clients`, only its instances are in `connect_clients`. The classes
-    # are compared by identity: a metaclass `__eq__` must not make another class look resolved.
-    classes = map(id, map(type, container.connect_clients))
-    return client_class in container.clients or id(client_class) in classes
-
-
-def autospec(client_class: type[NotSingletonClient]) -> Any:
+def autospec(client_class: type[Client]) -> Any:
     """
     An autospec mock of an instance of `client_class`.
     """

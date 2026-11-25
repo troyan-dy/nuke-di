@@ -15,7 +15,7 @@ from litestar.response.base import ASGIResponse
 from litestar.testing import TestClient
 from litestar.types import Receive, Scope, Send
 
-from nuke_di import DI, BackgroundTasks, Client, Dependencies, NotSingletonClient, Shutdown
+from nuke_di import DI, BackgroundTasks, Client, Dependencies, Shutdown
 from nuke_di.integration.testing import check
 from nuke_di.litestar import ClientPlugin
 from nuke_di.litestar.plugin import _LITESTAR
@@ -78,8 +78,8 @@ class Billing(Client):
     """A second client, for handlers that take two."""
 
 
-class Session(NotSingletonClient):
-    """A client built for every argument that takes it."""
+class Session(Client):
+    """A client shared by arguments of the same type."""
 
 
 class Broken(Client):
@@ -143,11 +143,11 @@ def sessions(first: Session, second: Session) -> bool:
     return first is second
 
 
-def test_sync_handler_and_not_singleton_client_per_argument() -> None:
+def test_sync_handler_arguments_share_a_client() -> None:
     app = make_app(Dependencies(), [sessions])
 
     with TestClient(app) as client:
-        assert client.get("/sessions").json() is False
+        assert client.get("/sessions").json() is True
 
 
 @get("/billing")

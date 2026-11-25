@@ -30,9 +30,9 @@ uv run flake8 src/nuke_di/core.py    # one file
 
 Every merge into `master` is a release. The `Release` workflow publishes the version in
 `pyproject.toml` to PyPI, tags it `vX.Y.Z` and creates a GitHub release from its section of
-`CHANGELOG.md`. A pull request therefore carries its own version: raise it with `uv version --bump
+`CHANGELOG.md`. A pull request into `master` therefore carries its own version: raise it with `uv version --bump
 patch|minor|major` and turn `## [Unreleased]` into `## [X.Y.Z] - YYYY-MM-DD` with a compare link at
-the bottom. CI checks this on every pull request, and `make check-version` checks it locally:
+the bottom. CI checks this on pull requests into `master`, and `make check-version` checks it locally:
 
 ```console
 $ make check-version
@@ -53,3 +53,14 @@ uv run --no-project python scripts/version.py check origin/master
 
 A change that reaches `master` without a new version, e.g. pushed directly, fails the `Release`
 workflow before anything is built or published.
+
+## 3.0 development builds
+
+Each push to `3.0.0` runs **Dev build** in GitHub Actions. Download the wheel and source
+distribution from the run's **Artifacts** section. The run number becomes the suffix in
+`3.0.0.devN`. A rerun keeps that version and gets its own artifact name. To try the wheel
+in a separate virtual environment, pass its downloaded path to `uv pip install`.
+
+Development builds are distributed as GitHub Actions artifacts. The stable `3.0.0` release
+uses the regular release workflow after the branch merges into `master`. Before merging,
+update the 3.0.0 changelog date and compare link for the stable release.

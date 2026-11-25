@@ -431,7 +431,7 @@ INFO:     Finished server process [48646]
 | A client's `connect()` fails | `RuntimeError: nuke-di clients failed to start: Database.connect() raised OSError: connection refused`; the server reports a failed startup and exits, and the container is left flushed |
 | The container is connected already, e.g. by another app | `RuntimeError: nuke-di clients failed to start: the container is already connected` |
 | `lifespan(Database)`, the container left out | `TypeError: lifespan() takes the container first, then the clients, e.g. lifespan(DI, Database); got <class 'app.clients.Database'>` |
-| `lifespan(DI, "Database")`, not a client class | `TypeError: 'Database' is not a client: subclass Client or NotSingletonClient` |
+| `lifespan(DI, "Database")`, not a client class | `TypeError: 'Database' is not a client: subclass Client` |
 
 Under uvicorn, with a `Database` whose `connect()` raises `OSError("connection refused")`:
 

@@ -28,7 +28,7 @@ Keep the apparent simplicity: a dependency is a class with a type-hinted `__init
 
 The library stays pure Python with no runtime dependencies: a Rust or compiled core was measured and is not added until a CPU-bound stage appears (`docs/adr/0010-pure-python-no-compiled-core.md`).
 
-A client lives as long as its container. Per-request or per-message clients are never added (#65, `docs/adr/0006-clients-live-as-long-as-the-container.md`), and `NotSingletonClient` is a workaround slated for removal: new features, integrations and examples do not build on it.
+A client lives as long as its container. Per-request or per-message clients are never added (#65, `docs/adr/0006-clients-live-as-long-as-the-container.md`).
 
 ## Эксперимент с моделями Codex
 

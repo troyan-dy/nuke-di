@@ -57,7 +57,7 @@ a Starlette or Quart app lists them in `clients = nuke_di.asgi.lifespan(DI, ...)
 Do not write what nuke-di rejects:
 - provider or factory functions: wrap a third-party object in a Client that creates it in connect();
 - `bind(Protocol, Impl)`, qualifiers, multibinding: depend on the concrete client, swap it in tests;
-- per-request or per-message clients, new code on `NotSingletonClient`: open per-request state through a method;
+- per-request or per-message clients: open per-request state through a method;
 - retries or waiting loops in `connect()`: let it raise, the orchestrator restarts the process.
 
 Tests replace clients with `DI.mock()` / `DI.override()` before anything is resolved. Check the wiring with

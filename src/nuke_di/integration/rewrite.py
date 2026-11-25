@@ -14,7 +14,7 @@ from nuke_di.core import Dependencies
 from nuke_di.integration.binding import Binding, DependsFramework, client_of
 from nuke_di.integration.hints import _depends, _hint_class, _hints, _signature
 from nuke_di.naming import sname
-from nuke_di.types import NotSingletonClient
+from nuke_di.types import Client
 
 
 def bind(
@@ -110,7 +110,7 @@ class _Rewrite:
             self.reachable.extend(bind(dependency, self.container, self.framework))
         self.arguments.append(argument.replace(annotation=hint))
 
-    def _add_client(self, argument: inspect.Parameter, client: type[NotSingletonClient]) -> None:
+    def _add_client(self, argument: inspect.Parameter, client: type[Client]) -> None:
         binding = Binding(client, self.container, self.framework)
         self.own.append(binding)
         make_getter = self.framework._getter

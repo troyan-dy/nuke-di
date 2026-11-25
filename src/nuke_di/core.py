@@ -26,13 +26,13 @@ from nuke_di._container.replacements import (
 from nuke_di.graph import Graph, snapshot
 from nuke_di.options import DependenciesSettings
 from nuke_di.timings import ClientTiming
-from nuke_di.types import ClientT, NotSingletonClient, isnotsingleton
+from nuke_di.types import Client, ClientT, isclient
 
 ReturnT = TypeVar("ReturnT")
 
 # The class asked for and the client passed, for one `__init__` argument; the class a Replacement stands in for and
 # the Replacement
-_Dependency: TypeAlias = tuple[type[NotSingletonClient], NotSingletonClient]
+_Dependency: TypeAlias = tuple[type[Client], Client]
 
 
 @dataclass(repr=False)
@@ -51,8 +51,8 @@ class Dependencies:  # noqa: WPS214
     connected, or fails after it.
     """
 
-    clients: OrderedDict[type[NotSingletonClient], NotSingletonClient] = field(default_factory=OrderedDict)
-    connect_clients: list[NotSingletonClient] = field(default_factory=list)
+    clients: OrderedDict[type[Client], Client] = field(default_factory=OrderedDict)
+    connect_clients: list[Client] = field(default_factory=list)
     settings: DependenciesSettings = field(default_factory=DependenciesSettings)
     connected: bool = field(default=False, init=False)
     # One entry per client of the last connect(), in resolution order: a client after its dependencies; kept after
@@ -65,14 +65,14 @@ class Dependencies:  # noqa: WPS214
     # class tells a Replacement apart from the clients it stands in for.
     _dependencies: dict[int, dict[str, _Dependency]] = field(default_factory=dict, init=False)
     # Replacements registered by `mock()` and `override()`, a subset of `clients`
-    _replacements: dict[type[NotSingletonClient], NotSingletonClient] = field(default_factory=dict, init=False)
+    _replacements: dict[type[Client], Client] = field(default_factory=dict, init=False)
     # Replacements of the open `override()` blocks, outermost first; `flush()` keeps them
     _overrides: list[_Dependency] = field(default_factory=list, init=False)
     # Clients being resolved right now, the open frames of `resolve_tree()`, outermost first: finds cycles and names
     # the path in errors
-    _resolving: list[type[NotSingletonClient]] = field(default_factory=list, init=False)
+    _resolving: list[type[Client]] = field(default_factory=list, init=False)
     # The same classes, for the cycle check: the list would be scanned once per client, as long as the depth
-    _resolving_set: set[type[NotSingletonClient]] = field(default_factory=set, init=False)
+    _resolving_set: set[type[Client]] = field(default_factory=set, init=False)
     # The function `inject()` is resolving for, named first in the path but never part of a cycle
     _injecting: Callable[..., Any] | None = field(default=None, init=False)
     # Serializes the methods that build or drop clients across threads; reentrant, a client's `__init__` may resolve
@@ -136,7 +136,7 @@ class Dependencies:  # noqa: WPS214
         # AttributeError on `connect`; a type checker sees the bound, `Any` and `# type: ignore` do not. Checked
         # after the lookup, which never finds a non-client since mock() refuses one too: the check costs about
         # 60 ns, a warm hit must not pay it
-        if not isnotsingleton(client_class):
+        if not isclient(client_class):
             raise not_a_client(client_class)
 
         with self._lock:
@@ -177,7 +177,7 @@ class Dependencies:  # noqa: WPS214
         """
         Register a Replacement for `client_class`, an autospec mock by default; `flush()` drops it.
         """
-        if not isnotsingleton(client_class):
+        if not isclient(client_class):
             raise not_a_client(client_class)
         with self._lock:
             current = check_mockable(self, client_class, new)

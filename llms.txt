@@ -3,7 +3,8 @@
 > The simplest dependency injection for async Python projects.
 
 Before writing code with nuke-di, know what it deliberately lacks. A dependency is a `Client` subclass with a
-type-hinted `__init__` and async `connect()` / `disconnect()`; the type hint is the only registration. There are no
+type-hinted `__init__` and async `connect()` / `disconnect()`. The type hint is the only registration, and all
+consumers of a client class in a container share one instance. There are no
 provider or factory functions (ADR-0005), no binding of a Protocol to an implementation, qualifiers or multibinding
 (ADR-0008), no per-request or per-message scopes (ADR-0006) and no retries in `connect()` (ADR-0009): the
 recipes in the guide reach the same results with plain clients, `mock()` and `override()`.
@@ -11,7 +12,7 @@ recipes in the guide reach the same results with plain clients, `mock()` and `ov
 ## Docs
 
 - [README](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/README.md): the pitch, the Quick start, the principles and two examples
-- [Clients](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/clients.md): `Client` and `NotSingletonClient`, the lifecycle, dataclass clients, connect order, startup timings, the dependency graph, connect and resolution errors
+- [Clients](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/clients.md): `Client`, the lifecycle, dataclass clients, connect order, startup timings, the dependency graph, connect and resolution errors
 - [The container](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/container.md): `Dependencies` and the global `DI`, `resolve()`, `inject()`, `mock()`, `override()`
 - [Workers and jobs](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/workers-and-jobs.md): `@job` and `@worker`, command-line parameters, `Shutdown`, the grace period, background tasks, exit codes, hooks, Kubernetes
 - [FastAPI](https://raw.githubusercontent.com/troyan-dy/nuke-di/master/docs/guide/fastapi.md)

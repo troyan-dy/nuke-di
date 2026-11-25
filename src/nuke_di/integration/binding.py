@@ -10,7 +10,7 @@ from typing import Annotated, Any, cast, get_args, get_origin
 
 from nuke_di.core import Dependencies
 from nuke_di.naming import sname
-from nuke_di.types import NotSingletonClient, isnotsingleton
+from nuke_di.types import Client, isclient
 
 
 @dataclass(frozen=True, eq=False)
@@ -49,14 +49,14 @@ class Binding:
     A client argument of one function, filled with the instance resolved on startup.
     """
 
-    def __init__(self, client_class: type[NotSingletonClient], container: Dependencies, framework: Framework) -> None:
+    def __init__(self, client_class: type[Client], container: Dependencies, framework: Framework) -> None:
         self.client_class = client_class
         # The container that resolves it, or would: it tells "not started" from "not connected"
         self.container = weakref.ref(container)
         self.framework = framework
-        self.instance: NotSingletonClient | None = None
+        self.instance: Client | None = None
 
-    def require(self) -> NotSingletonClient:
+    def require(self) -> Client:
         """
         The instance resolved on startup; without one, the framework's "not started" or "not connected" error.
         """
@@ -69,7 +69,7 @@ class Binding:
             raise RuntimeError(self.framework.not_started.format(client=sname(self.client_class)))
         raise RuntimeError(self.framework.not_connected.format(client=sname(self.client_class)))
 
-    async def get(self) -> NotSingletonClient:
+    async def get(self) -> Client:
         """
         `require()` as the framework calls it: with no arguments and `async`, so inline rather than in a threadpool.
         """
@@ -83,16 +83,16 @@ def unique(bindings: Iterable[Binding]) -> list[Binding]:
     return list({id(binding): binding for binding in bindings}.values())
 
 
-def client_of(hint: Any, *markers: type) -> type[NotSingletonClient] | None:
+def client_of(hint: Any, *markers: type) -> type[Client] | None:
     """
     The client a type hint asks for: `Client`, or `Annotated[Client, ...]` without any of `markers`.
     """
-    if isnotsingleton(hint):
-        return cast(type[NotSingletonClient], hint)
+    if isclient(hint):
+        return cast(type[Client], hint)
     if get_origin(hint) is not Annotated:
         return None
     inner, *metadata = get_args(hint)
-    if not isnotsingleton(inner):
+    if not isclient(inner):
         return None
     marked = any(isinstance(extra, markers) for extra in metadata)
-    return None if marked else cast(type[NotSingletonClient], inner)
+    return None if marked else cast(type[Client], inner)

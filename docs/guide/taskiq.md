@@ -188,8 +188,7 @@ The rules:
   orchestrator never sees a crash and the dead dependency is tried again every second. Run the worker with
   `--max-fails 1`: it then exits with code 255, and the orchestrator restarts it with its own backoff, as
   `connect()` is fail-fast in nuke-di.
-- **Instances.** As with `inject()`, a `Client` is one instance per container, and a `NotSingletonClient` is
-  one instance per argument that declares it, not one per task.
+- **Instances.** As with `inject()`, arguments of the same client class share the container's instance.
 - **The function stays a function.** Its signature shows `Annotated[UserService, TaskiqDepends(...)]` to
   taskiq, as in [FastAPI](fastapi.md); `await send_report(1, users)` calls it with clients passed by hand.
   A function that takes clients serves either taskiq or FastAPI: one bound to FastAPI is refused with a

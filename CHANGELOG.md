@@ -6,6 +6,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-11-25
+
+### Removed
+
+- Remove `NotSingletonClient`. A container shares one instance of each `Client` class across all consumers.
+  Use a method on a client to create fresh state for an operation.
+
 ## [2.0.4] - 2026-11-25
 
 The library is unchanged.
@@ -964,7 +971,8 @@ First public release, extracted from the `nuke.di` package of the nuke framework
   `logging` module under the `nuke_di` logger.
 - Clients no longer get a per-class `_logger` attribute.
 
-[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v2.0.4...HEAD
+[Unreleased]: https://github.com/troyan-dy/nuke-di/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/troyan-dy/nuke-di/compare/v2.0.4...v3.0.0
 [2.0.4]: https://github.com/troyan-dy/nuke-di/compare/v2.0.3...v2.0.4
 [2.0.3]: https://github.com/troyan-dy/nuke-di/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/troyan-dy/nuke-di/compare/v2.0.1...v2.0.2

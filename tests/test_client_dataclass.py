@@ -2,7 +2,7 @@ from dataclasses import FrozenInstanceError, is_dataclass
 
 import pytest
 
-from nuke_di import Client, Dependencies, NotSingletonClient, client_dataclass
+from nuke_di import Client, Dependencies, client_dataclass
 
 
 @client_dataclass
@@ -14,14 +14,9 @@ class Singleton(Client):
     """A client the container builds once."""
 
 
-class Fresh(NotSingletonClient):
-    """A client the container builds for every argument that takes it."""
-
-
 @client_dataclass(frozen=True)
 class MyClient(Client):
     singleton: Singleton
-    fresh: Fresh
     plain: Plain
 
     def plain_client(self) -> Plain:
@@ -29,9 +24,6 @@ class MyClient(Client):
 
     def singleton_client(self) -> Singleton:
         return self.singleton
-
-    def fresh_client(self) -> Fresh:
-        return self.fresh
 
 
 @pytest.fixture
@@ -42,7 +34,6 @@ def my_client() -> MyClient:
 
 def test_methods(my_client: MyClient) -> None:
     assert my_client.singleton_client().__class__ is Singleton
-    assert my_client.fresh_client().__class__ is Fresh
     assert my_client.plain_client().__class__ is Plain
 
 
@@ -52,7 +43,6 @@ def test_is_dataclass(my_client: MyClient) -> None:
 
 def test_dataclass_init(my_client: MyClient) -> None:
     assert my_client.singleton.__class__ is Singleton
-    assert my_client.fresh.__class__ is Fresh
     assert my_client.plain.__class__ is Plain
 
 

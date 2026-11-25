@@ -7,7 +7,7 @@ from nuke_di._converters import converter, help_text, strip_annotated, strip_opt
 from nuke_di.errors import InvalidSignatureError, UsageError
 from nuke_di.naming import sname
 from nuke_di.options import Option
-from nuke_di.types import isnotsingleton
+from nuke_di.types import isclient
 
 
 class HelpRequested(Exception):  # noqa: N818 - not an error, argparse already printed the help
@@ -97,7 +97,7 @@ def _parameter(
         raise _signature_error(func, argument, "has no type hint")
 
     hint, option = strip_annotated(hints[argument.name], None)
-    if isnotsingleton(hint):
+    if isclient(hint):
         if option is not None:
             raise _signature_error(func, argument, "is a client and cannot have an Option")
         return None

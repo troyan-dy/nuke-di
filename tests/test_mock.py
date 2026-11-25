@@ -4,7 +4,7 @@ from unittest.mock import NonCallableMock, call
 
 import pytest
 
-from nuke_di import DI, Client, ConnectError, Dependencies, NotSingletonClient
+from nuke_di import DI, Client, ConnectError, Dependencies
 
 
 class InnerDeps(Client):
@@ -79,29 +79,12 @@ async def test_mock_keeps_async_methods_awaitable() -> None:
     mocked.add.assert_awaited_once_with(1, 2)
 
 
-class Session(NotSingletonClient):
-    """The not-singleton client `UsesSession` depends on."""
-
-
-class UsesSession(Client):
-    def __init__(self, session: Session):
-        self.session = session
-
-
 def test_mock_after_resolve_raises() -> None:
     dep = Dependencies()
     dep.resolve(PublicClient)
 
     with pytest.raises(ConnectError, match=r"InnerDeps is already resolved, call mock\(\) before resolve\(\)"):
         dep.mock(InnerDeps)
-
-
-def test_mock_not_singleton_after_resolve_raises() -> None:
-    dep = Dependencies()
-    dep.resolve(UsesSession)
-
-    with pytest.raises(ConnectError, match="Session is already resolved"):
-        dep.mock(Session)
 
 
 class _EqualClasses(type):
@@ -113,11 +96,11 @@ class _EqualClasses(type):
     __hash__ = type.__hash__
 
 
-class _Resolved(NotSingletonClient, metaclass=_EqualClasses):
+class _Resolved(Client, metaclass=_EqualClasses):
     """A client resolved before the mock."""
 
 
-class _NotResolved(NotSingletonClient, metaclass=_EqualClasses):
+class _NotResolved(Client, metaclass=_EqualClasses):
     """A client equal to `_Resolved` by its metaclass, never resolved."""
 
 

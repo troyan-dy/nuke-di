@@ -12,22 +12,22 @@ from typing import TYPE_CHECKING, Any, Final, Literal, TypeAlias
 
 from nuke_di.options import DependenciesSettings
 from nuke_di.timings import ClientTiming, Outcome
-from nuke_di.types import NotSingletonClient
+from nuke_di.types import Client
 
 if TYPE_CHECKING:
     from nuke_di.core import Dependencies
 
 Limiter: TypeAlias = asyncio.Semaphore | contextlib.nullcontext[None]
 # The step of one client, run once the clients it waits for are done
-_Step: TypeAlias = Callable[[NotSingletonClient], Coroutine[Any, Any, None]]
+_Step: TypeAlias = Callable[[Client], Coroutine[Any, Any, None]]
 # The class asked for and the client passed, for one `__init__` argument of a client
-_Dependency: TypeAlias = tuple[type[NotSingletonClient], NotSingletonClient]
+_Dependency: TypeAlias = tuple[type[Client], Client]
 # The arguments of a client that takes no client
 _NO_ARGUMENTS: Final[Mapping[str, _Dependency]] = MappingProxyType({})
 
 
 async def in_dependency_order(
-    clients: list[NotSingletonClient],
+    clients: list[Client],
     waits_for: dict[int, list[int]],
     step: _Step,
 ) -> None:
@@ -46,7 +46,7 @@ async def in_dependency_order(
 
 
 async def _step_when_ready(
-    client: NotSingletonClient,
+    client: Client,
     step: _Step,
     waits_for: dict[int, list[int]],
     done: dict[int, asyncio.Event],
@@ -59,7 +59,7 @@ async def _step_when_ready(
     done[key].set()
 
 
-def dependencies_among(container: "Dependencies", clients: list[NotSingletonClient]) -> dict[int, list[int]]:
+def dependencies_among(container: "Dependencies", clients: list[Client]) -> dict[int, list[int]]:
     """
     The dependencies of every client of `clients` that are among `clients`, by `id()`: a Replacement is never
     connected, so nothing waits for it.

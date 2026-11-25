@@ -58,7 +58,7 @@ Exported from `nuke_di`.
 
 - `*args` / `**kwargs` are skipped.
 - An argument without a type hint raises `InvalidSignatureError`, as `inject()` already does.
-- A client (a subclass of `NotSingletonClient`, possibly inside `Annotated`) is resolved by the container as before.
+- A client (a subclass of `Client`, possibly inside `Annotated`) is resolved by the container as before.
 - Anything else is a Parameter. A positional-only Parameter raises `InvalidSignatureError`, because Parameters are passed as keyword arguments.
 
 ### `Option`

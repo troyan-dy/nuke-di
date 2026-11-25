@@ -14,7 +14,7 @@ from nuke_di.graph import Graph, Node
 from nuke_di.options import DependenciesSettings, Option
 from nuke_di.run import Run, RunHook
 from nuke_di.timings import ClientTiming
-from nuke_di.types import Client, NotSingletonClient
+from nuke_di.types import Client
 
 __all__ = (
     "DI",
@@ -30,7 +30,6 @@ __all__ = (
     "InitializeDependencyError",
     "InvalidSignatureError",
     "Node",
-    "NotSingletonClient",
     "Option",
     "Run",
     "RunHook",

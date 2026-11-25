@@ -72,8 +72,7 @@ The rules:
   the brokers start; they disconnect after the brokers stop and after the `after_shutdown=` hooks.
   `Shutdown` and `BackgroundTasks` behave as in [FastAPI](fastapi.md). `setup()` works on an
   `AsgiFastStream` too.
-- **Instances.** As with `inject()`, a `Client` is one instance per container, and a
-  `NotSingletonClient` is one instance per argument that declares it, not one per message.
+- **Instances.** As with `inject()`, arguments of the same client class share the container's instance.
 - **The function stays a function.** Its signature shows `Annotated[UserService, Depends(...)]` to
   FastStream, as in [FastAPI](fastapi.md).
 - **One app at a time.** A subscriber function and its dependencies are rewritten once, whatever the

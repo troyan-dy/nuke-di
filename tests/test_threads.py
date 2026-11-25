@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from nuke_di import Client, ConnectError, Dependencies, NotSingletonClient
+from nuke_di import Client, ConnectError, Dependencies
 from tests.sequences import repeated
 
 THREADS = 8
@@ -48,7 +48,7 @@ class ConsumerB(Client):
         self.shared = shared
 
 
-class PerConsumer(NotSingletonClient):
+class ConsumerC(Client):
     def __init__(self, shared: Shared) -> None:
         self.shared = shared
 
@@ -102,7 +102,7 @@ def test_threads_resolving_different_trees_see_no_false_cycle() -> None:
     targets = [
         lambda: deps.resolve(ConsumerA),
         lambda: deps.resolve(ConsumerB),
-        lambda: deps.resolve(PerConsumer),
+        lambda: deps.resolve(ConsumerC),
     ]
     outcomes = run_threads(repeated(targets, THREADS))
 
@@ -118,7 +118,7 @@ def test_threads_injecting_share_the_instance() -> None:
     def handler_a(consumer: ConsumerA) -> ConsumerA:
         return consumer
 
-    def handler_b(consumer: ConsumerB, per_consumer: PerConsumer) -> ConsumerB:
+    def handler_b(consumer: ConsumerB, other: ConsumerC) -> ConsumerB:
         return consumer
 
     targets = [

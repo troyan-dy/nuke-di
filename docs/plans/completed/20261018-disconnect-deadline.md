@@ -177,7 +177,7 @@
 - Setting: `DependenciesSettings.disconnect_deadline: float`, env `DISCONNECT_DEADLINE_SECONDS`, default `20.0`,
   `>= 0`; `0` skips every client, `inf` disables the bound.
 - Flow of `_disconnect_clients(clients)`:
-  1. `deadline = loop.time() + settings.disconnect_deadline`, `skipped: list[NotSingletonClient] = []`
+  1. `deadline = loop.time() + settings.disconnect_deadline`, `skipped: list[Client] = []`
   2. `_in_dependency_order(clients, consumers, partial(_disconnect_client, limiter=..., disconnected=..., total=...,
      deadline=deadline, skipped=skipped))`
   3. per client, after the limiter slot: `remaining = deadline - loop.time()`; `remaining <= 0` → append to `skipped`,

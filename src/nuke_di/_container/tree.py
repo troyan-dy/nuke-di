@@ -11,7 +11,7 @@ from nuke_di._container.signatures import client_arguments
 from nuke_di.errors import CircularDependencyError
 from nuke_di.logs import CONTAINER_LOGGER, fields
 from nuke_di.naming import qualname
-from nuke_di.types import NotSingletonClient, isclient
+from nuke_di.types import Client
 
 if TYPE_CHECKING:
     from nuke_di.core import Dependencies
@@ -19,15 +19,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(CONTAINER_LOGGER)
 
 # An argument of an `__init__` and the class it asks for
-_ClientArgument: TypeAlias = tuple[str, type[NotSingletonClient]]
+_ClientArgument: TypeAlias = tuple[str, type[Client]]
 # A client waiting for a dependency in `resolve_tree()`: its class, the arguments of its `__init__` to fill with
 # clients, the clients found so far, the arguments left (an iterator: the index of the next one) and the argument the
 # dependency fills. A plain tuple, for speed: on 3.14 a NamedTuple cost a chain 10-13% per client and methods that
 # open and close a frame 8-10%, measured.
 Frame: TypeAlias = tuple[
-    type[NotSingletonClient],
-    dict[str, type[NotSingletonClient]],
-    dict[str, NotSingletonClient],
+    type[Client],
+    dict[str, type[Client]],
+    dict[str, Client],
     Iterator[_ClientArgument],
     str,
 ]
@@ -35,7 +35,7 @@ Frame: TypeAlias = tuple[
 NO_ARGUMENTS: Iterator[_ClientArgument] = iter(())
 
 
-def resolve_tree(container: "Dependencies", client_class: type[NotSingletonClient]) -> NotSingletonClient:
+def resolve_tree(container: "Dependencies", client_class: type[Client]) -> Client:
     """
     Build `client_class` and its dependencies, each before its consumer, on a stack of frames instead of the call
     stack.
@@ -58,7 +58,7 @@ def resolve_tree(container: "Dependencies", client_class: type[NotSingletonClien
         resolving.append(client_class)
         resolving_set.add(client_class)
         arguments = client_arguments(container, client_class)
-        init: dict[str, NotSingletonClient] = {}
+        init: dict[str, Client] = {}
         # Most clients of a tree take no client, and share one exhausted cursor
         pending = iter(arguments.items()) if arguments else NO_ARGUMENTS
 
@@ -89,8 +89,7 @@ def resolve_tree(container: "Dependencies", client_class: type[NotSingletonClien
                 container.connect_clients.append(inst)
                 # Published last: the lock-free lookup of resolve() hands out a singleton that the container
                 # accounts for
-                if isclient(client_class):
-                    container.clients[client_class] = inst
+                container.clients[client_class] = inst
 
                 if not waiting:
                     return inst

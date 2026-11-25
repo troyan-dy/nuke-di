@@ -12,7 +12,7 @@ from nuke_di._container.signatures import client_hints
 from nuke_di._container.tree import resolve_tree
 from nuke_di.logs import CONTAINER_LOGGER, fields
 from nuke_di.naming import sname
-from nuke_di.types import ClientT, NotSingletonClient, isnotsingleton
+from nuke_di.types import Client, ClientT, isclient
 
 if TYPE_CHECKING:
     from nuke_di.core import Dependencies
@@ -57,10 +57,10 @@ def inject_function(container: "Dependencies", func: Callable[..., ReturnT]) -> 
     # A client may inject() on its own while this one resolves, so the outer root is restored after it
     outer = container._injecting
     container._injecting = func
-    signature: dict[str, NotSingletonClient] = {}
+    signature: dict[str, Client] = {}
     try:
         for key, hint in hints.items():
-            if isnotsingleton(hint):
+            if isclient(hint):
                 # `inject()` holds the lock for the whole signature
                 signature[key] = resolve_locked(container, hint)
     except BaseException:

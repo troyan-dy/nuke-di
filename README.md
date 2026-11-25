@@ -384,7 +384,7 @@ Routers, websockets and the app's own lifespan are covered in [FastAPI](https://
 
 ## Documentation
 
-- [Clients](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md): `Client` and `NotSingletonClient`, the lifecycle, dataclass clients,
+- [Clients](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/clients.md): `Client`, the lifecycle, dataclass clients,
   connect order, startup timings, the dependency graph, connect and resolution errors
 - [The container](https://github.com/troyan-dy/nuke-di/blob/master/docs/guide/container.md): `Dependencies` and the global `DI`, `resolve()`, `inject()`,
   `mock()`, `override()`

@@ -27,7 +27,7 @@ CLIENTS = """
 from collections.abc import Callable
 from typing import Any, Generic, Literal, Protocol, TypeVar
 
-from nuke_di import Client, NotSingletonClient, client_dataclass
+from nuke_di import Client, client_dataclass
 
 T = TypeVar("T")
 
@@ -159,7 +159,7 @@ class Fine(Client):
         self.db, self.inner = db, inner
 
 
-class Fresh(NotSingletonClient):
+class Fresh(Client):
     def __init__(self, db: Database) -> None:
         self.db = db
 

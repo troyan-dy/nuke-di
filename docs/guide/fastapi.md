@@ -126,8 +126,7 @@ The rules:
   apps on two containers serve the same functions at once, e.g. in tests. An app mounted into a set-up app,
   or one that serves its routes, e.g. through `include_router(api.router)`, which runs `api`'s lifespan,
   gets the clients that app started.
-- **Instances.** As with `inject()`, a `Client` is one instance per container, and a
-  `NotSingletonClient` is one instance per argument that declares it, not one per request.
+- **Instances.** As with `inject()`, arguments of the same client class share the container's instance.
 - **Lifespan.** The app's own `lifespan=` runs inside: its startup code sees connected clients, and
   its shutdown code runs before they disconnect. On shutdown `Shutdown` is set and
   `BackgroundTasks` are stopped, if the app uses them, before the clients disconnect, as in a
