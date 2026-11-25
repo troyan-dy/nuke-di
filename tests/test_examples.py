@@ -56,15 +56,12 @@ def inherited(name: str) -> bool:
     return not name.startswith("COV_CORE_") and name not in CONFIGURATION
 
 
-def nats_is_running() -> bool:
+@pytest.fixture(scope="module")
+def nats_available() -> None:
     try:
         socket.create_connection(("localhost", 4222), timeout=0.5).close()
     except OSError:
-        return False
-    return True
-
-
-needs_nats = pytest.mark.skipif(not nats_is_running(), reason="no NATS server on localhost:4222")
+        pytest.skip("no NATS server on localhost:4222")
 
 
 def test_every_example_has_a_readme() -> None:
@@ -294,7 +291,7 @@ def test_service_layout_worker(tmp_path: Path) -> None:
     assert "outbox: stopped" in relay.output
 
 
-@needs_nats
+@pytest.mark.usefixtures("nats_available")
 @pytest.mark.skipif(sys.platform == "win32", reason="the subprocess uses POSIX signal delivery")
 def test_nats_worker() -> None:
     with running("nats_worker.worker") as worker:
@@ -308,7 +305,7 @@ def test_nats_worker() -> None:
     assert "worker: stopped" in worker.output
 
 
-@needs_nats
+@pytest.mark.usefixtures("nats_available")
 @pytest.mark.skipif(sys.platform == "win32", reason="the subprocess uses POSIX signal delivery")
 def test_faststream_nats() -> None:
     with running("faststream_nats.app") as app:
