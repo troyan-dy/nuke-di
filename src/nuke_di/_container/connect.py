@@ -75,22 +75,18 @@ class Connect:
             # leaves a client that this connect() does not see
             container.connected = True
             clients = list(container.connect_clients)
-        self._start_timings(clients)
+        self._timings = _start_timings(container, clients)
         self._total = len(clients)
-        started = time.perf_counter()
+        task = asyncio.current_task()
+        prior_cancels = 0 if task is None else task.cancelling()
 
         try:
-            # A client connects once its dependencies have; the first failure cancels every client still connecting
-            # and every client still waiting
-            await in_dependency_order(clients, dependencies_among(container, clients), self.client)
-
+            return await self._connect(clients, prior_cancels)
         except BaseException as exc:
-            await self._rollback()
+            await self._rollback(exc, task, prior_cancels)
             error = _reported_error(exc)
             if error is None:
                 raise
-        else:
-            return time.perf_counter() - started
 
         # Keep the client's exception chain without the task group's wrapper.
         raise error
@@ -131,20 +127,35 @@ class Connect:
                 extra=client_fields(timing, timing.connect),
             )
 
-    def _start_timings(self, clients: list[NotSingletonClient]) -> None:
-        """
-        Give the container a timing per client of this connect(), in connect order.
-        """
-        # Computed once: the timings, the logs and the errors of this connect() all name a client the same way
-        named = names(self._container)
-        for client in clients:
-            self._timings[id(client)] = ClientTiming(named[type(client)])
-        self._container._timings = self._timings
-        self._container.timings = list(self._timings.values())
+    async def _connect(self, clients: list[NotSingletonClient], prior_cancels: int) -> float:
+        # Deliver a pending cancellation before starting clients. An already handled request only leaves a count.
+        if prior_cancels:
+            await asyncio.sleep(0)
+        started = time.perf_counter()
+        # A client connects once its dependencies have. The first failure cancels clients still connecting or waiting.
+        await in_dependency_order(clients, dependencies_among(self._container, clients), self.client)
+        return time.perf_counter() - started
 
-    async def _rollback(self) -> None:
+    async def _rollback(
+        self,
+        error: BaseException,
+        task: asyncio.Task[object] | None,
+        prior_cancels: int,
+    ) -> None:
+        cancellation = None
+        if isinstance(error, BaseExceptionGroup) and task is not None and task.cancelling():
+            # TaskGroup can reissue cancellation when it raises a group. Take it before disconnecting so a
+            # request from startup cannot stop the rollback at its first await.
+            try:
+                await asyncio.sleep(0)
+            except asyncio.CancelledError as exc:
+                cancellation = exc
         logger.debug("Connect failed, disconnecting %d connected clients", len(self._connected), extra=fields())
         await Disconnect(self._container, self._connected).run()
+        if cancellation is not None and task is not None and task.cancelling() > prior_cancels:
+            # Report the failure first, then deliver the new cancellation on the caller's next await.
+            task.uncancel()
+            task.cancel(*cancellation.args)
 
     def _timeout_failure(self, timing: ClientTiming, exc: TimeoutError) -> ClientConnectError:
         """
@@ -179,6 +190,17 @@ class Connect:
         error = ConnectError(raised)
         error.__cause__ = exc
         return ClientConnectError(error)
+
+
+def _start_timings(container: "Dependencies", clients: list[NotSingletonClient]) -> dict[int, ClientTiming]:
+    # Computed once: the timings, the logs and the errors of this connect() all name a client the same way
+    named = names(container)
+    timings = {}
+    for client in clients:
+        timings[id(client)] = ClientTiming(named[type(client)])
+    container._timings = timings
+    container.timings = list(timings.values())
+    return timings
 
 
 def _reported_error(exc: BaseException) -> BaseException | None:

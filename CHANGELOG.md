@@ -12,6 +12,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 - Roll back a failed `connect()` when a client raises a `BaseException`. The container disconnects clients that
   already connected and clears its state before reporting the failure.
+- Keep startup cancellation from interrupting the rollback of a failed `connect()`. A new cancellation during
+  rollback can still interrupt it.
 
 ## [2.0.2] - 2026-11-25
 
