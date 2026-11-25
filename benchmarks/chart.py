@@ -1,7 +1,7 @@
 """
 The comparison chart of docs/benchmarks.md from the JSON of benchmarks/compare.py.
 
-    uv run python benchmarks/chart.py [JSON] [PNG]
+    uv run --group compare python benchmarks/chart.py [JSON] [PNG]
 
 One panel per figure of the summary (a cold start, a cached root, a FastAPI request), the libraries
 sorted from the fastest, nuke-di in color and the others in gray; lower is better. A panel is drawn by

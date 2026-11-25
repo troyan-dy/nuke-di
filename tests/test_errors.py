@@ -11,9 +11,6 @@ from nuke_di import (
     InitializeDependencyError,
 )
 
-# The seconds an environment variable gives in the tests of the settings
-FROM_ENV = "2.5"
-
 
 class SlowClient(Client):
     async def connect(self) -> None:
@@ -100,19 +97,6 @@ async def test_connected_state_guards() -> None:
             dep.mock(TrackedClient)
 
 
-def test_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CONNECT_TIMEOUT_SECONDS", "5")
-
-    assert DependenciesSettings().connect_timeout == 5
-    assert Dependencies().settings is None
-
-
-def test_settings_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("CONNECT_TIMEOUT_SECONDS", raising=False)
-
-    assert DependenciesSettings().connect_timeout == 30
-
-
 class HangingDisconnectClient(Client):
     async def disconnect(self) -> None:
         await asyncio.sleep(10)
@@ -131,56 +115,42 @@ async def test_disconnect_timeout(caplog: pytest.LogCaptureFixture) -> None:
     assert "HangingDisconnectClient did not disconnect within 0.01s (DISCONNECT_TIMEOUT_SECONDS)" in caplog.text
 
 
-def test_disconnect_timeout_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DISCONNECT_TIMEOUT_SECONDS", FROM_ENV)
+@pytest.mark.parametrize(
+    ("field", "raw", "expected"),
+    [
+        ("connect_timeout", "5", 5),
+        ("disconnect_timeout", "2.5", 2.5),
+        ("disconnect_deadline", "2.5", 2.5),
+        ("disconnect_deadline", "inf", float("inf")),
+    ],
+)
+def test_settings_from_env(monkeypatch: pytest.MonkeyPatch, field: str, raw: str, expected: float) -> None:
+    monkeypatch.setenv(f"{field.upper()}_SECONDS", raw)
 
-    assert DependenciesSettings().disconnect_timeout == float(FROM_ENV)
-
-
-def test_disconnect_timeout_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("DISCONNECT_TIMEOUT_SECONDS", raising=False)
-
-    assert DependenciesSettings().disconnect_timeout == 10
-
-
-def test_negative_disconnect_timeout() -> None:
-    with pytest.raises(ValueError, match="disconnect_timeout"):
-        DependenciesSettings(disconnect_timeout=-1)
+    assert getattr(DependenciesSettings(), field) == expected
 
 
-def test_disconnect_deadline_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DISCONNECT_DEADLINE_SECONDS", FROM_ENV)
+@pytest.mark.parametrize(
+    ("field", "expected"), [("connect_timeout", 30), ("disconnect_timeout", 10), ("disconnect_deadline", 20)]
+)
+def test_settings_default(monkeypatch: pytest.MonkeyPatch, field: str, expected: float) -> None:
+    monkeypatch.delenv(f"{field.upper()}_SECONDS", raising=False)
 
-    assert DependenciesSettings().disconnect_deadline == float(FROM_ENV)
-
-
-def test_disconnect_deadline_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("DISCONNECT_DEADLINE_SECONDS", raising=False)
-
-    assert DependenciesSettings().disconnect_deadline == 20
+    assert getattr(DependenciesSettings(), field) == expected
 
 
-def test_negative_disconnect_deadline() -> None:
-    with pytest.raises(ValueError, match="disconnect_deadline"):
-        DependenciesSettings(disconnect_deadline=-1)
+@pytest.mark.parametrize("field", ["disconnect_timeout", "disconnect_deadline"])
+@pytest.mark.parametrize("invalid", [-1, float("nan")])
+def test_settings_reject_invalid_value(field: str, invalid: float) -> None:
+    with pytest.raises(ValueError, match=field):
+        DependenciesSettings(**{field: invalid})
 
 
 def test_zero_disconnect_deadline() -> None:
     assert DependenciesSettings(disconnect_deadline=0).disconnect_deadline == 0
 
 
-def test_infinite_disconnect_deadline_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DISCONNECT_DEADLINE_SECONDS", "inf")
+def test_dependencies_leave_settings_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONNECT_TIMEOUT_SECONDS", "5")
 
-    assert DependenciesSettings().disconnect_deadline == float("inf")
-
-
-def test_nan_disconnect_timeout() -> None:
-    # NaN would pass a `< 0` check and lift the bound without a word
-    with pytest.raises(ValueError, match="disconnect_timeout"):
-        DependenciesSettings(disconnect_timeout=float("nan"))
-
-
-def test_nan_disconnect_deadline() -> None:
-    with pytest.raises(ValueError, match="disconnect_deadline"):
-        DependenciesSettings(disconnect_deadline=float("nan"))
+    assert Dependencies().settings is None

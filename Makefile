@@ -17,7 +17,7 @@ lint: ## Run ruff (lint + format check), flake8 (wemake-python-styleguide), mypy
 	uv run ruff check .
 	uv run ruff format --check .
 	uv run flake8 .
-	uv run mypy
+	uv run --group compare mypy
 	uvx $(PYRIGHT)
 
 .PHONY: format
@@ -27,7 +27,7 @@ format: ## Autofix lint issues and format the code
 
 .PHONY: typecheck
 typecheck: ## Run mypy and pyright only
-	uv run mypy
+	uv run --group compare mypy
 	uvx $(PYRIGHT)
 
 .PHONY: test
@@ -88,6 +88,10 @@ test-taskiq-min: ## Run the taskiq tests on the lowest supported taskiq
 bench: ## Run the benchmarks, see docs/benchmarks.md
 	uv run python benchmarks/run.py
 
+.PHONY: test-benchmarks
+test-benchmarks: ## Run the benchmark checks used by CI
+	uv run --locked --group compare pytest -m benchmarks tests/test_benchmarks.py
+
 .PHONY: bench-all
 bench-all: ## Run the benchmarks on every supported Python version, JSON into docs/benchmarks/
 	@mkdir -p docs/benchmarks
@@ -99,8 +103,8 @@ bench-all: ## Run the benchmarks on every supported Python version, JSON into do
 .PHONY: bench-compare
 bench-compare: ## Run the comparison with other DI libraries, JSON and the chart into docs/benchmarks/
 	@mkdir -p docs/benchmarks
-	uv run python benchmarks/compare.py --json docs/benchmarks/compare-py$$(uv run python -c 'import sys; print("%d.%d" % sys.version_info[:2])').json
-	uv run python benchmarks/chart.py docs/benchmarks/compare-py$$(uv run python -c 'import sys; print("%d.%d" % sys.version_info[:2])').json docs/benchmarks/compare.png
+	uv run --group compare python benchmarks/compare.py --json docs/benchmarks/compare-py$$(uv run python -c 'import sys; print("%d.%d" % sys.version_info[:2])').json
+	uv run --group compare python benchmarks/chart.py docs/benchmarks/compare-py$$(uv run python -c 'import sys; print("%d.%d" % sys.version_info[:2])').json docs/benchmarks/compare.png
 
 .PHONY: check-version
 check-version: ## Check that the version is bumped against origin/master, as CI does for a pull request
@@ -108,7 +112,7 @@ check-version: ## Check that the version is bumped against origin/master, as CI 
 	uv run --no-project python scripts/version.py check origin/master
 
 .PHONY: check
-check: lint test ## Run everything CI runs
+check: lint test ## Run lint and the default test suite
 
 .PHONY: build
 build: clean ## Build sdist and wheel into dist/
