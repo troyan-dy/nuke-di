@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from nuke_di import Client, ConnectError, Dependencies
+from nuke_di import Client, ConnectError, Dependencies, NotSingletonClient
 from nuke_di._container.connect import Connect
 from tests.sequences import single
 
@@ -229,6 +229,26 @@ def suspending_disconnect(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Postgres, "disconnect", disconnect)
 
 
+@pytest.fixture
+def reissuing_task_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    if sys.version_info >= (3, 13):
+        return
+    connect = Connect._connect
+
+    async def connect_with_reissue(controller: Connect, clients: list[NotSingletonClient], prior_cancels: int) -> float:
+        # Exercise the 3.13+ TaskGroup contract under the per-version coverage gate too.
+        try:
+            return await connect(controller, clients, prior_cancels)
+        except BaseExceptionGroup:
+            task = asyncio.current_task()
+            assert task is not None and task.cancelling()
+            task.uncancel()
+            task.cancel()
+            raise
+
+    monkeypatch.setattr(Connect, "_connect", connect_with_reissue)
+
+
 @pytest.mark.usefixtures("suspending_disconnect")
 @pytest.mark.parametrize("error_type", [OSError, SystemExit])
 @pytest.mark.parametrize("cancel_before_start", [False, True], ids=["concurrent", "previous"])
@@ -258,6 +278,25 @@ async def test_startup_cancellation_does_not_interrupt_rollback(
     task = asyncio.create_task(connect())
     await task
     assert (dep.connected, dep.connect_clients, dep.clients) == (False, [], {})
+
+
+@pytest.mark.usefixtures("reissuing_task_group", "suspending_disconnect")
+async def test_startup_failure_preserves_reissued_cancellation(monkeypatch: pytest.MonkeyPatch) -> None:
+    dep = Dependencies()
+    broken = dep.resolve(Broken)
+    error = OSError("boom")
+
+    async def fail() -> None:
+        task.cancel()
+        raise error
+
+    async def connect() -> None:
+        await _check_startup_failure(dep, error)
+        await _check_cancellation(expected=True)
+
+    monkeypatch.setattr(broken, "connect", fail)
+    task = asyncio.create_task(connect())
+    await task
 
 
 async def test_pending_cancellation_prevents_startup() -> None:
